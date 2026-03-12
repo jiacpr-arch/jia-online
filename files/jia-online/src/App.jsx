@@ -19,14 +19,11 @@ const SHEET_URL = "https://script.google.com/macros/s/AKfycbxSNte5rBWi7SmHxaDBaU
 
 // ฟังก์ชันส่งข้อมูลไป Google Sheets
 const sendToSheet = async (data) => {
-  if (!SHEET_URL) return; // ยังไม่ได้ตั้งค่า ข้ามไปก่อน
+  if (!SHEET_URL) return;
   try {
-    await fetch(SHEET_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
+    const form = new FormData();
+    form.append("payload", JSON.stringify(data));
+    navigator.sendBeacon(SHEET_URL, form);
   } catch (e) {
     console.log("Sheet sync:", e);
   }
