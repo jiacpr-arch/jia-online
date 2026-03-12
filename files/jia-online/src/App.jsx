@@ -22,8 +22,7 @@ const sendToSheet = (data) => {
   if (!SHEET_URL) return;
   try {
     const url = SHEET_URL + "?data=" + encodeURIComponent(JSON.stringify(data));
-    const img = new Image();
-    img.src = url;
+    fetch(url, { mode: "no-cors" });
   } catch (e) {
     console.log("Sheet sync:", e);
   }
