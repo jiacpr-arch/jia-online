@@ -16,7 +16,7 @@ const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); retur
 
 // ========== COURSE DATA ==========
 const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 0 : 100, modules: [
-  { id: 1, title: "บทที่ 1: CPR ผู้ใหญ่", short: "CPR ผู้ใหญ่", desc: "เทคนิคการช่วยชีวิตผู้ใหญ่ขั้นพื้นฐาน ตามมาตรฐาน 2025", vid: "MO2gPhOOydY", dur: 55, quiz: [
+  { id: 1, title: "บทที่ 1: CPR ผู้ใหญ่", short: "CPR ผู้ใหญ่", desc: "เทคนิคการช่วยชีวิตผู้ใหญ่ขั้นพื้นฐาน ตามมาตรฐาน 2025", vid: "IbvE4PnW_80", dur: 54, quiz: [
     { q: "ขั้นตอนแรกก่อนเข้าช่วยเหลือผู้หมดสติคืออะไร?", c: ["ทำ CPR ทันที", "โทร 1669", "ประเมินความปลอดภัยของที่เกิดเหตุ (Scene Safety)", "ใช้ AED"], a: 2 },
     { q: "การประเมินการตอบสนอง ทำอย่างไร?", c: ["เขย่าตัวแรงๆ", "ตบบ่าพร้อมตะโกน \"คุณ...คุณ...เป็นยังไงบ้าง\"", "ตรวจชีพจร", "ตบหน้า"], a: 1 },
     { q: "ความลึกในการกดหน้าอกผู้ใหญ่คือเท่าไร?", c: ["อย่างน้อย 3 ซม.", "อย่างน้อย 5 ซม. ถึง 6 ซม.", "อย่างน้อย 7 ซม.", "อย่างน้อย 10 ซม."], a: 1 },
@@ -60,7 +60,7 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
   ]},
   { id: 7, title: "แบบทดสอบสุดท้าย", short: "Final Exam", desc: "ทดสอบความรู้ทั้งหมด 6 บท ต้องได้ 80% ขึ้นไปจึงผ่าน", vid: null, dur: null, quiz: [
     { q: "ขั้นตอนแรกเมื่อพบผู้หมดสติคืออะไร?", c: ["ทำ CPR ทันที", "โทร 1669", "ประเมินความปลอดภัยที่เกิดเหตุ (Scene Safety)", "ใช้ AED"], a: 2 },
-    { q: "ประเมินการหายใจใช้เวลาเท่าไร?", c: ["5 วินาที", "อย่างน้อย 10 วินาที", "30 วินาที", "1 นาที"], a: 1 },
+    { q: "ประเมินการหายใจใช้เวลาเท่าไร?", c: ["5 วินาที", "ไม่เกิน 10 วินาที", "30 วินาที", "1 นาที"], a: 1 },
     { q: "อัตราส่วนกด:เป่า ผู้ใหญ่?", c: ["15:2", "30:2", "15:1", "5:1"], a: 1 },
     { q: "ความลึกกดหน้าอกผู้ใหญ่?", c: ["3 ซม.", "อย่างน้อย 5 ซม. ถึง 6 ซม.", "7 ซม.", "10 ซม."], a: 1 },
     { q: "ความเร็วกดหน้าอก?", c: ["60-80 ครั้ง/นาที", "80-100 ครั้ง/นาที", "100-120 ครั้ง/นาที", "120-150 ครั้ง/นาที"], a: 2 },
@@ -139,7 +139,7 @@ function Register({ go, setUser }) {
   const [f, setF] = useState({ name: "", phone: "", email: "" }); const [err, setErr] = useState({}); const [pdpa, setPdpa] = useState(false);
   const submit = () => {
     const e = {}; if (!f.name.trim()) e.name = "กรุณากรอกชื่อ-นามสกุล"; if (!f.phone.trim() || f.phone.replace(/\D/g, "").length < 9) e.phone = "กรุณากรอกเบอร์โทรที่ถูกต้อง"; if (!pdpa) e.pdpa = "กรุณายินยอม PDPA ก่อนลงทะเบียน"; if (Object.keys(e).length) return setErr(e);
-    setUser(f); save("user", f); sendToSheet({ action: "register", name: f.name, phone: f.phone, email: f.email });
+    setUser(f); save("user", f); sendToSheet({ action: "register", name: f.name, phone: f.phone.replace(/\D/g, ""), email: f.email });
     if (FREE_LAUNCH) { save("enrolled", true); go("course"); } else go("payment");
   };
   const field = (key, label, ph, type = "text") => (<div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>{label}</label><input type={type} placeholder={ph} value={f[key]} onChange={e => { setF({...f, [key]: e.target.value}); setErr({...err, [key]: undefined}); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${err[key] ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>{err[key] && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err[key]}</div>}</div>);
@@ -170,12 +170,16 @@ function Course({ go, progress, setProgress, user }) {
   const unlocked = id => id === 1 || progress.done.includes(id - 1); const done = id => progress.done.includes(id);
 
   // Timer for video watching (70% of duration)
-  useEffect(() => { if (active && !reviewMode && !done(active)) { const mod = COURSE.modules.find(m => m.id === active); if (mod && mod.dur) { const target = Math.floor(mod.dur * 0.7); setTimer(target); setCanWatch(false); timerRef.current = setInterval(() => { setTimer(prev => { if (prev <= 1) { clearInterval(timerRef.current); setCanWatch(true); return 0; } return prev - 1; }); }, 1000); } } return () => { if (timerRef.current) clearInterval(timerRef.current); }; }, [active, reviewMode, mustRewatch]);
+  useEffect(() => { if (active && !reviewMode && !done(active)) { const mod = COURSE.modules.find(m => m.id === active); if (mod && mod.dur) { const target = Math.floor(mod.dur * 0.9); setTimer(target); setCanWatch(false); timerRef.current = setInterval(() => { setTimer(prev => { if (prev <= 1) { clearInterval(timerRef.current); setCanWatch(true); return 0; } return prev - 1; }); }, 1000); } } return () => { if (timerRef.current) clearInterval(timerRef.current); }; }, [active, reviewMode, mustRewatch]);
 
   const submitQuiz = () => {
     const mod = COURSE.modules.find(m => m.id === active); let correct = 0; mod.quiz.forEach((q, i) => { if (ans[i] === q.a) correct++; }); const score = Math.round((correct / mod.quiz.length) * 100); const passed = score >= 80; setResult({ score, correct, total: mod.quiz.length, passed });
     if (passed && !progress.done.includes(active)) { const np = { ...progress, done: [...progress.done, active], scores: { ...progress.scores, [active]: score } }; setProgress(np); save("progress", np);
-      if (!mod.vid && mod.id === COURSE.modules[COURSE.modules.length - 1].id && user) { const coupon = genCoupon(); save("coupon", coupon); sendToSheet({ action: "complete", name: user.name, phone: user.phone, score, coupon }); }
+      if (!mod.vid && mod.id === COURSE.modules[COURSE.modules.length - 1].id) { 
+        const u = user || load("user", null);
+        const coupon = genCoupon(); save("coupon", coupon); 
+        if (u) sendToSheet({ action: "complete", name: u.name, phone: u.phone.replace(/\D/g, ""), coupon, score }); 
+      }
     }
   };
   const resetLesson = () => { setActive(null); setQuiz(false); setAns({}); setResult(null); setWatched(false); setReviewMode(false); setMustRewatch(false); setCanWatch(false); setTimer(0); if (timerRef.current) clearInterval(timerRef.current); };
@@ -205,7 +209,7 @@ function Course({ go, progress, setProgress, user }) {
             {!result ? <button onClick={submitQuiz} disabled={Object.keys(ans).length < mod.quiz.length} style={css.btn(Object.keys(ans).length >= mod.quiz.length ? B.red : B.ltGray, Object.keys(ans).length >= mod.quiz.length ? B.white : B.dkGray, true)}>ส่งคำตอบ</button>
             : <div style={{ textAlign: "center" }}><div style={{ background: result.passed ? `${B.green}12` : `${B.red}08`, borderRadius: 12, padding: 20, marginBottom: 16 }}><div style={{ fontSize: 40, fontWeight: 800, color: result.passed ? B.green : B.red }}>{result.score}%</div><div style={{ fontSize: 14, fontWeight: 600, color: result.passed ? B.green : B.red }}>{result.passed ? "ผ่าน!" : "ไม่ผ่าน"}</div><div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>ตอบถูก {result.correct}/{result.total} ข้อ</div></div>
               {result.passed ? (<button onClick={() => { resetLesson(); if (isFinal) go("certificate"); }} style={css.btn(B.green, B.white)}>{isFinal ? "รับใบประกาศนียบัตร →" : "กลับหน้าบทเรียน →"}</button>)
-              : mod.vid ? (<button onClick={() => { setQuiz(false); setResult(null); setAns({}); setWatched(false); setMustRewatch(true); setCanWatch(false); setTimer(Math.floor(mod.dur * 0.7)); }} style={css.btn(B.red, B.white)}>← กลับดูวิดีโอใหม่แล้วสอบอีกครั้ง</button>)
+              : mod.vid ? (<button onClick={() => { setQuiz(false); setResult(null); setAns({}); setWatched(false); setMustRewatch(true); setCanWatch(false); setTimer(Math.floor(mod.dur * 0.9)); }} style={css.btn(B.red, B.white)}>← กลับดูวิดีโอใหม่แล้วสอบอีกครั้ง</button>)
               : (<button onClick={() => { setAns({}); setResult(null); }} style={css.btn(B.red, B.white)}>ทำใหม่</button>)}
             </div>}
           </div>
