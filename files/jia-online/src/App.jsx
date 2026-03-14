@@ -9,7 +9,7 @@ const LAUNCH_END = "30 เมษายน 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const SHEET_URL = "https://script.google.com/macros/s/AKfycbxSNte5rBWi7SmHxaDBaU9h_-URJo7wymLzKR2CRgBON9ed3GxOx72kXNcypQy-X9aNuw/exec";
 
-const sendToSheet = (data) => { if (!SHEET_URL) return; try { fetch(SHEET_URL + "?data=" + encodeURIComponent(JSON.stringify(data)), { mode: "no-cors" }); } catch (e) { console.log("Sheet:", e); } };
+const sendToSheet = (data) => { if (!SHEET_URL) return; try { const url = SHEET_URL + "?data=" + encodeURIComponent(JSON.stringify(data)); fetch(url, { mode: "no-cors" }); console.log("Sheet sent:", data.action, data.name); } catch (e) { console.log("Sheet:", e); } };
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const save = (k, v) => { try { localStorage.setItem(`jia_${k}`, JSON.stringify(v)); } catch(e){} };
 const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
@@ -139,7 +139,9 @@ function Register({ go, setUser }) {
   const [f, setF] = useState({ name: "", phone: "", email: "" }); const [err, setErr] = useState({}); const [pdpa, setPdpa] = useState(false);
   const submit = () => {
     const e = {}; if (!f.name.trim()) e.name = "กรุณากรอกชื่อ-นามสกุล"; if (!f.phone.trim() || f.phone.replace(/\D/g, "").length < 9) e.phone = "กรุณากรอกเบอร์โทรที่ถูกต้อง"; if (!pdpa) e.pdpa = "กรุณายินยอม PDPA ก่อนลงทะเบียน"; if (Object.keys(e).length) return setErr(e);
-    setUser(f); save("user", f); sendToSheet({ action: "register", name: f.name, phone: f.phone.replace(/\D/g, ""), email: f.email });
+    const cleanPhone = f.phone.replace(/\D/g, "");
+    const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email };
+    setUser(userData); save("user", userData); sendToSheet({ action: "register", name: userData.name, phone: cleanPhone, email: f.email });
     if (FREE_LAUNCH) { save("enrolled", true); go("course"); } else go("payment");
   };
   const field = (key, label, ph, type = "text") => (<div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>{label}</label><input type={type} placeholder={ph} value={f[key]} onChange={e => { setF({...f, [key]: e.target.value}); setErr({...err, [key]: undefined}); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${err[key] ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>{err[key] && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err[key]}</div>}</div>);
@@ -222,6 +224,7 @@ function Course({ go, progress, setProgress, user }) {
     <div style={{ background: `linear-gradient(135deg, ${B.black} 0%, #2a2a2a 100%)`, color: B.white, padding: "24px 24px 30px" }}><div style={{ maxWidth: 480, margin: "0 auto" }}><div style={{ fontSize: 11, letterSpacing: 2, opacity: .5, textTransform: "uppercase" }}>JIA TRAINER CENTER</div><h2 style={{ fontSize: 20, fontWeight: 700, margin: "4px 0 14px" }}>CPR & AED ออนไลน์</h2><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)" }}><div style={{ height: "100%", borderRadius: 3, background: B.green, width: `${pct}%`, transition: "width .5s" }}/></div><span style={{ fontSize: 12, fontWeight: 600 }}>{pct}%</span></div><div style={{ fontSize: 11, opacity: .5, marginTop: 4 }}>{progress.done.length}/{COURSE.modules.length} บทเรียน</div></div></div>
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>{COURSE.modules.map(m => { const ok = unlocked(m.id), dn = done(m.id), fin = !m.vid; return (<button key={m.id} onClick={() => { if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: B.white, border: dn ? `2px solid ${B.green}` : "2px solid transparent", borderRadius: 14, cursor: ok ? "pointer" : "not-allowed", opacity: ok ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{ok && !dn && <I name="arrow" size={14} color={B.dkGray}/>}{ok && dn && m.vid && <I name="replay" size={14} color={B.green}/>}</button>); })}
       {pct === 100 && <button onClick={() => go("certificate")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 16 }}>ดูใบประกาศนียบัตร & คูปอง →</button>}
+      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
     </div>
   </div>);
 }
@@ -254,6 +257,7 @@ function Certificate({ user, go }) {
       <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ ...css.btn(B.red, B.white), display: "inline-block", textDecoration: "none" }}>สมัครเรียน On-site →</a>
     </div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 14, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
+    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
   </div></div>);
 }
 
