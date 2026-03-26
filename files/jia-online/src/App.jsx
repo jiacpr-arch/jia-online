@@ -155,14 +155,80 @@ function Register({ go, setUser }) {
 }
 
 // ==================== PAYMENT ====================
-function Payment({ go }) {
-  const [slipSent, setSlipSent] = useState(false); const [approved, setApproved] = useState(false);
-  return (<div style={css.page}><div style={css.header(B.red)}><button onClick={() => go("register")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ชำระเงิน</div></div>
-    <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>{!approved ? (<><div style={{ ...css.card, textAlign: "center" }}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>สแกน QR Code เพื่อโอนเงิน</div><div style={{ width: 200, height: 200, background: B.gray, borderRadius: 14, margin: "0 auto 16px", display: "flex", alignItems: "center", justifyContent: "center" }}><I name="qr" size={48} color={B.dkGray}/></div><div style={{ background: `${B.red}08`, borderRadius: 12, padding: 14 }}><div style={{ fontSize: 30, fontWeight: 800, color: B.red }}>฿100.00</div></div></div>
-      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 14, background: "#06C755", borderRadius: 16, padding: "16px 20px", color: B.white, textDecoration: "none" }}><I name="line" size={36} color={B.white}/><div><div style={{ fontWeight: 700, fontSize: 14 }}>ส่งสลิปทาง LINE OA</div><div style={{ fontSize: 20, fontWeight: 800 }}>@jiacpr</div></div></a>
-      <button onClick={() => setSlipSent(true)} style={{ ...css.btn(slipSent ? B.green : B.red, B.white, true), marginTop: 18 }}>{slipSent ? "✓ รอแอดมินตรวจสอบ" : "ส่งสลิปแล้ว ✓"}</button>
-      {slipSent && <div style={{ textAlign: "center", marginTop: 14 }}><button onClick={() => { setApproved(true); save("enrolled", true); }} style={{ ...css.btn(B.green, B.white), padding: "10px 20px", fontSize: 13 }}>(Demo) อนุมัติ →</button></div>}
-    </>) : (<div style={{ textAlign: "center", padding: "40px 0" }}><div style={{ width: 80, height: 80, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><I name="check" size={40} color={B.green}/></div><h3 style={{ fontSize: 20, fontWeight: 700 }}>ชำระเงินสำเร็จ!</h3><button onClick={() => go("course")} style={{ ...css.btn(B.red, B.white), marginTop: 20 }}>เข้าเรียนเลย →</button></div>)}</div></div>);
+function Payment({ go, user }) {
+  const [uploading, setUploading] = useState(false);
+  const [slipDone, setSlipDone] = useState(false);
+
+  const handleSlip = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const u = user || load("user", null);
+        const res = await fetch(JIA_COURSE_API + "?action=uploadSlip", {
+          method: "POST", headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify({ base64: reader.result, fileName: (u?.name || "student") + "_online.jpg", bookingId: "online_" + Date.now() })
+        });
+        const data = await res.json();
+        if (data.success) {
+          // แจ้งทีม
+          sendToSheet({ action: "payment", name: u?.name || "", phone: u?.phone || "", amount: 100, slipUrl: data.url });
+          setSlipDone(true);
+          // ให้เข้าเรียนได้เลย (ทีมตรวจทีหลัง)
+          save("enrolled", true);
+        } else {
+          alert("อัพโหลดไม่สำเร็จ กรุณาส่งสลิปทาง LINE แทน");
+        }
+      } catch(err) {
+        alert("เกิดข้อผิดพลาด กรุณาส่งสลิปทาง LINE");
+      }
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  if (slipDone) return (
+    <div style={css.page}><div style={{ ...css.wrap, paddingTop: 60, textAlign: "center" }}>
+      <div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><I name="check" size={38} color={B.green}/></div>
+      <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>ชำระเงินสำเร็จ!</h2>
+      <p style={{ fontSize: 14, color: B.dkGray }}>ได้รับสลิปแล้ว เข้าเรียนได้เลย</p>
+      <button onClick={() => go("course")} style={{ ...css.btn(B.red, B.white), marginTop: 20, padding: "14px 40px", fontSize: 16 }}>เข้าเรียนเลย →</button>
+    </div></div>
+  );
+
+  return (
+    <div style={css.page}><div style={css.header(B.red)}><button onClick={() => go("register")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ชำระเงิน ฿100</div></div>
+    <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+      <div style={{ ...css.card, textAlign: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>คอร์ส CPR & AED ออนไลน์</div>
+        <div style={{ fontSize: 36, fontWeight: 800, color: B.red, margin: "8px 0" }}>฿100</div>
+        <div style={{ fontSize: 13, color: B.dkGray }}>เอา ฿100 เป็นส่วนลดตอนมาเรียน On-site</div>
+      </div>
+
+      <div style={{ ...css.card, marginTop: 14, textAlign: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>โอนเงินเข้าบัญชี</div>
+        <div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
+          <div style={{ fontSize: 13, color: B.dkGray }}>ธนาคารกสิกรไทย</div>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 2, margin: "6px 0" }}>134-3-11564-0</div>
+          <div style={{ fontSize: 13, color: B.dkGray }}>บริษัท โรจน์รุ่งธุรกิจ จำกัด</div>
+        </div>
+        <button onClick={() => { navigator.clipboard?.writeText("1343115640"); alert("คัดลอกเลขบัญชีแล้ว!"); }} style={{ ...css.btn(B.white, B.black, true), border: `1px solid ${B.ltGray}`, fontSize: 13, padding: "8px 20px" }}>คัดลอกเลขบัญชี</button>
+      </div>
+
+      <div style={{ ...css.card, marginTop: 14, textAlign: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>อัพโหลดสลิป</div>
+        <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 14 }}>โอนแล้วอัพโหลดสลิปที่นี่เลย</div>
+        <label style={{ ...css.btn(B.red, B.white), display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", opacity: uploading ? 0.6 : 1 }}>
+          <I name="save" size={18} color={B.white}/> {uploading ? "กำลังอัพโหลด..." : "เลือกรูปสลิป"}
+          <input type="file" accept="image/*" capture="environment" onChange={handleSlip} disabled={uploading} style={{ display: "none" }}/>
+        </label>
+      </div>
+
+      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 14, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> หรือส่งสลิปทาง LINE @jiacpr</a>
+    </div></div>
+  );
 }
 
 // ==================== COURSE ====================
@@ -509,7 +575,7 @@ export default function App() {
   switch (page) {
     case "landing": return <Landing go={go}/>;
     case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-    case "payment": return <Payment go={go}/>;
+    case "payment": return <Payment go={go} user={user}/>;
     case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user}/>;
     case "certificate": return <Certificate user={user} go={go}/>;
     case "booking": return <Booking go={go}/>;
