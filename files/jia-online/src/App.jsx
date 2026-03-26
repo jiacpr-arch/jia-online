@@ -273,13 +273,16 @@ function Booking({ go }) {
   const [loading, setLoading] = useState(true);
   const [selectedClass, setSelectedClass] = useState("");
   const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "", people: "1", note: coupon ? `คูปองออนไลน์ ${coupon}` : "" });
-  const [sent, setSent] = useState(false);
+  const [step, setStep] = useState("form"); // form → payment → done
   const [submitting, setSubmitting] = useState(false);
+  const [bookingRef, setBookingRef] = useState(null); // เก็บ booking id สำหรับ upload slip
+  const [uploading, setUploading] = useState(false);
+  const [slipSent, setSlipSent] = useState(false);
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inp = { width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${B.ltGray}`, fontSize: 15, boxSizing: "border-box", outline: "none" };
   const lbl = { fontSize: 13, fontWeight: 600, color: B.black, marginBottom: 6, display: "block" };
+  const price = coupon ? 400 : 500;
 
-  // ดึงคลาสที่เปิดรับจอง จาก JIA Course API
   useEffect(() => {
     fetch(JIA_COURSE_API + "?action=getData&sheet=classes")
       .then(r => r.json())
@@ -295,25 +298,22 @@ function Booking({ go }) {
   }, []);
 
   const fmtDate = (d) => { const dt = new Date(d + "T00:00:00"); const days = ["อา.","จ.","อ.","พ.","พฤ.","ศ.","ส."]; const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; return `${days[dt.getDay()]} ${dt.getDate()} ${months[dt.getMonth()]}`; };
-
   const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
   const today = () => new Date().toISOString().slice(0, 10);
-  const b64 = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
 
+  // Step 1: จอง → สร้าง booking ใน JIA Course (paymentStatus: รอชำระ)
   const submit = async () => {
     if (!form.name || !form.phone || !selectedClass) { alert("กรุณากรอกข้อมูลและเลือกคลาสให้ครบ"); return; }
     setSubmitting(true);
     const cls = classes.find(c => c.id === selectedClass);
     try {
-      // 1. สร้าง customer ใน JIA Course
       const custId = uid();
       const customer = { id: custId, name: form.name, tel: form.phone.replace(/\D/g, ""), email: "", createdAt: today(), source: "online-course" };
       await fetch(JIA_COURSE_API + "?action=saveRow&sheet=customers", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(customer) });
 
-      // 2. สร้าง booking ใน JIA Course
-      const price = coupon ? 400 : 500;
+      const bkId = uid();
       const booking = {
-        id: uid(), customerId: custId, name: form.name, tel: form.phone.replace(/\D/g, ""),
+        id: bkId, customerId: custId, name: form.name, tel: form.phone.replace(/\D/g, ""),
         courseType: cls.courseKey, courseName: cls.courseName, classId: cls.id,
         channel: "online-course", package: "", totalPeople: form.people,
         finalPrice: price, discountCode: coupon || "", discountAmount: coupon ? 100 : 0,
@@ -323,14 +323,11 @@ function Booking({ go }) {
         pdpaConsent: true, pdpaConsentDate: today(), createdAt: today()
       };
       await fetch(JIA_COURSE_API + "?action=saveRow&sheet=bookings", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(booking) });
-
-      // 3. แจ้งเตือน
       fetch(JIA_COURSE_API + "?action=notifyBooking", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(booking) }).catch(() => {});
-
-      // 4. ส่งข้อมูลไป Online Sheet ด้วย
       sendToSheet({ action: "booking", name: form.name, phone: form.phone.replace(/\D/g, ""), date: cls.date + " " + cls.timeSlot, people: form.people, note: form.note, coupon: coupon || "" });
 
-      setSent(true);
+      setBookingRef(bkId);
+      setStep("payment");
     } catch (e) {
       console.log("Booking error:", e);
       alert("เกิดข้อผิดพลาด กรุณาลองใหม่หรือจองผ่าน LINE");
@@ -338,13 +335,106 @@ function Booking({ go }) {
     setSubmitting(false);
   };
 
-  if (sent) return (
+  // Step 2: อัพโหลดสลิป
+  const handleSlip = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result;
+        // อัพโหลดสลิปไป Google Drive ผ่าน JIA Course API
+        const res = await fetch(JIA_COURSE_API + "?action=uploadSlip", {
+          method: "POST", headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify({ base64, fileName: form.name + "_slip.jpg", bookingId: bookingRef })
+        });
+        const data = await res.json();
+        if (data.success && data.url) {
+          // อัพเดท booking ใส่ slip URL + เปลี่ยนสถานะ
+          await fetch(JIA_COURSE_API + "?action=saveRow&sheet=bookings", {
+            method: "POST", headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({ id: bookingRef, paymentSlip: data.url, paymentStatus: "แจ้งชำระแล้ว" })
+          });
+          // แจ้งเตือนชำระเงิน
+          fetch(JIA_COURSE_API + "?action=notifyPayment", {
+            method: "POST", headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({ bookingId: bookingRef, name: form.name, slipUrl: data.url })
+          }).catch(() => {});
+          setSlipSent(true);
+        } else {
+          alert("อัพโหลดไม่สำเร็จ กรุณาลองใหม่หรือส่งสลิปทาง LINE");
+        }
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.log("Slip upload error:", err);
+      alert("เกิดข้อผิดพลาด กรุณาส่งสลิปทาง LINE แทน");
+      setUploading(false);
+    }
+  };
+
+  const cls = classes.find(c => c.id === selectedClass);
+
+  // ===== Step 3: Done =====
+  if (step === "done" || (step === "payment" && slipSent)) return (
     <div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center", paddingTop: 60 }}>
       <div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><I name="check" size={38} color={B.green}/></div>
-      <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>จองเรียบร้อย!</h2>
-      <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6 }}>ทีมงาน JIA จะติดต่อกลับเพื่อยืนยันภายใน 24 ชม.<br/>หรือสอบถามเพิ่มเติมผ่าน LINE ได้เลย</p>
+      <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>จองสำเร็จ!</h2>
+      <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6 }}>ได้รับข้อมูลจองและหลักฐานการโอนแล้ว<br/>ทีมงาน JIA จะยืนยันภายใน 24 ชม.</p>
+      {cls && <div style={{ background: B.gray, borderRadius: 12, padding: 14, marginTop: 16, fontSize: 14 }}><strong>{fmtDate(cls.date)}</strong> • {cls.timeSlot}<br/><span style={{ color: B.dkGray, fontSize: 13 }}>{cls.courseName}</span></div>}
       <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginTop: 16, background: "#06C755", borderRadius: 12, padding: "14px 28px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> LINE @jiacpr</a>
       <div><button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 14, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button></div>
+    </div></div>
+  );
+
+  // ===== Step 2: Payment =====
+  if (step === "payment") return (
+    <div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto" }}>
+      <div style={{ textAlign: "center", marginBottom: 20 }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: `${B.gold}15`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}><I name="star" size={32} color={B.gold}/></div>
+        <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>ชำระเงิน</h2>
+        <p style={{ fontSize: 14, color: B.dkGray }}>โอนเงินแล้วอัพโหลดสลิปด้านล่าง</p>
+      </div>
+
+      {/* สรุปการจอง */}
+      {cls && <div style={{ background: B.white, borderRadius: 14, padding: 16, marginBottom: 16, boxShadow: "0 1px 6px rgba(0,0,0,.05)" }}>
+        <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 6 }}>สรุปการจอง</div>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtDate(cls.date)} • {cls.timeSlot}</div>
+        <div style={{ fontSize: 13, color: B.dkGray }}>{cls.courseName} • {form.people} คน</div>
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${B.ltGray}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 13, color: B.dkGray }}>ยอดชำระ</span>
+          <span style={{ fontSize: 22, fontWeight: 800, color: B.red }}>฿{price}</span>
+        </div>
+        {coupon && <div style={{ fontSize: 12, color: B.green, marginTop: 4 }}>ใช้คูปอง {coupon} ลด ฿100 แล้ว</div>}
+      </div>}
+
+      {/* ข้อมูลบัญชี */}
+      <div style={{ background: B.white, borderRadius: 14, padding: 20, marginBottom: 16, boxShadow: "0 1px 6px rgba(0,0,0,.05)", textAlign: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: B.black }}>โอนเงินเข้าบัญชี</div>
+        <div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
+          <div style={{ fontSize: 13, color: B.dkGray }}>ธนาคารกสิกรไทย</div>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 2, margin: "6px 0", color: B.black }}>134-3-11564-0</div>
+          <div style={{ fontSize: 13, color: B.dkGray }}>บริษัท โรจน์รุ่งธุรกิจ จำกัด</div>
+        </div>
+        <button onClick={() => { navigator.clipboard?.writeText("1343115640"); alert("คัดลอกเลขบัญชีแล้ว!"); }} style={{ ...css.btn(B.white, B.black, true), border: `1px solid ${B.ltGray}`, fontSize: 13, padding: "8px 20px" }}>คัดลอกเลขบัญชี</button>
+      </div>
+
+      {/* อัพโหลดสลิป */}
+      <div style={{ background: B.white, borderRadius: 14, padding: 20, boxShadow: "0 1px 6px rgba(0,0,0,.05)", textAlign: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8, color: B.black }}>อัพโหลดสลิปโอนเงิน</div>
+        <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 14 }}>ถ่ายรูปสลิปหรือ screenshot แล้วอัพโหลด</div>
+        <label style={{ ...css.btn(B.red, B.white), display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", opacity: uploading ? 0.6 : 1 }}>
+          <I name="save" size={18} color={B.white}/> {uploading ? "กำลังอัพโหลด..." : "เลือกรูปสลิป"}
+          <input type="file" accept="image/*" capture="environment" onChange={handleSlip} disabled={uploading} style={{ display: "none" }}/>
+        </label>
+      </div>
+
+      {/* ส่งสลิปทาง LINE แทน */}
+      <div style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: B.dkGray }}>หรือส่งสลิปทาง LINE แทน</div>
+      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 8, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> ส่งสลิปทาง LINE @jiacpr</a>
+      <button onClick={() => setStep("done")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 10, border: `1px solid ${B.ltGray}`, width: "100%", fontSize: 13 }}>ข้ามขั้นตอนนี้ (ส่งสลิปทีหลัง)</button>
     </div></div>
   );
 
