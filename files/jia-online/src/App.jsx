@@ -264,25 +264,84 @@ function Certificate({ user, go }) {
 }
 
 // ==================== BOOKING ====================
+const JIA_COURSE_API = "https://script.google.com/macros/s/AKfycbyAbzjf6EyBdgv_h3k72CyesYG72voz_-ss3GpiniwI8YU8JKTBi2i8bVKhpQTXamt-YA/exec";
+
 function Booking({ go }) {
   const coupon = load("coupon", null);
   const user = load("user", null);
-  const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "", date: "", people: "1", note: coupon ? `ใช้คูปอง ${coupon}` : "" });
+  const [classes, setClasses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedClass, setSelectedClass] = useState("");
+  const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "", people: "1", note: coupon ? `คูปองออนไลน์ ${coupon}` : "" });
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inp = { width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${B.ltGray}`, fontSize: 15, boxSizing: "border-box", outline: "none" };
   const lbl = { fontSize: 13, fontWeight: 600, color: B.black, marginBottom: 6, display: "block" };
 
-  const submit = () => {
-    if (!form.name || !form.phone || !form.date) { alert("กรุณากรอกข้อมูลให้ครบ"); return; }
-    sendToSheet({ action: "booking", name: form.name, phone: form.phone.replace(/\D/g, ""), date: form.date, people: form.people, note: form.note, coupon: coupon || "" });
-    setSent(true);
+  // ดึงคลาสที่เปิดรับจอง จาก JIA Course API
+  useEffect(() => {
+    fetch(JIA_COURSE_API + "?action=getData&sheet=classes")
+      .then(r => r.json())
+      .then(data => {
+        const now = new Date().toISOString().slice(0, 10);
+        const open = (data || [])
+          .filter(c => c.status === "ready" && c.date >= now)
+          .sort((a, b) => a.date.localeCompare(b.date) || a.timeSlot.localeCompare(b.timeSlot));
+        setClasses(open);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const fmtDate = (d) => { const dt = new Date(d + "T00:00:00"); const days = ["อา.","จ.","อ.","พ.","พฤ.","ศ.","ส."]; const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; return `${days[dt.getDay()]} ${dt.getDate()} ${months[dt.getMonth()]}`; };
+
+  const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const today = () => new Date().toISOString().slice(0, 10);
+  const b64 = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+
+  const submit = async () => {
+    if (!form.name || !form.phone || !selectedClass) { alert("กรุณากรอกข้อมูลและเลือกคลาสให้ครบ"); return; }
+    setSubmitting(true);
+    const cls = classes.find(c => c.id === selectedClass);
+    try {
+      // 1. สร้าง customer ใน JIA Course
+      const custId = uid();
+      const customer = { id: custId, name: form.name, tel: form.phone.replace(/\D/g, ""), email: "", createdAt: today(), source: "online-course" };
+      await fetch(JIA_COURSE_API + "?action=saveRow&sheet=customers", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(customer) });
+
+      // 2. สร้าง booking ใน JIA Course
+      const price = coupon ? 400 : 500;
+      const booking = {
+        id: uid(), customerId: custId, name: form.name, tel: form.phone.replace(/\D/g, ""),
+        courseType: cls.courseKey, courseName: cls.courseName, classId: cls.id,
+        channel: "online-course", package: "", totalPeople: form.people,
+        finalPrice: price, discountCode: coupon || "", discountAmount: coupon ? 100 : 0,
+        paymentMode: "โอน", paymentSlip: "", paymentStatus: "รอชำระ",
+        startDate: cls.date, timeSlot: cls.timeSlot, totalDays: "1", additionalDates: "",
+        salesStaff: "", instructor: "", note: form.note,
+        pdpaConsent: true, pdpaConsentDate: today(), createdAt: today()
+      };
+      await fetch(JIA_COURSE_API + "?action=saveRow&sheet=bookings", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(booking) });
+
+      // 3. แจ้งเตือน
+      fetch(JIA_COURSE_API + "?action=notifyBooking", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(booking) }).catch(() => {});
+
+      // 4. ส่งข้อมูลไป Online Sheet ด้วย
+      sendToSheet({ action: "booking", name: form.name, phone: form.phone.replace(/\D/g, ""), date: cls.date + " " + cls.timeSlot, people: form.people, note: form.note, coupon: coupon || "" });
+
+      setSent(true);
+    } catch (e) {
+      console.log("Booking error:", e);
+      alert("เกิดข้อผิดพลาด กรุณาลองใหม่หรือจองผ่าน LINE");
+    }
+    setSubmitting(false);
   };
 
   if (sent) return (
     <div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center", paddingTop: 60 }}>
       <div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><I name="check" size={38} color={B.green}/></div>
-      <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>ส่งข้อมูลจองเรียบร้อย!</h2>
+      <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>จองเรียบร้อย!</h2>
       <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6 }}>ทีมงาน JIA จะติดต่อกลับเพื่อยืนยันภายใน 24 ชม.<br/>หรือสอบถามเพิ่มเติมผ่าน LINE ได้เลย</p>
       <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginTop: 16, background: "#06C755", borderRadius: 12, padding: "14px 28px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> LINE @jiacpr</a>
       <div><button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 14, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button></div>
@@ -302,9 +361,9 @@ function Booking({ go }) {
       {/* Info cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
         {[
-          { icon: "clock", t: "6 ชั่วโมง", s: "เช้า-บ่าย" },
+          { icon: "clock", t: "2 ชั่วโมง", s: "ต่อรอบ" },
           { icon: "star", t: coupon ? "฿400" : "฿500", s: coupon ? "ลดแล้ว ฿100" : "ต่อท่าน" },
-          { icon: "book", t: "ใบรับรอง", s: "มาตรฐานสากล" },
+          { icon: "book", t: "ใบรับรอง", s: "มาตรฐาน 2025" },
           { icon: "heart", t: "ฝึกจริง", s: "หุ่น CPR + AED" },
         ].map((c, i) => (
           <div key={i} style={{ background: B.white, borderRadius: 12, padding: 14, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,.05)" }}>
@@ -321,10 +380,28 @@ function Booking({ go }) {
       <div style={{ background: B.white, borderRadius: 16, padding: 20, boxShadow: "0 2px 12px rgba(0,0,0,.06)" }}>
         <div style={{ marginBottom: 14 }}><label style={lbl}>ชื่อ-นามสกุล *</label><input value={form.name} onChange={e => F("name", e.target.value)} placeholder="ชื่อจริง นามสกุล" style={inp}/></div>
         <div style={{ marginBottom: 14 }}><label style={lbl}>เบอร์โทร *</label><input value={form.phone} onChange={e => F("phone", e.target.value)} placeholder="08X-XXX-XXXX" type="tel" style={inp}/></div>
-        <div style={{ marginBottom: 14 }}><label style={lbl}>วันที่ต้องการเรียน *</label><input value={form.date} onChange={e => F("date", e.target.value)} type="date" style={inp}/></div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={lbl}>เลือกวัน-เวลาเรียน *</label>
+          {loading ? <div style={{ padding: 14, textAlign: "center", color: B.dkGray, fontSize: 13 }}>กำลังโหลดตารางคลาส...</div> :
+           classes.length === 0 ? <div style={{ padding: 14, textAlign: "center", color: B.dkGray, fontSize: 13, background: B.gray, borderRadius: 10 }}>ยังไม่มีคลาสเปิดในขณะนี้ — ติดต่อ LINE เพื่อนัดวัน</div> :
+           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {classes.map(c => (
+              <button key={c.id} onClick={() => setSelectedClass(c.id)} style={{
+                padding: "12px 14px", borderRadius: 10, textAlign: "left", cursor: "pointer",
+                border: selectedClass === c.id ? `2px solid ${B.red}` : `1px solid ${B.ltGray}`,
+                background: selectedClass === c.id ? `${B.red}08` : B.white,
+              }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: selectedClass === c.id ? B.red : B.black }}>{fmtDate(c.date)} • {c.timeSlot}</div>
+                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 2 }}>{c.courseName}{c.place ? ` • ${c.place}` : ""}</div>
+              </button>
+            ))}
+           </div>}
+        </div>
+
         <div style={{ marginBottom: 14 }}><label style={lbl}>จำนวนคน</label><select value={form.people} onChange={e => F("people", e.target.value)} style={inp}><option>1</option><option>2</option><option>3</option><option>4</option><option>5+</option></select></div>
-        <div style={{ marginBottom: 18 }}><label style={lbl}>หมายเหตุ</label><textarea value={form.note} onChange={e => F("note", e.target.value)} placeholder="ข้อมูลเพิ่มเติม" rows={3} style={{ ...inp, resize: "vertical" }}/></div>
-        <button onClick={submit} style={{ ...css.btn(B.red, B.white), width: "100%", padding: "14px", fontSize: 16 }}>ส่งข้อมูลจอง →</button>
+        <div style={{ marginBottom: 18 }}><label style={lbl}>หมายเหตุ</label><textarea value={form.note} onChange={e => F("note", e.target.value)} placeholder="ข้อมูลเพิ่มเติม" rows={2} style={{ ...inp, resize: "vertical" }}/></div>
+        <button onClick={submit} disabled={submitting} style={{ ...css.btn(B.red, B.white), width: "100%", padding: "14px", fontSize: 16, opacity: submitting ? 0.6 : 1 }}>{submitting ? "กำลังจอง..." : "จองคอร์ส →"}</button>
       </div>
 
       <div style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: B.dkGray }}>หรือจองผ่าน LINE ได้เลย</div>
