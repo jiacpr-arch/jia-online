@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
 
 // ========== CONFIG ==========
-const FREE_LAUNCH = true; // เปลี่ยนเป็น false เดือน เม.ย. 2569 เพื่อเริ่มคิดเงิน
+const FREE_LAUNCH = false; // เปลี่ยนเป็น false เดือน เม.ย. 2569 เพื่อเริ่มคิดเงิน
 const LAUNCH_END = "30 เมษายน 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const SUPABASE_URL = "https://tpoiyykbgsgnrdwzgzvn.supabase.co";
