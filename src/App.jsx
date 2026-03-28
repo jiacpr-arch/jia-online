@@ -197,6 +197,31 @@ function Store({ go }) {
   const total = calcPrice(selected.length);
   const isFull = selected.length + purchased.filter(x => x <= 6).length >= 6;
 
+  const [stripePaying, setStripePaying] = useState(false);
+  const payWithStripe = async () => {
+    setStripePaying(true);
+    try {
+      const moduleNames = selected.map(id => COURSE.modules.find(x => x.id === id)?.short).filter(Boolean);
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({
+          type: "online_purchase",
+          items: [{ name: `JIA Online: ${moduleNames.join(", ")}`, amount: total }],
+          metadata: { phone: user?.phone || "", modules: selected.join(","), name: user?.name || "" },
+          successUrl: window.location.origin + window.location.pathname + "?stripe=success&modules=" + selected.join(","),
+          cancelUrl: window.location.origin + window.location.pathname + "?stripe=cancel",
+        }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, payment_status: "รอชำระ" });
+        window.location.href = data.url;
+      } else { alert("เกิดข้อผิดพลาด: " + (data.error || "ไม่สามารถสร้างลิงก์ชำระเงินได้")); }
+    } catch(err) { alert("เกิดข้อผิดพลาด กรุณาลองใหม่"); console.error(err); }
+    setStripePaying(false);
+  };
+
   const handleSlip = (e) => {
     const file = e.target.files[0]; if (!file) return;
     setUploading(true);
@@ -248,6 +273,15 @@ function Store({ go }) {
         {isFull && <div style={{ fontSize: 12, color: B.green, marginTop: 6 }}>ครบ 6 หัวข้อ! ได้ Final Exam + Full Certificate + คูปอง ฿100 ฟรี</div>}
       </div>
       <div style={{ ...css.card, textAlign: "center", marginBottom: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>ชำระออนไลน์ (บัตรเครดิต / PromptPay)</div>
+        <button onClick={payWithStripe} disabled={stripePaying} style={{ ...css.btn("#635BFF", B.white), padding: "14px 32px", fontSize: 15, width: "100%", opacity: stripePaying ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/></svg>
+          {stripePaying ? "กำลังเปิดหน้าชำระเงิน..." : "ชำระผ่าน Stripe"}
+        </button>
+        <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8 }}>รองรับ Visa / Mastercard / PromptPay — ปลดล็อคทันที</div>
+      </div>
+      <div style={{ ...css.card, textAlign: "center", marginBottom: 14, position: "relative" }}>
+        <div style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", background: B.white, padding: "0 12px", fontSize: 12, color: B.dkGray }}>หรือ</div>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>โอนเงินเข้าบัญชี</div>
         <div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: B.dkGray }}>ธนาคารกสิกรไทย</div>
@@ -787,6 +821,23 @@ export default function App() {
   const [user, setUser] = useState(() => load("user", null));
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
+
+  // Handle Stripe success redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("stripe") === "success") {
+      const mods = params.get("modules");
+      if (mods) {
+        const newMods = mods.split(",").map(Number).filter(Boolean);
+        const current = getPurchased();
+        const merged = [...new Set([...current, ...newMods])];
+        savePurchased(merged);
+        supaRest("online_purchases", "PATCH", { payment_status: "ชำระแล้ว" }, `?phone=eq.${encodeURIComponent(load("user",{})?.phone||"")}&payment_status=eq.รอชำระ`);
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+      setPage("course");
+    }
+  }, []);
   switch (page) {
     case "landing": return <Landing go={go}/>;
     case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
