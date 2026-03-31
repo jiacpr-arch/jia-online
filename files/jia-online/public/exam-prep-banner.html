@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>เตรียมสอบ CPR & AED | JIA TRAINER CENTER</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans Thai', -apple-system, sans-serif;
+      background: transparent;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .banner {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: linear-gradient(135deg, #C8102E 0%, #8B0000 50%, #C8102E 100%);
+      border-radius: 20px;
+      padding: 48px 40px;
+      position: relative;
+      overflow: hidden;
+      color: #fff;
+    }
+
+    .banner::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+      border-radius: 50%;
+    }
+
+    .banner::after {
+      content: '';
+      position: absolute;
+      bottom: -30%;
+      left: -10%;
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
+      border-radius: 50%;
+    }
+
+    .content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 40px;
+    }
+
+    .text-section {
+      flex: 1;
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      backdrop-filter: blur(10px);
+      padding: 6px 16px;
+      border-radius: 50px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+
+    .title {
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1.3;
+      margin-bottom: 12px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .title span {
+      color: #FFD700;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      line-height: 1.6;
+      opacity: 0.9;
+      margin-bottom: 24px;
+    }
+
+    .features {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+
+    .feature {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .feature-icon {
+      width: 32px;
+      height: 32px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .cta-section {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .cta-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #FFD700;
+      color: #1A1A1A;
+      padding: 14px 32px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+
+    .cta-btn:hover {
+      background: #FFF;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+
+    .price-tag {
+      text-align: center;
+    }
+
+    .price-tag .price {
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .price-tag .unit {
+      font-size: 14px;
+      opacity: 0.8;
+    }
+
+    .visual-section {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .icon-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .icon-card {
+      width: 90px;
+      height: 90px;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid rgba(255,255,255,0.15);
+      transition: transform 0.3s ease;
+    }
+
+    .icon-card:hover {
+      transform: scale(1.05);
+    }
+
+    .icon-card .emoji {
+      font-size: 28px;
+    }
+
+    .icon-card .label {
+      font-size: 11px;
+      font-weight: 600;
+      opacity: 0.9;
+    }
+
+    .cert-note {
+      font-size: 12px;
+      opacity: 0.7;
+      text-align: center;
+      max-width: 200px;
+    }
+
+    @media (max-width: 768px) {
+      .banner {
+        padding: 32px 24px;
+        border-radius: 16px;
+      }
+
+      .content {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .title {
+        font-size: 24px;
+      }
+
+      .subtitle {
+        font-size: 14px;
+      }
+
+      .features {
+        justify-content: center;
+      }
+
+      .cta-section {
+        justify-content: center;
+      }
+
+      .visual-section {
+        order: -1;
+      }
+
+      .icon-card {
+        width: 75px;
+        height: 75px;
+      }
+
+      .icon-card .emoji {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    <div class="content">
+      <div class="text-section">
+        <div class="badge">🎓 คอร์สออนไลน์ มาตรฐานสากล</div>
+        <h1 class="title">เตรียมสอบ <span>CPR & AED</span><br/>เรียนออนไลน์ แค่ ฿100</h1>
+        <p class="subtitle">
+          ดูวิดีโอสอน → ทำแบบทดสอบ → รับใบประกาศนียบัตร<br/>
+          นำ ฿100 ไปเป็นส่วนลดเมื่อมาเรียน On-site ที่ JIA
+        </p>
+        <div class="features">
+          <div class="feature">
+            <div class="feature-icon">📹</div>
+            <span>วิดีโอสอนชัด</span>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">📝</div>
+            <span>แบบทดสอบออนไลน์</span>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">📜</div>
+            <span>ใบประกาศนียบัตร</span>
+          </div>
+        </div>
+        <div class="cta-section">
+          <a href="https://jiacpr.com/online" class="cta-btn">
+            เริ่มเรียนเลย →
+          </a>
+          <div class="price-tag">
+            <div class="price">฿100</div>
+            <div class="unit">ต่อคอร์ส</div>
+          </div>
+        </div>
+      </div>
+      <div class="visual-section">
+        <div class="icon-grid">
+          <div class="icon-card">
+            <span class="emoji">❤️</span>
+            <span class="label">CPR</span>
+          </div>
+          <div class="icon-card">
+            <span class="emoji">⚡</span>
+            <span class="label">AED</span>
+          </div>
+          <div class="icon-card">
+            <span class="emoji">🏥</span>
+            <span class="label">First Aid</span>
+          </div>
+          <div class="icon-card">
+            <span class="emoji">🏆</span>
+            <span class="label">Certificate</span>
+          </div>
+        </div>
+        <p class="cert-note">ได้รับการรับรองจาก JIA TRAINER CENTER</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
