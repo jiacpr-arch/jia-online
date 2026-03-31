@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JIA - เตรียมสอบใบประกอบวิชาชีพ</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800;900&family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Noto Sans Thai', 'Sarabun', sans-serif;
+    background: #f5f5f5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  .section-wrapper {
+    width: 100%;
+    max-width: 1200px;
+  }
+
+  /* Section Header */
+  .section-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+
+  .section-header .badge {
+    display: inline-block;
+    background: #C8102E;
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    padding: 6px 20px;
+    border-radius: 30px;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  .section-header h2 {
+    font-size: 32px;
+    font-weight: 800;
+    color: #1a1a2e;
+    line-height: 1.3;
+    margin-bottom: 8px;
+  }
+
+  .section-header p {
+    font-size: 16px;
+    color: #666;
+    font-weight: 400;
+  }
+
+  /* Cards Container */
+  .cards-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 768px) {
+    .cards-container {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .section-header h2 {
+      font-size: 24px;
+    }
+  }
+
+  /* Card Base */
+  .card {
+    position: relative;
+    border-radius: 20px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.4s ease;
+    text-decoration: none;
+    color: white;
+    display: block;
+    min-height: 280px;
+  }
+
+  .card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+
+  /* Card 1 - Doctor / Morroo */
+  .card-doctor {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
+  }
+
+  .card-doctor::before {
+    content: '';
+    position: absolute;
+    top: -60px;
+    right: -60px;
+    width: 250px;
+    height: 250px;
+    background: radial-gradient(circle, rgba(200, 16, 46, 0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .card-doctor::after {
+    content: '';
+    position: absolute;
+    bottom: -40px;
+    left: -40px;
+    width: 180px;
+    height: 180px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  /* Card 2 - Pharmacist / PharmRu */
+  .card-pharma {
+    background: linear-gradient(135deg, #064e3b 0%, #065f46 40%, #047857 100%);
+  }
+
+  .card-pharma::before {
+    content: '';
+    position: absolute;
+    top: -60px;
+    right: -60px;
+    width: 250px;
+    height: 250px;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .card-pharma::after {
+    content: '';
+    position: absolute;
+    bottom: -40px;
+    left: -40px;
+    width: 180px;
+    height: 180px;
+    background: radial-gradient(circle, rgba(52, 211, 153, 0.1) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  /* Card Inner */
+  .card-inner {
+    position: relative;
+    z-index: 2;
+    padding: 36px 32px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+    min-height: 280px;
+  }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .card-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    flex-shrink: 0;
+  }
+
+  .card-doctor .card-icon {
+    background: rgba(200, 16, 46, 0.2);
+    border: 1px solid rgba(200, 16, 46, 0.3);
+  }
+
+  .card-pharma .card-icon {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+
+  .card-tag {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    opacity: 0.6;
+    padding-top: 4px;
+  }
+
+  .card-content {
+    margin-top: 24px;
+  }
+
+  .card-content h3 {
+    font-size: 24px;
+    font-weight: 800;
+    line-height: 1.3;
+    margin-bottom: 8px;
+  }
+
+  .card-content .subtitle {
+    font-size: 15px;
+    font-weight: 500;
+    opacity: 0.8;
+    margin-bottom: 4px;
+  }
+
+  .card-content .url-display {
+    font-size: 13px;
+    opacity: 0.5;
+    font-weight: 400;
+  }
+
+  .card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 24px;
+  }
+
+  .card-features {
+    display: flex;
+    gap: 16px;
+  }
+
+  .feature {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+
+  .feature svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0.8;
+  }
+
+  .card-arrow {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease, background 0.3s ease;
+    flex-shrink: 0;
+  }
+
+  .card-doctor .card-arrow {
+    background: rgba(200, 16, 46, 0.3);
+  }
+
+  .card-pharma .card-arrow {
+    background: rgba(16, 185, 129, 0.3);
+  }
+
+  .card:hover .card-arrow {
+    transform: translateX(4px);
+  }
+
+  .card-doctor:hover .card-arrow {
+    background: rgba(200, 16, 46, 0.5);
+  }
+
+  .card-pharma:hover .card-arrow {
+    background: rgba(16, 185, 129, 0.5);
+  }
+
+  .card-arrow svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Decorative grid lines */
+  .grid-deco {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 120px;
+    height: 120px;
+    opacity: 0.05;
+    z-index: 1;
+  }
+
+  .grid-deco line {
+    stroke: white;
+    stroke-width: 1;
+  }
+
+  /* Pulse dot */
+  .pulse-dot {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    z-index: 3;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .card-doctor .pulse-dot { background: #C8102E; }
+  .card-pharma .pulse-dot { background: #10b981; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.5); }
+  }
+
+  /* Footer note */
+  .section-footer {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 13px;
+    color: #999;
+  }
+
+  .section-footer a {
+    color: #C8102E;
+    text-decoration: none;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="section-wrapper">
+
+  <!-- Section Header -->
+  <div class="section-header">
+    <div class="badge">Exam Preparation</div>
+    <h2>เตรียมสอบใบประกอบวิชาชีพ</h2>
+    <p>แหล่งข้อสอบคุณภาพสำหรับแพทย์และเภสัชกร</p>
+  </div>
+
+  <!-- Cards -->
+  <div class="cards-container">
+
+    <!-- Card 1: Morroo - แพทย์ -->
+    <a href="https://www.morroo.com" target="_blank" rel="noopener" class="card card-doctor">
+      <div class="pulse-dot"></div>
+      <svg class="grid-deco" viewBox="0 0 120 120">
+        <line x1="0" y1="30" x2="120" y2="30"/>
+        <line x1="0" y1="60" x2="120" y2="60"/>
+        <line x1="0" y1="90" x2="120" y2="90"/>
+        <line x1="30" y1="0" x2="30" y2="120"/>
+        <line x1="60" y1="0" x2="60" y2="120"/>
+        <line x1="90" y1="0" x2="90" y2="120"/>
+      </svg>
+      <div class="card-inner">
+        <div>
+          <div class="card-top">
+            <div class="card-icon">🩺</div>
+            <div class="card-tag">สำหรับแพทย์</div>
+          </div>
+          <div class="card-content">
+            <h3>ข้อสอบใบประกอบ<br>วิชาชีพเวชกรรม</h3>
+            <div class="subtitle">เตรียมสอบ NL / OSCE ครบทุกหมวด</div>
+            <div class="url-display">morroo.com</div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <div class="card-features">
+            <div class="feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+              ข้อสอบจริง
+            </div>
+            <div class="feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/></svg>
+              อัพเดตล่าสุด
+            </div>
+          </div>
+          <div class="card-arrow">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+        </div>
+      </div>
+    </a>
+
+    <!-- Card 2: PharmRu - เภสัชกร -->
+    <a href="https://www.pharmru.com" target="_blank" rel="noopener" class="card card-pharma">
+      <div class="pulse-dot"></div>
+      <svg class="grid-deco" viewBox="0 0 120 120">
+        <line x1="0" y1="30" x2="120" y2="30"/>
+        <line x1="0" y1="60" x2="120" y2="60"/>
+        <line x1="0" y1="90" x2="120" y2="90"/>
+        <line x1="30" y1="0" x2="30" y2="120"/>
+        <line x1="60" y1="0" x2="60" y2="120"/>
+        <line x1="90" y1="0" x2="90" y2="120"/>
+      </svg>
+      <div class="card-inner">
+        <div>
+          <div class="card-top">
+            <div class="card-icon">💊</div>
+            <div class="card-tag">สำหรับเภสัชกร</div>
+          </div>
+          <div class="card-content">
+            <h3>ข้อสอบใบประกอบ<br>วิชาชีพเภสัชกรรม</h3>
+            <div class="subtitle">เตรียมสอบเภสัชกร ครบทุกวิชา</div>
+            <div class="url-display">pharmru.com</div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <div class="card-features">
+            <div class="feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+              ข้อสอบจริง
+            </div>
+            <div class="feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/></svg>
+              อัพเดตล่าสุด
+            </div>
+          </div>
+          <div class="card-arrow">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+        </div>
+      </div>
+    </a>
+
+  </div>
+
+  <div class="section-footer">
+    JIA TRAINER CENTER — ศูนย์ฝึกอบรม CPR & AED มาตรฐานสากล
+  </div>
+
+</div>
+
+</body>
+</html>
