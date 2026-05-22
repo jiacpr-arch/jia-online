@@ -820,12 +820,403 @@ const ADMIN_PASSWORD = "JiaAdmin2026";
 const ADMIN_SESSION_KEY = "jia_admin_auth";
 
 const TABS = [
+  { key: "pipeline",        label: "Pipeline (jiaroo)", custom: true },
+  { key: "team",            label: "ทีมเซลล์",         custom: true },
   { key: "online_students", label: "นักเรียนออนไลน์", cols: ["name","phone","email","status","final_score","coupon_code","registered_at"] },
   { key: "customers",       label: "ลูกค้าทั้งหมด",   cols: ["name","tel","email","source","created_at"] },
   { key: "bookings",        label: "การจอง On-site", cols: ["name","tel","course_name","start_date","time_slot","total_people","final_price","payment_status","created_at"] },
   { key: "sales_tracking",  label: "ติดตามขาย",      cols: ["name","phone","score","coupon_code","follow_status","completed_date"] },
   { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
 ];
+
+// ==================== JIAROO CRM ====================
+const JIAROO_TENANT = "jiaroo";
+const STAGES = [
+  { key: "new",       label: "ใหม่",         color: "#94A3B8" },
+  { key: "called",    label: "โทรแล้ว",     color: "#3B82F6" },
+  { key: "scheduled", label: "นัดคุย",       color: "#8B5CF6" },
+  { key: "quoted",    label: "เสนอราคา",    color: "#F59E0B" },
+  { key: "deciding",  label: "รอตัดสินใจ",  color: "#EAB308" },
+  { key: "won",       label: "ปิดดีล",       color: "#22C55E" },
+  { key: "lost",      label: "ไม่สนใจ",     color: "#94A3B8" },
+];
+const STAGE_BY_KEY = Object.fromEntries(STAGES.map(s => [s.key, s]));
+const fmtDT = (v) => v ? new Date(v).toLocaleString("th-TH", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "—";
+
+function Pipeline() {
+  const [leads, setLeads] = useState([]);
+  const [team, setTeam] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState("all");
+  const [selected, setSelected] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const [l, t] = await Promise.all([
+      supaRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=updated_at.desc&limit=2000`),
+      supaRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&active=eq.true&order=name.asc`),
+    ]);
+    setLeads(Array.isArray(l) ? l : []);
+    setTeam(Array.isArray(t) ? t : []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  const filtered = leads.filter(l => {
+    if (filterAssignee === "unassigned" && l.assignee_id) return false;
+    if (filterAssignee !== "all" && filterAssignee !== "unassigned" && l.assignee_id !== filterAssignee) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      const hay = [l.name, l.display_name, l.phone, l.email, l.notes, l.tags].filter(Boolean).join(" ").toLowerCase();
+      if (!hay.includes(s)) return false;
+    }
+    return true;
+  });
+
+  const byStage = STAGES.reduce((acc, s) => { acc[s.key] = filtered.filter(l => l.stage === s.key); return acc; }, {});
+  const teamById = Object.fromEntries(team.map(t => [t.id, t]));
+
+  const moveStage = async (lead, newStage) => {
+    if (lead.stage === newStage) return;
+    const prev = lead.stage;
+    setLeads(rs => rs.map(r => r.id === lead.id ? { ...r, stage: newStage } : r));
+    await supaRest("jiaroo_leads", "PATCH", { stage: newStage }, `?id=eq.${lead.id}`);
+    await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: prev, to: newStage }, created_by: "admin" });
+  };
+
+  return (
+    <div>
+      <div style={{ background: B.white, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / โน้ต / แท็ก" style={{ flex: "1 1 220px", padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+        <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
+          <option value="all">ทุกคน</option>
+          <option value="unassigned">ยังไม่มอบหมาย</option>
+          {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <button onClick={() => setShowNew(true)} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ เพิ่ม Lead</button>
+        <button onClick={reload} style={{ background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, cursor: "pointer" }}>↻</button>
+        <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {leads.length} leads</div>
+      </div>
+
+      {loading ? (
+        <div style={{ background: B.white, padding: 40, borderRadius: 12, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>
+      ) : (
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 12 }}>
+          {STAGES.map(s => (
+            <div key={s.key} style={{ minWidth: 260, flex: "0 0 260px", background: B.gray, borderRadius: 12, padding: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "0 4px" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: s.color }}/>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{s.label}</div>
+                <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{byStage[s.key].length}</div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "calc(100vh - 320px)", overflowY: "auto" }}>
+                {byStage[s.key].length === 0 ? (
+                  <div style={{ fontSize: 12, color: B.dkGray, padding: 12, textAlign: "center" }}>—</div>
+                ) : byStage[s.key].map(l => {
+                  const a = l.assignee_id ? teamById[l.assignee_id] : null;
+                  return (
+                    <div key={l.id} onClick={() => setSelected(l)} style={{ background: B.white, borderRadius: 10, padding: 10, cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,.05)", borderLeft: `3px solid ${s.color}` }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{l.name || l.display_name || "(ไม่มีชื่อ)"}</div>
+                      {l.phone && <div style={{ fontSize: 11, color: B.dkGray }}>{l.phone}</div>}
+                      {l.last_message_preview && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>💬 {l.last_message_preview}</div>}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, fontSize: 10, color: B.dkGray }}>
+                        <span>{a ? a.name : "—"}</span>
+                        <span>{fmtDT(l.updated_at)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selected && <LeadDetail lead={selected} team={team} onClose={() => setSelected(null)} onChange={reload} onStage={moveStage}/>}
+      {showNew && <LeadNew team={team} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); reload(); }}/>}
+    </div>
+  );
+}
+
+function LeadDetail({ lead, team, onClose, onChange, onStage }) {
+  const [form, setForm] = useState({
+    name: lead.name || "",
+    phone: lead.phone || "",
+    email: lead.email || "",
+    notes: lead.notes || "",
+    tags: lead.tags || "",
+    product_interest: lead.product_interest || "",
+    deal_value: lead.deal_value || "",
+    assignee_id: lead.assignee_id || "",
+    stage: lead.stage,
+  });
+  const [events, setEvents] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    supaRest("jiaroo_lead_events", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.desc&limit=50`).then(r => setEvents(Array.isArray(r) ? r : []));
+  }, [lead.id]);
+
+  const save = async () => {
+    setSaving(true);
+    const patch = {
+      name: form.name || null, phone: form.phone || null, email: form.email || null,
+      notes: form.notes || null, tags: form.tags || null,
+      product_interest: form.product_interest || null,
+      deal_value: form.deal_value === "" ? null : Number(form.deal_value),
+      assignee_id: form.assignee_id || null,
+      stage: form.stage,
+    };
+    await supaRest("jiaroo_leads", "PATCH", patch, `?id=eq.${lead.id}`);
+    if (form.stage !== lead.stage) {
+      await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: lead.stage, to: form.stage }, created_by: "admin" });
+    }
+    if (form.assignee_id !== (lead.assignee_id || "")) {
+      await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "assign", data: { from: lead.assignee_id, to: form.assignee_id || null }, created_by: "admin" });
+    }
+    setSaving(false);
+    onChange();
+    onClose();
+  };
+
+  const del = async () => {
+    if (!confirm("ลบ lead นี้?")) return;
+    await supaRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
+    onChange();
+    onClose();
+  };
+
+  const Fld = (k, label, type = "text") => (
+    <div style={{ marginBottom: 10 }}>
+      <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{label}</label>
+      {type === "textarea" ? (
+        <textarea value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} rows={3} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: "inherit" }}/>
+      ) : (
+        <input type={type} value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}/>
+      )}
+    </div>
+  );
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", justifyContent: "flex-end" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: B.white, width: "100%", maxWidth: 480, height: "100%", overflowY: "auto", padding: 20, boxSizing: "border-box" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{lead.display_name || lead.name || "Lead"}</div>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: B.dkGray }}>×</button>
+        </div>
+        {lead.line_user_id && <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 10 }}>LINE: {lead.line_user_id}</div>}
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>Stage</label>
+          <select value={form.stage} onChange={e => setForm({ ...form, stage: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
+            {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>มอบหมาย</label>
+          <select value={form.assignee_id} onChange={e => setForm({ ...form, assignee_id: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
+            <option value="">— ยังไม่มอบหมาย —</option>
+            {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+
+        {Fld("name", "ชื่อ")}
+        {Fld("phone", "เบอร์")}
+        {Fld("email", "อีเมล")}
+        {Fld("product_interest", "สนใจสินค้า/คอร์ส")}
+        {Fld("deal_value", "มูลค่าดีล (บาท)", "number")}
+        {Fld("tags", "แท็ก (คั่นด้วย ,)")}
+        {Fld("notes", "โน้ต", "textarea")}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <button onClick={save} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+          <button onClick={del} style={{ background: B.white, color: B.red, border: `1px solid ${B.red}`, borderRadius: 8, padding: "12px 14px", fontSize: 13, cursor: "pointer" }}>ลบ</button>
+        </div>
+
+        <div style={{ marginTop: 24 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Timeline</div>
+          {events.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีกิจกรรม</div> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {events.map(ev => (
+                <div key={ev.id} style={{ padding: 8, background: B.gray, borderRadius: 8, fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{ev.type}</div>
+                  <div style={{ color: B.dkGray, fontSize: 11 }}>{fmtDT(ev.created_at)} {ev.created_by ? `• ${ev.created_by}` : ""}</div>
+                  {ev.data && Object.keys(ev.data).length > 0 && <pre style={{ margin: "4px 0 0", fontSize: 11, whiteSpace: "pre-wrap" }}>{JSON.stringify(ev.data)}</pre>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeadNew({ team, onClose, onCreated }) {
+  const [form, setForm] = useState({ name: "", phone: "", email: "", source: "manual", assignee_id: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (!form.name && !form.phone) { alert("กรอกชื่อหรือเบอร์อย่างน้อย 1"); return; }
+    setSaving(true);
+    const res = await supaRest("jiaroo_leads", "POST", {
+      tenant_slug: JIAROO_TENANT,
+      name: form.name || null,
+      phone: form.phone || null,
+      email: form.email || null,
+      source: form.source,
+      assignee_id: form.assignee_id || null,
+      notes: form.notes || null,
+      stage: "new",
+    });
+    const id = Array.isArray(res) && res[0]?.id;
+    if (id) await supaRest("jiaroo_lead_events", "POST", { lead_id: id, type: "created", data: { source: form.source }, created_by: "admin" });
+    setSaving(false);
+    onCreated();
+  };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: B.white, borderRadius: 12, padding: 20, width: "100%", maxWidth: 400 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>เพิ่ม Lead ใหม่</div>
+        {["name","phone","email"].map(k => (
+          <div key={k} style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{k === "name" ? "ชื่อ" : k === "phone" ? "เบอร์" : "อีเมล"}</label>
+            <input value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}/>
+          </div>
+        ))}
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>แหล่งที่มา</label>
+          <select value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
+            <option value="manual">เพิ่มเอง</option>
+            <option value="line">LINE OA</option>
+            <option value="facebook">Facebook</option>
+            <option value="phone">โทรเข้า</option>
+            <option value="referral">แนะนำ</option>
+            <option value="website">เว็บไซต์</option>
+          </select>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>มอบหมาย</label>
+          <select value={form.assignee_id} onChange={e => setForm({ ...form, assignee_id: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
+            <option value="">— ยังไม่มอบหมาย —</option>
+            {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>โน้ต</label>
+          <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: "inherit" }}/>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose} style={{ flex: 1, background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "12px", fontSize: 14, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={submit} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "..." : "เพิ่ม"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TeamManager() {
+  const [team, setTeam] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const r = await supaRest("jiaroo_team", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=active.desc,name.asc`);
+    setTeam(Array.isArray(r) ? r : []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  const toggleActive = async (m) => {
+    await supaRest("jiaroo_team", "PATCH", { active: !m.active }, `?id=eq.${m.id}`);
+    reload();
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, color: B.dkGray }}>{team.filter(t => t.active).length} active / {team.length} ทั้งหมด</div>
+        <button onClick={() => setShowNew(true)} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ เพิ่มสมาชิก</button>
+      </div>
+      <div style={{ background: B.white, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+        {loading ? <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div> :
+         team.length === 0 ? <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>ยังไม่มีสมาชิก — กด "+ เพิ่มสมาชิก"</div> : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: B.gray }}>
+              {["ชื่อ","อีเมล","เบอร์","บทบาท","สถานะ",""].map(h => <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: B.dkGray, fontSize: 12, borderBottom: `1px solid ${B.ltGray}` }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {team.map(m => (
+                <tr key={m.id} style={{ borderBottom: `1px solid ${B.ltGray}`, opacity: m.active ? 1 : 0.5 }}>
+                  <td style={{ padding: "10px 12px", fontWeight: 600 }}>{m.name}</td>
+                  <td style={{ padding: "10px 12px" }}>{m.email || "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{m.phone || "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{m.role}</td>
+                  <td style={{ padding: "10px 12px" }}>{m.active ? "✓ active" : "ปิดอยู่"}</td>
+                  <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button onClick={() => setEditing(m)} style={{ background: "transparent", color: B.red, border: "none", cursor: "pointer", fontSize: 12, marginRight: 8 }}>แก้ไข</button>
+                    <button onClick={() => toggleActive(m)} style={{ background: "transparent", color: B.dkGray, border: "none", cursor: "pointer", fontSize: 12 }}>{m.active ? "ปิด" : "เปิด"}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {(showNew || editing) && <TeamForm member={editing} onClose={() => { setShowNew(false); setEditing(null); }} onSaved={() => { setShowNew(false); setEditing(null); reload(); }}/>}
+    </div>
+  );
+}
+
+function TeamForm({ member, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: member?.name || "",
+    email: member?.email || "",
+    phone: member?.phone || "",
+    role: member?.role || "sales",
+  });
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (!form.name) { alert("กรอกชื่อ"); return; }
+    setSaving(true);
+    if (member) {
+      await supaRest("jiaroo_team", "PATCH", { name: form.name, email: form.email || null, phone: form.phone || null, role: form.role }, `?id=eq.${member.id}`);
+    } else {
+      await supaRest("jiaroo_team", "POST", { tenant_slug: JIAROO_TENANT, name: form.name, email: form.email || null, phone: form.phone || null, role: form.role, active: true });
+    }
+    setSaving(false);
+    onSaved();
+  };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: B.white, borderRadius: 12, padding: 20, width: "100%", maxWidth: 380 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>{member ? "แก้ไขสมาชิก" : "เพิ่มสมาชิก"}</div>
+        {[["name","ชื่อ"],["email","อีเมล"],["phone","เบอร์"]].map(([k, l]) => (
+          <div key={k} style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{l}</label>
+            <input value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}/>
+          </div>
+        ))}
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>บทบาท</label>
+          <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
+            <option value="sales">sales</option>
+            <option value="manager">manager</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose} style={{ flex: 1, background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "12px", fontSize: 14, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={submit} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "..." : "บันทึก"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AdminLogin({ onAuth }) {
   const [pw, setPw] = useState("");
@@ -869,7 +1260,7 @@ function AdminLogin({ onAuth }) {
 
 function Admin() {
   const [authed, setAuthed] = useState(() => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1");
-  const [tab, setTab] = useState("online_students");
+  const [tab, setTab] = useState("pipeline");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
@@ -877,8 +1268,11 @@ function Admin() {
   const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, bookings: 0 });
 
   const currentTab = TABS.find(t => t.key === tab);
+  const isCustomTab = !!currentTab?.custom;
 
   const fetchTab = useCallback(async (key) => {
+    const t = TABS.find(x => x.key === key);
+    if (t?.custom) { setRows([]); return; }
     setLoading(true);
     const orderCol = key === "online_students" ? "registered_at"
       : key === "bookings" || key === "customers" ? "created_at"
@@ -995,7 +1389,13 @@ function Admin() {
           ))}
         </div>
 
-        {/* Search & filter */}
+        {/* Custom tabs (Pipeline / Team) */}
+        {tab === "pipeline" && <Pipeline/>}
+        {tab === "team" && <TeamManager/>}
+
+        {/* Search & filter (for table tabs only) */}
+        {!isCustomTab && (
+        <>
         <div style={{ background: B.white, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / อีเมล / คูปอง" style={{ flex: "1 1 220px", padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
           {tab === "online_students" && (
@@ -1049,6 +1449,8 @@ function Admin() {
         <div style={{ textAlign: "center", marginTop: 16, fontSize: 11, color: B.dkGray }}>
           JIA Admin • แสดงสูงสุด 1000 แถวล่าสุดต่อตาราง
         </div>
+        </>
+        )}
       </div>
     </div>
   );
