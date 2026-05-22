@@ -815,8 +815,248 @@ function Booking({ go }) {
   );
 }
 
+// ==================== ADMIN ====================
+const ADMIN_PASSWORD = "JiaAdmin2026";
+const ADMIN_SESSION_KEY = "jia_admin_auth";
+
+const TABS = [
+  { key: "online_students", label: "นักเรียนออนไลน์", cols: ["name","phone","email","status","final_score","coupon_code","registered_at"] },
+  { key: "customers",       label: "ลูกค้าทั้งหมด",   cols: ["name","tel","email","source","created_at"] },
+  { key: "bookings",        label: "การจอง On-site", cols: ["name","tel","course_name","start_date","time_slot","total_people","final_price","payment_status","created_at"] },
+  { key: "sales_tracking",  label: "ติดตามขาย",      cols: ["name","phone","score","coupon_code","follow_status","completed_date"] },
+  { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
+];
+
+function AdminLogin({ onAuth }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const submit = () => {
+    if (pw === ADMIN_PASSWORD) {
+      sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
+      onAuth();
+    } else {
+      setErr("รหัสผ่านไม่ถูกต้อง");
+    }
+  };
+  return (
+    <div style={{ ...css.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ ...css.card, maxWidth: 380, width: "100%" }}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: `${B.red}15`, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+            <I name="lock" size={28} color={B.red}/>
+          </div>
+          <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>JIA Admin</h2>
+          <p style={{ fontSize: 13, color: B.dkGray, marginTop: 6 }}>กรอกรหัสผ่านเพื่อเข้าระบบ</p>
+        </div>
+        <input
+          type="password"
+          value={pw}
+          onChange={e => { setPw(e.target.value); setErr(""); }}
+          onKeyDown={e => e.key === "Enter" && submit()}
+          placeholder="รหัสผ่าน"
+          autoFocus
+          style={{ width: "100%", padding: "14px 16px", border: `1px solid ${B.ltGray}`, borderRadius: 10, fontSize: 15, marginBottom: 10, boxSizing: "border-box" }}
+        />
+        {err && <div style={{ color: B.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
+        <button onClick={submit} style={{ ...css.btn(B.red, B.white, true) }}>เข้าระบบ →</button>
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <a href="/" style={{ fontSize: 12, color: B.dkGray }}>← กลับหน้าหลัก</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Admin() {
+  const [authed, setAuthed] = useState(() => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1");
+  const [tab, setTab] = useState("online_students");
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, bookings: 0 });
+
+  const currentTab = TABS.find(t => t.key === tab);
+
+  const fetchTab = useCallback(async (key) => {
+    setLoading(true);
+    const orderCol = key === "online_students" ? "registered_at"
+      : key === "bookings" || key === "customers" ? "created_at"
+      : key === "sales_tracking" ? "completed_date"
+      : "id";
+    const data = await supaRest(key, "GET", null, `?order=${orderCol}.desc.nullslast&limit=1000`);
+    setRows(Array.isArray(data) ? data : []);
+    setLoading(false);
+  }, []);
+
+  const fetchStats = useCallback(async () => {
+    const [students, customers, bookings] = await Promise.all([
+      supaRest("online_students", "GET", null, "?select=status"),
+      supaRest("customers", "GET", null, "?select=id&limit=10000"),
+      supaRest("bookings", "GET", null, "?select=id&limit=10000"),
+    ]);
+    const s = Array.isArray(students) ? students : [];
+    setStats({
+      total: s.length,
+      finished: s.filter(x => (x.status || "").startsWith("จบคอร์ส")).length,
+      in_progress: s.filter(x => x.status === "กำลังเรียน").length,
+      customers: Array.isArray(customers) ? customers.length : 0,
+      bookings: Array.isArray(bookings) ? bookings.length : 0,
+    });
+  }, []);
+
+  useEffect(() => { if (authed) { fetchTab(tab); } }, [authed, tab, fetchTab]);
+  useEffect(() => { if (authed) { fetchStats(); } }, [authed, fetchStats]);
+
+  if (!authed) return <AdminLogin onAuth={() => setAuthed(true)}/>;
+
+  const logout = () => {
+    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    setAuthed(false);
+  };
+
+  const filtered = rows.filter(r => {
+    if (q) {
+      const s = q.toLowerCase();
+      const hay = [r.name, r.phone, r.tel, r.email, r.coupon_code].filter(Boolean).join(" ").toLowerCase();
+      if (!hay.includes(s)) return false;
+    }
+    if (statusFilter !== "all") {
+      const st = r.status || r.payment_status || r.follow_status || "";
+      if (statusFilter === "finished" && !st.startsWith("จบคอร์ส")) return false;
+      if (statusFilter === "in_progress" && st !== "กำลังเรียน") return false;
+      if (statusFilter === "pending_pay" && st !== "รอชำระ" && st !== "แจ้งชำระแล้ว") return false;
+      if (statusFilter === "paid" && st !== "ชำระแล้ว") return false;
+    }
+    return true;
+  });
+
+  const exportCSV = () => {
+    if (!filtered.length) return;
+    const cols = currentTab.cols;
+    const header = cols.join(",");
+    const escape = (v) => {
+      if (v == null) return "";
+      const s = String(v).replace(/"/g, '""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    };
+    const body = filtered.map(r => cols.map(c => escape(r[c])).join(",")).join("\n");
+    const csv = "﻿" + header + "\n" + body;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `jia_${tab}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const fmt = (v) => {
+    if (v == null || v === "") return "—";
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 16).replace("T", " ");
+    if (typeof v === "string" && v.startsWith("http")) return <a href={v} target="_blank" rel="noopener noreferrer" style={{ color: B.red, textDecoration: "underline" }}>ดูสลิป</a>;
+    return String(v);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: B.gray }}>
+      <div style={{ background: B.black, color: B.white, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <I name="lock" size={20} color={B.white}/>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>JIA Admin</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { fetchTab(tab); fetchStats(); }} style={{ background: "transparent", color: B.white, border: `1px solid ${B.white}40`, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>↻ รีเฟรช</button>
+          <button onClick={logout} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>ออกจากระบบ</button>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}>
+        {/* Stat cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
+          {[
+            { label: "นักเรียนทั้งหมด", value: stats.total, color: B.red },
+            { label: "จบคอร์สแล้ว", value: stats.finished, color: B.green },
+            { label: "กำลังเรียน", value: stats.in_progress, color: B.gold },
+            { label: "ลูกค้าทั้งหมด", value: stats.customers, color: B.black },
+            { label: "การจอง On-site", value: stats.bookings, color: B.dkGray },
+          ].map(c => (
+            <div key={c.label} style={{ background: B.white, borderRadius: 12, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+              <div style={{ fontSize: 11, color: B.dkGray }}>{c.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: c.color, marginTop: 4 }}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{ background: tab === t.key ? B.red : B.white, color: tab === t.key ? B.white : B.dkGray, border: `1px solid ${tab === t.key ? B.red : B.ltGray}`, borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{t.label}</button>
+          ))}
+        </div>
+
+        {/* Search & filter */}
+        <div style={{ background: B.white, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / อีเมล / คูปอง" style={{ flex: "1 1 220px", padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+          {tab === "online_students" && (
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
+              <option value="all">ทุกสถานะ</option>
+              <option value="finished">จบคอร์สแล้ว</option>
+              <option value="in_progress">กำลังเรียน</option>
+            </select>
+          )}
+          {(tab === "bookings" || tab === "online_purchases") && (
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
+              <option value="all">ทุกสถานะการชำระ</option>
+              <option value="pending_pay">รอชำระ / แจ้งชำระ</option>
+              <option value="paid">ชำระแล้ว</option>
+            </select>
+          )}
+          <button onClick={exportCSV} disabled={!filtered.length} style={{ background: B.green, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", opacity: filtered.length ? 1 : 0.5 }}>⬇ Export CSV</button>
+          <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {rows.length} แถว</div>
+        </div>
+
+        {/* Table */}
+        <div style={{ background: B.white, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+          {loading ? (
+            <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>ไม่พบข้อมูล</div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: B.gray }}>
+                    {currentTab.cols.map(c => (
+                      <th key={c} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: B.dkGray, fontSize: 12, borderBottom: `1px solid ${B.ltGray}`, whiteSpace: "nowrap" }}>{c}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r, i) => (
+                    <tr key={r.id || i} style={{ borderBottom: `1px solid ${B.ltGray}` }}>
+                      {currentTab.cols.map(c => (
+                        <td key={c} style={{ padding: "10px 12px", verticalAlign: "top" }}>{fmt(r[c])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 11, color: B.dkGray }}>
+          JIA Admin • แสดงสูงสุด 1000 แถวล่าสุดต่อตาราง
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==================== APP ====================
 export default function App() {
+  const isAdmin = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
   const [page, setPage] = useState(() => load("enrolled", false) ? "course" : "landing");
   const [user, setUser] = useState(() => load("user", null));
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
@@ -838,6 +1078,9 @@ export default function App() {
       setPage("course");
     }
   }, []);
+
+  if (isAdmin) return <Admin/>;
+
   switch (page) {
     case "landing": return <Landing go={go}/>;
     case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
