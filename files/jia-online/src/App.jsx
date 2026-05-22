@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
 
 // ========== CONFIG ==========
-const FREE_LAUNCH = true; // เปลี่ยนเป็น false เดือน เม.ย. 2569 เพื่อเริ่มคิดเงิน
+const FREE_LAUNCH = false; // เปลี่ยนเป็น false เดือน เม.ย. 2569 เพื่อเริ่มคิดเงิน
 const LAUNCH_END = "30 เมษายน 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
-const SHEET_URL = "https://script.google.com/macros/s/AKfycbxSNte5rBWi7SmHxaDBaU9h_-URJo7wymLzKR2CRgBON9ed3GxOx72kXNcypQy-X9aNuw/exec";
+const SUPABASE_URL = "https://tpoiyykbgsgnrdwzgzvn.supabase.co";
+const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
 
 // ========== PRICING ==========
 const PRICING = {
@@ -17,7 +18,14 @@ const PRICING = {
   freeModule: 1,    // บทที่ 1 ฟรี (CPR ผู้ใหญ่)
 };
 
-const sendToSheet = (data) => { if (!SHEET_URL) return; try { const url = SHEET_URL + "?data=" + encodeURIComponent(JSON.stringify(data)); fetch(url, { mode: "no-cors" }); console.log("Sheet sent:", data.action, data.name); } catch (e) { console.log("Sheet:", e); } };
+const supaRest = async (table, method = "GET", body = null, filters = "") => {
+  const url = `${SUPABASE_URL}/rest/v1/${table}${filters}`;
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" };
+  if (method === "POST" || method === "PATCH") h.Prefer = "return=representation";
+  const opts = { method, headers: h };
+  if (body && method !== "GET" && method !== "DELETE") opts.body = JSON.stringify(body);
+  try { const res = await fetch(url, opts); return res.ok ? (await res.text().then(t => t ? JSON.parse(t) : [])) : []; } catch(e) { console.error("Supabase:", e); return []; }
+};
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const save = (k, v) => { try { localStorage.setItem(`jia_${k}`, JSON.stringify(v)); } catch(e){} };
 const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
@@ -189,19 +197,50 @@ function Store({ go }) {
   const total = calcPrice(selected.length);
   const isFull = selected.length + purchased.filter(x => x <= 6).length >= 6;
 
+  const [stripePaying, setStripePaying] = useState(false);
+  const payWithStripe = async () => {
+    setStripePaying(true);
+    try {
+      const moduleNames = selected.map(id => COURSE.modules.find(x => x.id === id)?.short).filter(Boolean);
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({
+          type: "online_purchase",
+          items: [{ name: `JIA Online: ${moduleNames.join(", ")}`, amount: total }],
+          metadata: { phone: user?.phone || "", modules: selected.join(","), name: user?.name || "" },
+          successUrl: window.location.origin + window.location.pathname + "?stripe=success&modules=" + selected.join(","),
+          cancelUrl: window.location.origin + window.location.pathname + "?stripe=cancel",
+        }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, payment_status: "รอชำระ" });
+        window.location.href = data.url;
+      } else { alert("เกิดข้อผิดพลาด: " + (data.error || "ไม่สามารถสร้างลิงก์ชำระเงินได้")); }
+    } catch(err) { alert("เกิดข้อผิดพลาด กรุณาลองใหม่"); console.error(err); }
+    setStripePaying(false);
+  };
+
   const handleSlip = (e) => {
     const file = e.target.files[0]; if (!file) return;
     setUploading(true);
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const res = await fetch(JIA_COURSE_API + "?action=uploadSlip", {
-          method: "POST", headers: { "Content-Type": "text/plain" },
-          body: JSON.stringify({ base64: reader.result, fileName: (user?.name || "student") + "_course.jpg", bookingId: "course_" + Date.now() })
+        const fileName = (user?.name || "student") + "_course_" + Date.now() + ".jpg";
+        const byteChars = atob(reader.result.split(",").pop());
+        const byteArr = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([byteArr], { type: "image/jpeg" });
+        const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/slips/${fileName}`, {
+          method: "POST",
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "image/jpeg", "x-upsert": "true" },
+          body: blob
         });
-        const data = await res.json();
-        if (data.success) {
-          sendToSheet({ action: "purchase", name: user?.name || "", phone: user?.phone || "", modules: selected.join(","), amount: total, slipUrl: data.url });
+        if (uploadRes.ok) {
+          const data = { url: `${SUPABASE_URL}/storage/v1/object/public/slips/${fileName}` };
+          supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, slip_url: data.url, payment_status: "แจ้งชำระแล้ว" });
           const newPurchased = [...new Set([...purchased, ...selected])];
           savePurchased(newPurchased);
           setSlipDone(true);
@@ -234,6 +273,15 @@ function Store({ go }) {
         {isFull && <div style={{ fontSize: 12, color: B.green, marginTop: 6 }}>ครบ 6 หัวข้อ! ได้ Final Exam + Full Certificate + คูปอง ฿100 ฟรี</div>}
       </div>
       <div style={{ ...css.card, textAlign: "center", marginBottom: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>ชำระออนไลน์ (บัตรเครดิต / PromptPay)</div>
+        <button onClick={payWithStripe} disabled={stripePaying} style={{ ...css.btn("#635BFF", B.white), padding: "14px 32px", fontSize: 15, width: "100%", opacity: stripePaying ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/></svg>
+          {stripePaying ? "กำลังเปิดหน้าชำระเงิน..." : "ชำระผ่าน Stripe"}
+        </button>
+        <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8 }}>รองรับ Visa / Mastercard / PromptPay — ปลดล็อคทันที</div>
+      </div>
+      <div style={{ ...css.card, textAlign: "center", marginBottom: 14, position: "relative" }}>
+        <div style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", background: B.white, padding: "0 12px", fontSize: 12, color: B.dkGray }}>หรือ</div>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>โอนเงินเข้าบัญชี</div>
         <div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: B.dkGray }}>ธนาคารกสิกรไทย</div>
@@ -316,7 +364,10 @@ function Register({ go, setUser }) {
     const e = {}; if (!f.name.trim()) e.name = "กรุณากรอกชื่อ-นามสกุล"; if (!f.phone.trim() || f.phone.replace(/\D/g, "").length < 9) e.phone = "กรุณากรอกเบอร์โทรที่ถูกต้อง"; if (!pdpa) e.pdpa = "กรุณายินยอม PDPA ก่อนลงทะเบียน"; if (Object.keys(e).length) return setErr(e);
     const cleanPhone = f.phone.replace(/\D/g, "");
     const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email };
-    setUser(userData); save("user", userData); sendToSheet({ action: "register", name: userData.name, phone: cleanPhone, email: f.email });
+    setUser(userData); save("user", userData);
+    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
+    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course" });
+    supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน" });
     save("enrolled", true);
     if (FREE_LAUNCH) { go("course"); } else { go("course"); } // ลงทะเบียนแล้วเข้าเรียนได้เลย (บทที่ 1 ฟรี)
   };
@@ -343,16 +394,20 @@ function Payment({ go, user }) {
     reader.onload = async () => {
       try {
         const u = user || load("user", null);
-        const res = await fetch(JIA_COURSE_API + "?action=uploadSlip", {
-          method: "POST", headers: { "Content-Type": "text/plain" },
-          body: JSON.stringify({ base64: reader.result, fileName: (u?.name || "student") + "_online.jpg", bookingId: "online_" + Date.now() })
+        const fileName = (u?.name || "student") + "_online_" + Date.now() + ".jpg";
+        const byteChars = atob(reader.result.split(",").pop());
+        const byteArr = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([byteArr], { type: "image/jpeg" });
+        const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/slips/${fileName}`, {
+          method: "POST",
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "image/jpeg", "x-upsert": "true" },
+          body: blob
         });
-        const data = await res.json();
-        if (data.success) {
-          // แจ้งทีม
-          sendToSheet({ action: "payment", name: u?.name || "", phone: u?.phone || "", amount: 100, slipUrl: data.url });
+        if (uploadRes.ok) {
+          const data = { url: `${SUPABASE_URL}/storage/v1/object/public/slips/${fileName}` };
+          supaRest("online_purchases", "POST", { phone: u?.phone || "", modules: "online_fee", amount: 100, slip_url: data.url, payment_status: "แจ้งชำระแล้ว" });
           setSlipDone(true);
-          // ให้เข้าเรียนได้เลย (ทีมตรวจทีหลัง)
           save("enrolled", true);
         } else {
           alert("อัพโหลดไม่สำเร็จ กรุณาส่งสลิปทาง LINE แทน");
@@ -425,7 +480,12 @@ function Course({ go, progress, setProgress, user }) {
       if (!mod.vid && mod.id === COURSE.modules[COURSE.modules.length - 1].id) { 
         const u = user || load("user", null);
         const coupon = genCoupon(); save("coupon", coupon); 
-        if (u) sendToSheet({ action: "complete", name: u.name, phone: u.phone.replace(/\D/g, ""), coupon, score }); 
+        if (u) {
+          const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
+          supaRest("online_students", "PATCH", { status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: score, coupon_code: coupon, renew_date: renew.toISOString().split("T")[0] }, `?phone=ilike.*${u.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(u.name)}`);
+          supaRest("sales_tracking", "POST", { name: u.name, phone: u.phone.replace(/\D/g,""), completed_date: new Date().toISOString(), score, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
+          if (coupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
+        }
       }
     }
   };
@@ -537,7 +597,6 @@ function MiniCert({ user, go }) {
 }
 
 // ==================== BOOKING ====================
-const JIA_COURSE_API = "https://script.google.com/macros/s/AKfycbyAbzjf6EyBdgv_h3k72CyesYG72voz_-ss3GpiniwI8YU8JKTBi2i8bVKhpQTXamt-YA/exec";
 
 function Booking({ go }) {
   const coupon = load("coupon", null);
@@ -557,13 +616,10 @@ function Booking({ go }) {
   const price = coupon ? 400 : 500;
 
   useEffect(() => {
-    fetch(JIA_COURSE_API + "?action=getData&sheet=classes")
-      .then(r => r.json())
+    supaRest("classes", "GET", null, "?status=in.(ready,waiting_instructor)&order=date.asc")
       .then(data => {
         const now = new Date().toISOString().slice(0, 10);
-        const open = (data || [])
-          .filter(c => c.status === "ready" && c.date >= now)
-          .sort((a, b) => a.date.localeCompare(b.date) || a.timeSlot.localeCompare(b.timeSlot));
+        const open = (data || []).filter(c => c.date >= now);
         setClasses(open);
         setLoading(false);
       })
@@ -581,23 +637,12 @@ function Booking({ go }) {
     const cls = classes.find(c => c.id === selectedClass);
     try {
       const custId = uid();
-      const customer = { id: custId, name: form.name, tel: form.phone.replace(/\D/g, ""), email: "", createdAt: today(), source: "online-course" };
-      await fetch(JIA_COURSE_API + "?action=saveRow&sheet=customers", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(customer) });
+      const phone = form.phone.replace(/\D/g, "");
+      await supaRest("customers", "POST", { id: custId, name: form.name, tel: phone, email: "", created_at: today(), source: "online-course" });
 
       const bkId = uid();
-      const booking = {
-        id: bkId, customerId: custId, name: form.name, tel: form.phone.replace(/\D/g, ""),
-        courseType: cls.courseKey, courseName: cls.courseName, classId: cls.id,
-        channel: "online-course", package: "", totalPeople: form.people,
-        finalPrice: price, discountCode: coupon || "", discountAmount: coupon ? 100 : 0,
-        paymentMode: "โอน", paymentSlip: "", paymentStatus: "รอชำระ",
-        startDate: cls.date, timeSlot: cls.timeSlot, totalDays: "1", additionalDates: "",
-        salesStaff: "", instructor: "", note: form.note,
-        pdpaConsent: true, pdpaConsentDate: today(), createdAt: today()
-      };
-      await fetch(JIA_COURSE_API + "?action=saveRow&sheet=bookings", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(booking) });
-      fetch(JIA_COURSE_API + "?action=notifyBooking", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(booking) }).catch(() => {});
-      sendToSheet({ action: "booking", name: form.name, phone: form.phone.replace(/\D/g, ""), date: cls.date + " " + cls.timeSlot, people: form.people, note: form.note, coupon: coupon || "" });
+      const booking = await supaRest("bookings", "POST", { id: bkId, customer_id: custId, name: form.name, tel: phone, course_type: cls.courseKey || cls.course_key || "", course_name: cls.courseName || cls.course_name || "", class_id: cls.id, channel: "online-course", total_people: parseInt(form.people) || 1, final_price: price, discount_code: coupon || "", discount_amount: coupon ? 100 : 0, payment_mode: "โอน", payment_status: "รอชำระ", start_date: cls.date, time_slot: cls.timeSlot || cls.time_slot || "", total_days: 1, note: form.note || "", pdpa_consent: true, pdpa_consent_date: today(), created_at: new Date().toISOString() });
+      console.log("📢 Booking notification:", booking);
 
       setBookingRef(bkId);
       setStep("payment");
@@ -616,24 +661,21 @@ function Booking({ go }) {
     try {
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64 = reader.result;
-        // อัพโหลดสลิปไป Google Drive ผ่าน JIA Course API
-        const res = await fetch(JIA_COURSE_API + "?action=uploadSlip", {
-          method: "POST", headers: { "Content-Type": "text/plain" },
-          body: JSON.stringify({ base64, fileName: form.name + "_slip.jpg", bookingId: bookingRef })
+        // Upload to Supabase Storage
+        const fileName = (form.name || "student") + "_slip_" + Date.now() + ".jpg";
+        const byteChars = atob(reader.result.split(",").pop());
+        const byteArr = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([byteArr], { type: "image/jpeg" });
+        const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/slips/${fileName}`, {
+          method: "POST",
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "image/jpeg", "x-upsert": "true" },
+          body: blob
         });
-        const data = await res.json();
-        if (data.success && data.url) {
-          // อัพเดท booking ใส่ slip URL + เปลี่ยนสถานะ
-          await fetch(JIA_COURSE_API + "?action=saveRow&sheet=bookings", {
-            method: "POST", headers: { "Content-Type": "text/plain" },
-            body: JSON.stringify({ id: bookingRef, paymentSlip: data.url, paymentStatus: "แจ้งชำระแล้ว" })
-          });
-          // แจ้งเตือนชำระเงิน
-          fetch(JIA_COURSE_API + "?action=notifyPayment", {
-            method: "POST", headers: { "Content-Type": "text/plain" },
-            body: JSON.stringify({ bookingId: bookingRef, name: form.name, slipUrl: data.url })
-          }).catch(() => {});
+        if (uploadRes.ok) {
+          const data = { url: `${SUPABASE_URL}/storage/v1/object/public/slips/${fileName}` };
+          await supaRest("bookings", "PATCH", { payment_slip: data.url, payment_status: "แจ้งชำระแล้ว" }, `?id=eq.${encodeURIComponent(bookingRef)}`);
+          console.log("📢 Payment notification:", { bookingId: bookingRef, name: form.name, slipUrl: data.url });
           setSlipSent(true);
         } else {
           alert("อัพโหลดไม่สำเร็จ กรุณาลองใหม่หรือส่งสลิปทาง LINE");
@@ -656,7 +698,7 @@ function Booking({ go }) {
       <div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><I name="check" size={38} color={B.green}/></div>
       <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>จองสำเร็จ!</h2>
       <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6 }}>ได้รับข้อมูลจองและหลักฐานการโอนแล้ว<br/>ทีมงาน JIA จะยืนยันภายใน 24 ชม.</p>
-      {cls && <div style={{ background: B.gray, borderRadius: 12, padding: 14, marginTop: 16, fontSize: 14 }}><strong>{fmtDate(cls.date)}</strong> • {cls.timeSlot}<br/><span style={{ color: B.dkGray, fontSize: 13 }}>{cls.courseName}</span></div>}
+      {cls && <div style={{ background: B.gray, borderRadius: 12, padding: 14, marginTop: 16, fontSize: 14 }}><strong>{fmtDate(cls.date)}</strong> • {cls.timeSlot || cls.time_slot}<br/><span style={{ color: B.dkGray, fontSize: 13 }}>{cls.courseName || cls.course_name}</span></div>}
       <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginTop: 16, background: "#06C755", borderRadius: 12, padding: "14px 28px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> LINE @jiacpr</a>
       <div><button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 14, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button></div>
     </div></div>
@@ -674,8 +716,8 @@ function Booking({ go }) {
       {/* สรุปการจอง */}
       {cls && <div style={{ background: B.white, borderRadius: 14, padding: 16, marginBottom: 16, boxShadow: "0 1px 6px rgba(0,0,0,.05)" }}>
         <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 6 }}>สรุปการจอง</div>
-        <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtDate(cls.date)} • {cls.timeSlot}</div>
-        <div style={{ fontSize: 13, color: B.dkGray }}>{cls.courseName} • {form.people} คน</div>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtDate(cls.date)} • {cls.timeSlot || cls.time_slot}</div>
+        <div style={{ fontSize: 13, color: B.dkGray }}>{cls.courseName || cls.course_name} • {form.people} คน</div>
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${B.ltGray}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: 13, color: B.dkGray }}>ยอดชำระ</span>
           <span style={{ fontSize: 22, fontWeight: 800, color: B.red }}>฿{price}</span>
@@ -755,8 +797,8 @@ function Booking({ go }) {
                 border: selectedClass === c.id ? `2px solid ${B.red}` : `1px solid ${B.ltGray}`,
                 background: selectedClass === c.id ? `${B.red}08` : B.white,
               }}>
-                <div style={{ fontWeight: 600, fontSize: 14, color: selectedClass === c.id ? B.red : B.black }}>{fmtDate(c.date)} • {c.timeSlot}</div>
-                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 2 }}>{c.courseName}{c.place ? ` • ${c.place}` : ""}</div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: selectedClass === c.id ? B.red : B.black }}>{fmtDate(c.date)} • {c.timeSlot || c.time_slot}</div>
+                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 2 }}>{c.courseName || c.course_name}{c.place ? ` • ${c.place}` : ""}</div>
               </button>
             ))}
            </div>}
@@ -773,12 +815,272 @@ function Booking({ go }) {
   );
 }
 
+// ==================== ADMIN ====================
+const ADMIN_PASSWORD = "JiaAdmin2026";
+const ADMIN_SESSION_KEY = "jia_admin_auth";
+
+const TABS = [
+  { key: "online_students", label: "นักเรียนออนไลน์", cols: ["name","phone","email","status","final_score","coupon_code","registered_at"] },
+  { key: "customers",       label: "ลูกค้าทั้งหมด",   cols: ["name","tel","email","source","created_at"] },
+  { key: "bookings",        label: "การจอง On-site", cols: ["name","tel","course_name","start_date","time_slot","total_people","final_price","payment_status","created_at"] },
+  { key: "sales_tracking",  label: "ติดตามขาย",      cols: ["name","phone","score","coupon_code","follow_status","completed_date"] },
+  { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
+];
+
+function AdminLogin({ onAuth }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const submit = () => {
+    if (pw === ADMIN_PASSWORD) {
+      sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
+      onAuth();
+    } else {
+      setErr("รหัสผ่านไม่ถูกต้อง");
+    }
+  };
+  return (
+    <div style={{ ...css.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ ...css.card, maxWidth: 380, width: "100%" }}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: `${B.red}15`, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+            <I name="lock" size={28} color={B.red}/>
+          </div>
+          <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>JIA Admin</h2>
+          <p style={{ fontSize: 13, color: B.dkGray, marginTop: 6 }}>กรอกรหัสผ่านเพื่อเข้าระบบ</p>
+        </div>
+        <input
+          type="password"
+          value={pw}
+          onChange={e => { setPw(e.target.value); setErr(""); }}
+          onKeyDown={e => e.key === "Enter" && submit()}
+          placeholder="รหัสผ่าน"
+          autoFocus
+          style={{ width: "100%", padding: "14px 16px", border: `1px solid ${B.ltGray}`, borderRadius: 10, fontSize: 15, marginBottom: 10, boxSizing: "border-box" }}
+        />
+        {err && <div style={{ color: B.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
+        <button onClick={submit} style={{ ...css.btn(B.red, B.white, true) }}>เข้าระบบ →</button>
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <a href="/" style={{ fontSize: 12, color: B.dkGray }}>← กลับหน้าหลัก</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Admin() {
+  const [authed, setAuthed] = useState(() => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1");
+  const [tab, setTab] = useState("online_students");
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, bookings: 0 });
+
+  const currentTab = TABS.find(t => t.key === tab);
+
+  const fetchTab = useCallback(async (key) => {
+    setLoading(true);
+    const orderCol = key === "online_students" ? "registered_at"
+      : key === "bookings" || key === "customers" ? "created_at"
+      : key === "sales_tracking" ? "completed_date"
+      : "id";
+    const data = await supaRest(key, "GET", null, `?order=${orderCol}.desc.nullslast&limit=1000`);
+    setRows(Array.isArray(data) ? data : []);
+    setLoading(false);
+  }, []);
+
+  const fetchStats = useCallback(async () => {
+    const [students, customers, bookings] = await Promise.all([
+      supaRest("online_students", "GET", null, "?select=status"),
+      supaRest("customers", "GET", null, "?select=id&limit=10000"),
+      supaRest("bookings", "GET", null, "?select=id&limit=10000"),
+    ]);
+    const s = Array.isArray(students) ? students : [];
+    setStats({
+      total: s.length,
+      finished: s.filter(x => (x.status || "").startsWith("จบคอร์ส")).length,
+      in_progress: s.filter(x => x.status === "กำลังเรียน").length,
+      customers: Array.isArray(customers) ? customers.length : 0,
+      bookings: Array.isArray(bookings) ? bookings.length : 0,
+    });
+  }, []);
+
+  useEffect(() => { if (authed) { fetchTab(tab); } }, [authed, tab, fetchTab]);
+  useEffect(() => { if (authed) { fetchStats(); } }, [authed, fetchStats]);
+
+  if (!authed) return <AdminLogin onAuth={() => setAuthed(true)}/>;
+
+  const logout = () => {
+    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    setAuthed(false);
+  };
+
+  const filtered = rows.filter(r => {
+    if (q) {
+      const s = q.toLowerCase();
+      const hay = [r.name, r.phone, r.tel, r.email, r.coupon_code].filter(Boolean).join(" ").toLowerCase();
+      if (!hay.includes(s)) return false;
+    }
+    if (statusFilter !== "all") {
+      const st = r.status || r.payment_status || r.follow_status || "";
+      if (statusFilter === "finished" && !st.startsWith("จบคอร์ส")) return false;
+      if (statusFilter === "in_progress" && st !== "กำลังเรียน") return false;
+      if (statusFilter === "pending_pay" && st !== "รอชำระ" && st !== "แจ้งชำระแล้ว") return false;
+      if (statusFilter === "paid" && st !== "ชำระแล้ว") return false;
+    }
+    return true;
+  });
+
+  const exportCSV = () => {
+    if (!filtered.length) return;
+    const cols = currentTab.cols;
+    const header = cols.join(",");
+    const escape = (v) => {
+      if (v == null) return "";
+      const s = String(v).replace(/"/g, '""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    };
+    const body = filtered.map(r => cols.map(c => escape(r[c])).join(",")).join("\n");
+    const csv = "﻿" + header + "\n" + body;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `jia_${tab}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const fmt = (v) => {
+    if (v == null || v === "") return "—";
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 16).replace("T", " ");
+    if (typeof v === "string" && v.startsWith("http")) return <a href={v} target="_blank" rel="noopener noreferrer" style={{ color: B.red, textDecoration: "underline" }}>ดูสลิป</a>;
+    return String(v);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: B.gray }}>
+      <div style={{ background: B.black, color: B.white, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <I name="lock" size={20} color={B.white}/>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>JIA Admin</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { fetchTab(tab); fetchStats(); }} style={{ background: "transparent", color: B.white, border: `1px solid ${B.white}40`, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>↻ รีเฟรช</button>
+          <button onClick={logout} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>ออกจากระบบ</button>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}>
+        {/* Stat cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
+          {[
+            { label: "นักเรียนทั้งหมด", value: stats.total, color: B.red },
+            { label: "จบคอร์สแล้ว", value: stats.finished, color: B.green },
+            { label: "กำลังเรียน", value: stats.in_progress, color: B.gold },
+            { label: "ลูกค้าทั้งหมด", value: stats.customers, color: B.black },
+            { label: "การจอง On-site", value: stats.bookings, color: B.dkGray },
+          ].map(c => (
+            <div key={c.label} style={{ background: B.white, borderRadius: 12, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+              <div style={{ fontSize: 11, color: B.dkGray }}>{c.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: c.color, marginTop: 4 }}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{ background: tab === t.key ? B.red : B.white, color: tab === t.key ? B.white : B.dkGray, border: `1px solid ${tab === t.key ? B.red : B.ltGray}`, borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{t.label}</button>
+          ))}
+        </div>
+
+        {/* Search & filter */}
+        <div style={{ background: B.white, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / อีเมล / คูปอง" style={{ flex: "1 1 220px", padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+          {tab === "online_students" && (
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
+              <option value="all">ทุกสถานะ</option>
+              <option value="finished">จบคอร์สแล้ว</option>
+              <option value="in_progress">กำลังเรียน</option>
+            </select>
+          )}
+          {(tab === "bookings" || tab === "online_purchases") && (
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
+              <option value="all">ทุกสถานะการชำระ</option>
+              <option value="pending_pay">รอชำระ / แจ้งชำระ</option>
+              <option value="paid">ชำระแล้ว</option>
+            </select>
+          )}
+          <button onClick={exportCSV} disabled={!filtered.length} style={{ background: B.green, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", opacity: filtered.length ? 1 : 0.5 }}>⬇ Export CSV</button>
+          <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {rows.length} แถว</div>
+        </div>
+
+        {/* Table */}
+        <div style={{ background: B.white, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+          {loading ? (
+            <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>ไม่พบข้อมูล</div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: B.gray }}>
+                    {currentTab.cols.map(c => (
+                      <th key={c} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: B.dkGray, fontSize: 12, borderBottom: `1px solid ${B.ltGray}`, whiteSpace: "nowrap" }}>{c}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r, i) => (
+                    <tr key={r.id || i} style={{ borderBottom: `1px solid ${B.ltGray}` }}>
+                      {currentTab.cols.map(c => (
+                        <td key={c} style={{ padding: "10px 12px", verticalAlign: "top" }}>{fmt(r[c])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 11, color: B.dkGray }}>
+          JIA Admin • แสดงสูงสุด 1000 แถวล่าสุดต่อตาราง
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==================== APP ====================
 export default function App() {
+  const isAdmin = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
   const [page, setPage] = useState(() => load("enrolled", false) ? "course" : "landing");
   const [user, setUser] = useState(() => load("user", null));
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
+
+  // Handle Stripe success redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("stripe") === "success") {
+      const mods = params.get("modules");
+      if (mods) {
+        const newMods = mods.split(",").map(Number).filter(Boolean);
+        const current = getPurchased();
+        const merged = [...new Set([...current, ...newMods])];
+        savePurchased(merged);
+        supaRest("online_purchases", "PATCH", { payment_status: "ชำระแล้ว" }, `?phone=eq.${encodeURIComponent(load("user",{})?.phone||"")}&payment_status=eq.รอชำระ`);
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+      setPage("course");
+    }
+  }, []);
+
+  if (isAdmin) return <Admin/>;
+
   switch (page) {
     case "landing": return <Landing go={go}/>;
     case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
