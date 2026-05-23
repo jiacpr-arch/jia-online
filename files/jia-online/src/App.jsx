@@ -851,6 +851,7 @@ function Pipeline() {
   const [search, setSearch] = useState("");
   const [filterAssignee, setFilterAssignee] = useState(() => load("pipeline_filter", "mine"));
   const [stuckOnly, setStuckOnly] = useState(false);
+  const [filterTag, setFilterTag] = useState("all");
   const [selected, setSelected] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [dragOverStage, setDragOverStage] = useState(null);
@@ -887,6 +888,13 @@ function Pipeline() {
 
   const hoursSince = (iso) => iso ? (Date.now() - new Date(iso).getTime()) / 3600000 : 0;
   const isStuck = (l) => l.stage !== "won" && l.stage !== "lost" && hoursSince(l.updated_at) >= 24;
+  const parseTags = (s) => (s || "").split(/[,\s]+/).map(t => t.trim()).filter(Boolean);
+  const tagColor = (t) => {
+    let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    const palette = ["#3B82F6","#8B5CF6","#EC4899","#F59E0B","#10B981","#06B6D4","#EF4444","#84CC16"];
+    return palette[Math.abs(h) % palette.length];
+  };
+  const allTags = Array.from(new Set(leads.flatMap(l => parseTags(l.tags)))).sort();
 
   const filtered = leads.filter(l => {
     if (filterAssignee === "mine") {
@@ -897,6 +905,10 @@ function Pipeline() {
       if (l.assignee_id !== filterAssignee) return false;
     }
     if (stuckOnly && !isStuck(l)) return false;
+    if (filterTag !== "all") {
+      const tags = parseTags(l.tags);
+      if (!tags.includes(filterTag)) return false;
+    }
     if (search) {
       const s = search.toLowerCase();
       const hay = [l.name, l.display_name, l.phone, l.email, l.notes, l.tags].filter(Boolean).join(" ").toLowerCase();
@@ -934,6 +946,26 @@ function Pipeline() {
 
   const newCount = leads.filter(l => !l.assignee_id && l.stage === "new").length;
 
+  const exportCSV = () => {
+    const cols = ["display_name","name","phone","email","stage","assignee","tags","product_interest","deal_value","source","last_message_preview","created_at","updated_at"];
+    const esc = (v) => {
+      if (v == null) return "";
+      const s = String(v).replace(/"/g, '""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    };
+    const rows = filtered.map(l => cols.map(c => {
+      if (c === "assignee") return esc(teamById[l.assignee_id]?.name);
+      if (c === "stage") return esc(STAGE_BY_KEY[l.stage]?.label || l.stage);
+      return esc(l[c]);
+    }).join(","));
+    const csv = "﻿" + cols.join(",") + "\n" + rows.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `jiaroo_leads_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div>
       {/* "Me" selector — each sales picks themselves once */}
@@ -958,6 +990,13 @@ function Pipeline() {
           </optgroup>
         </select>
         <button onClick={() => setStuckOnly(s => !s)} style={{ background: stuckOnly ? B.red : B.white, color: stuckOnly ? B.white : B.red, border: `1px solid ${B.red}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🔥 ค้างเกิน 24 ชม</button>
+        {allTags.length > 0 && (
+          <select value={filterTag} onChange={e => setFilterTag(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
+            <option value="all">ทุกแท็ก</option>
+            {allTags.map(t => <option key={t} value={t}>🏷 {t}</option>)}
+          </select>
+        )}
+        <button onClick={exportCSV} disabled={!filtered.length} style={{ background: B.white, color: B.green, border: `1px solid ${B.green}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", opacity: filtered.length ? 1 : 0.5 }}>⬇ CSV</button>
         <button onClick={() => setShowNew(true)} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ เพิ่ม Lead</button>
         <button onClick={reload} style={{ background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, cursor: "pointer" }}>↻</button>
         <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {leads.length} leads</div>
@@ -1010,6 +1049,13 @@ function Pipeline() {
                         </div>
                       </div>
                       {l.last_message_preview && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>💬 {l.last_message_preview}</div>}
+                      {parseTags(l.tags).length > 0 && (
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                          {parseTags(l.tags).slice(0, 4).map(t => (
+                            <span key={t} style={{ background: `${tagColor(t)}20`, color: tagColor(t), padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600 }}>{t}</span>
+                          ))}
+                        </div>
+                      )}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 6 }}>
                         {unclaimed ? (
                           <button onClick={e => claim(e, l)} disabled={!meId} style={{ background: meId ? B.red : B.ltGray, color: B.white, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: meId ? "pointer" : "not-allowed", flex: 1 }}>🤚 รับ Lead</button>
@@ -1369,6 +1415,7 @@ function Dashboard() {
     return { name: t.name, total: my.length, won: my.filter(l => l.stage === "won").length, lost: my.filter(l => l.stage === "lost").length };
   }).filter(r => r.total > 0).sort((a, b) => b.total - a.total);
   const unassigned = leads.filter(l => !l.assignee_id).length;
+  const stuckCount = leads.filter(l => l.stage !== "won" && l.stage !== "lost" && (Date.now() - new Date(l.updated_at).getTime()) / 3600000 >= 24).length;
 
   const stat = (label, val, color) => (
     <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
@@ -1396,6 +1443,7 @@ function Dashboard() {
         {stat("Conversion", `${conv}%`, B.gold)}
         {stat("มูลค่ารวม", "฿" + totalValue.toLocaleString(), B.green)}
         {stat("ยังไม่มอบหมาย", unassigned, unassigned > 0 ? B.red : B.dkGray)}
+        {stat("ค้างเกิน 24 ชม", stuckCount, stuckCount > 0 ? B.red : B.dkGray)}
       </div>
 
       <div style={{ background: B.white, borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
@@ -1460,6 +1508,10 @@ function Dashboard() {
               if (ev.type === "stage_change") desc = `${STAGE_BY_KEY[data.from]?.label || data.from} → ${STAGE_BY_KEY[data.to]?.label || data.to}`;
               else if (ev.type === "assign") desc = `มอบหมายให้ ${teamById[data.to]?.name || "ใครก็ตาม"}`;
               else if (ev.type === "created") desc = `สร้าง (${data.source || ""})`;
+              else if (ev.type === "claim") desc = `${data.name || "ใครบางคน"} กดรับ`;
+              else if (ev.type === "note") desc = `📝 ${(data.text || "").slice(0, 60)}${(data.text || "").length > 60 ? "..." : ""}`;
+              else if (ev.type === "follow") desc = "เพิ่มเพื่อน LINE";
+              else if (ev.type === "unfollow") desc = "บล็อก / ลบเพื่อน";
               return (
                 <div key={ev.id} style={{ display: "flex", gap: 8, padding: 8, background: B.gray, borderRadius: 6, fontSize: 12 }}>
                   <div style={{ minWidth: 90, color: B.dkGray, fontSize: 11 }}>{fmtDT(ev.created_at)}</div>
