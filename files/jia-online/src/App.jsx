@@ -1074,6 +1074,23 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
     onClose();
   };
 
+  const convertToTeam = async () => {
+    if (!confirm(`แปลง "${lead.display_name || lead.name}" เป็นสมาชิกทีมเซลล์?\n\nLead นี้จะถูกลบ และเมื่อคนนี้ทักเข้ามาอีก ระบบจะไม่สร้าง lead ใหม่`)) return;
+    await supaRest("jiaroo_team", "POST", {
+      tenant_slug: JIAROO_TENANT,
+      name: lead.display_name || lead.name || "(ไม่มีชื่อ)",
+      picture_url: lead.picture_url || null,
+      line_user_id: lead.line_user_id || null,
+      phone: lead.phone || null,
+      email: lead.email || null,
+      role: "sales",
+      active: true,
+    });
+    await supaRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
+    onChange();
+    onClose();
+  };
+
   const Fld = (k, label, type = "text") => (
     <div style={{ marginBottom: 10 }}>
       <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{label}</label>
@@ -1121,6 +1138,12 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
           <button onClick={save} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
           <button onClick={del} style={{ background: B.white, color: B.red, border: `1px solid ${B.red}`, borderRadius: 8, padding: "12px 14px", fontSize: 13, cursor: "pointer" }}>ลบ</button>
         </div>
+
+        {lead.line_user_id && (
+          <button onClick={convertToTeam} style={{ width: "100%", background: B.white, color: B.dkGray, border: `1px dashed ${B.ltGray}`, borderRadius: 8, padding: "10px", fontSize: 13, cursor: "pointer", marginTop: 8 }}>
+            👤 ทำให้เป็นทีมเซลล์ (ไม่ใช่ลูกค้า)
+          </button>
+        )}
 
         <div style={{ marginTop: 24 }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Timeline</div>
