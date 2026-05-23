@@ -1039,10 +1039,13 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
     stage: lead.stage,
   });
   const [events, setEvents] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [tab, setTab] = useState("chat");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     supaRest("jiaroo_lead_events", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.desc&limit=50`).then(r => setEvents(Array.isArray(r) ? r : []));
+    supaRest("jiaroo_messages", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.asc&limit=500`).then(r => setMessages(Array.isArray(r) ? r : []));
   }, [lead.id]);
 
   const save = async () => {
@@ -1146,17 +1149,63 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
         )}
 
         <div style={{ marginTop: 24 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Timeline</div>
-          {events.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีกิจกรรม</div> : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {events.map(ev => (
-                <div key={ev.id} style={{ padding: 8, background: B.gray, borderRadius: 8, fontSize: 12 }}>
-                  <div style={{ fontWeight: 600 }}>{ev.type}</div>
-                  <div style={{ color: B.dkGray, fontSize: 11 }}>{fmtDT(ev.created_at)} {ev.created_by ? `• ${ev.created_by}` : ""}</div>
-                  {ev.data && Object.keys(ev.data).length > 0 && <pre style={{ margin: "4px 0 0", fontSize: 11, whiteSpace: "pre-wrap" }}>{JSON.stringify(ev.data)}</pre>}
-                </div>
-              ))}
-            </div>
+          <div style={{ display: "flex", borderBottom: `1px solid ${B.ltGray}`, marginBottom: 12 }}>
+            {[
+              { k: "chat", l: `💬 แชท (${messages.length})` },
+              { k: "timeline", l: `📋 Timeline (${events.length})` },
+            ].map(t => (
+              <button key={t.k} onClick={() => setTab(t.k)} style={{ background: "transparent", border: "none", padding: "8px 14px", fontSize: 13, fontWeight: tab === t.k ? 700 : 400, color: tab === t.k ? B.red : B.dkGray, borderBottom: `2px solid ${tab === t.k ? B.red : "transparent"}`, cursor: "pointer", marginBottom: -1 }}>{t.l}</button>
+            ))}
+          </div>
+
+          {tab === "chat" && (
+            messages.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray, padding: 20, textAlign: "center" }}>ยังไม่มีข้อความ</div> : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 480, overflowY: "auto", background: `${B.gray}80`, borderRadius: 10, padding: 12 }}>
+                {(() => {
+                  let lastDate = "";
+                  return messages.map(m => {
+                    const dateStr = new Date(m.created_at).toLocaleDateString("th-TH", { day: "2-digit", month: "short" });
+                    const showDate = dateStr !== lastDate;
+                    lastDate = dateStr;
+                    const inbound = m.direction === "in";
+                    return (
+                      <div key={m.id}>
+                        {showDate && <div style={{ textAlign: "center", fontSize: 10, color: B.dkGray, padding: "8px 0 4px" }}>— {dateStr} —</div>}
+                        <div style={{ display: "flex", justifyContent: inbound ? "flex-start" : "flex-end" }}>
+                          <div style={{ maxWidth: "78%", background: inbound ? B.white : `${B.green}20`, color: B.black, borderRadius: 12, padding: "8px 12px", fontSize: 13, wordBreak: "break-word", boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
+                            <div style={{ whiteSpace: "pre-wrap" }}>{m.text || `[${m.message_type}]`}</div>
+                            <div style={{ fontSize: 9, color: B.dkGray, marginTop: 4, textAlign: "right" }}>{new Date(m.created_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )
+          )}
+
+          {tab === "timeline" && (
+            events.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray, padding: 20, textAlign: "center" }}>ยังไม่มีกิจกรรม</div> : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {events.map(ev => {
+                  const d = ev.data || {};
+                  let label = ev.type;
+                  if (ev.type === "stage_change") label = `เปลี่ยน stage: ${STAGE_BY_KEY[d.from]?.label || d.from} → ${STAGE_BY_KEY[d.to]?.label || d.to}`;
+                  else if (ev.type === "assign") label = "เปลี่ยนผู้รับผิดชอบ";
+                  else if (ev.type === "claim") label = `${d.name || "ใครบางคน"} กดรับ lead`;
+                  else if (ev.type === "created") label = `สร้าง lead (${d.source || ""})`;
+                  else if (ev.type === "follow") label = "เพิ่มเพื่อน LINE";
+                  else if (ev.type === "unfollow") label = "บล็อก / ลบเพื่อน";
+                  return (
+                    <div key={ev.id} style={{ padding: 8, background: B.gray, borderRadius: 8, fontSize: 12 }}>
+                      <div style={{ fontWeight: 600 }}>{label}</div>
+                      <div style={{ color: B.dkGray, fontSize: 11 }}>{fmtDT(ev.created_at)} {ev.created_by ? `• ${ev.created_by}` : ""}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
       </div>
