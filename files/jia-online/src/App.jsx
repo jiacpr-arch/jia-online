@@ -821,6 +821,7 @@ const ADMIN_SESSION_KEY = "jia_admin_auth";
 
 const TABS = [
   { key: "pipeline",        label: "Pipeline (jiaroo)", custom: true },
+  { key: "dashboard",       label: "Dashboard",         custom: true },
   { key: "team",            label: "ทีมเซลล์",         custom: true },
   { key: "online_students", label: "นักเรียนออนไลน์", cols: ["name","phone","email","status","final_score","coupon_code","registered_at"] },
   { key: "customers",       label: "ลูกค้าทั้งหมด",   cols: ["name","tel","email","source","created_at"] },
@@ -851,6 +852,7 @@ function Pipeline() {
   const [filterAssignee, setFilterAssignee] = useState("all");
   const [selected, setSelected] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [dragOverStage, setDragOverStage] = useState(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -905,7 +907,17 @@ function Pipeline() {
       ) : (
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 12 }}>
           {STAGES.map(s => (
-            <div key={s.key} style={{ minWidth: 260, flex: "0 0 260px", background: B.gray, borderRadius: 12, padding: 10 }}>
+            <div key={s.key}
+              onDragOver={e => { e.preventDefault(); if (dragOverStage !== s.key) setDragOverStage(s.key); }}
+              onDragLeave={() => setDragOverStage(null)}
+              onDrop={e => {
+                e.preventDefault();
+                const id = e.dataTransfer.getData("text/plain");
+                const lead = leads.find(l => l.id === id);
+                if (lead) moveStage(lead, s.key);
+                setDragOverStage(null);
+              }}
+              style={{ minWidth: 260, flex: "0 0 260px", background: dragOverStage === s.key ? `${s.color}22` : B.gray, borderRadius: 12, padding: 10, transition: "background .15s", outline: dragOverStage === s.key ? `2px dashed ${s.color}` : "none" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "0 4px" }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: s.color }}/>
                 <div style={{ fontSize: 13, fontWeight: 700 }}>{s.label}</div>
@@ -913,11 +925,15 @@ function Pipeline() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "calc(100vh - 320px)", overflowY: "auto" }}>
                 {byStage[s.key].length === 0 ? (
-                  <div style={{ fontSize: 12, color: B.dkGray, padding: 12, textAlign: "center" }}>—</div>
+                  <div style={{ fontSize: 12, color: B.dkGray, padding: 12, textAlign: "center" }}>— ลากการ์ดมาวางที่นี่ —</div>
                 ) : byStage[s.key].map(l => {
                   const a = l.assignee_id ? teamById[l.assignee_id] : null;
                   return (
-                    <div key={l.id} onClick={() => setSelected(l)} style={{ background: B.white, borderRadius: 10, padding: 10, cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,.05)", borderLeft: `3px solid ${s.color}` }}>
+                    <div key={l.id}
+                      draggable
+                      onDragStart={e => { e.dataTransfer.setData("text/plain", l.id); e.dataTransfer.effectAllowed = "move"; }}
+                      onClick={() => setSelected(l)}
+                      style={{ background: B.white, borderRadius: 10, padding: 10, cursor: "grab", boxShadow: "0 1px 3px rgba(0,0,0,.05)", borderLeft: `3px solid ${s.color}` }}>
                       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{l.name || l.display_name || "(ไม่มีชื่อ)"}</div>
                       {l.phone && <div style={{ fontSize: 11, color: B.dkGray }}>{l.phone}</div>}
                       {l.last_message_preview && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>💬 {l.last_message_preview}</div>}
@@ -1112,6 +1128,158 @@ function LeadNew({ team, onClose, onCreated }) {
           <button onClick={onClose} style={{ flex: 1, background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "12px", fontSize: 14, cursor: "pointer" }}>ยกเลิก</button>
           <button onClick={submit} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "..." : "เพิ่ม"}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard() {
+  const [leads, setLeads] = useState([]);
+  const [team, setTeam] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [range, setRange] = useState(30);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const sinceISO = new Date(Date.now() - range * 86400000).toISOString();
+    const [l, t, e] = await Promise.all([
+      supaRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&limit=5000`),
+      supaRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=name.asc`),
+      supaRest("jiaroo_lead_events", "GET", null, `?created_at=gte.${sinceISO}&order=created_at.desc&limit=200`),
+    ]);
+    setLeads(Array.isArray(l) ? l : []);
+    setTeam(Array.isArray(t) ? t : []);
+    setEvents(Array.isArray(e) ? e : []);
+    setLoading(false);
+  }, [range]);
+  useEffect(() => { reload(); }, [reload]);
+
+  if (loading) return <div style={{ background: B.white, padding: 40, borderRadius: 12, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>;
+
+  const sinceMs = Date.now() - range * 86400000;
+  const inRange = leads.filter(l => new Date(l.created_at).getTime() >= sinceMs);
+  const won = leads.filter(l => l.stage === "won");
+  const lost = leads.filter(l => l.stage === "lost");
+  const closed = won.length + lost.length;
+  const conv = closed > 0 ? Math.round((won.length / closed) * 100) : 0;
+  const totalValue = won.reduce((s, l) => s + (Number(l.deal_value) || 0), 0);
+  const teamById = Object.fromEntries(team.map(t => [t.id, t]));
+
+  const byStage = STAGES.map(s => ({ ...s, count: leads.filter(l => l.stage === s.key).length }));
+  const maxStage = Math.max(1, ...byStage.map(b => b.count));
+
+  const bySource = leads.reduce((acc, l) => { const k = l.source || "—"; acc[k] = (acc[k] || 0) + 1; return acc; }, {});
+  const sourceRows = Object.entries(bySource).sort((a, b) => b[1] - a[1]);
+
+  const byAssignee = team.map(t => {
+    const my = leads.filter(l => l.assignee_id === t.id);
+    return { name: t.name, total: my.length, won: my.filter(l => l.stage === "won").length, lost: my.filter(l => l.stage === "lost").length };
+  }).filter(r => r.total > 0).sort((a, b) => b.total - a.total);
+  const unassigned = leads.filter(l => !l.assignee_id).length;
+
+  const stat = (label, val, color) => (
+    <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+      <div style={{ fontSize: 11, color: B.dkGray }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color, marginTop: 4 }}>{val}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: B.dkGray }}>ภาพรวม jiaroo CRM</div>
+        <select value={range} onChange={e => setRange(Number(e.target.value))} style={{ padding: "8px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
+          <option value={7}>7 วันล่าสุด</option>
+          <option value={30}>30 วันล่าสุด</option>
+          <option value={90}>90 วันล่าสุด</option>
+          <option value={365}>1 ปีล่าสุด</option>
+        </select>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 16 }}>
+        {stat("Leads ทั้งหมด", leads.length, B.black)}
+        {stat(`Leads ใหม่ (${range}d)`, inRange.length, B.red)}
+        {stat("ปิดดีลได้", won.length, B.green)}
+        {stat("Conversion", `${conv}%`, B.gold)}
+        {stat("มูลค่ารวม", "฿" + totalValue.toLocaleString(), B.green)}
+        {stat("ยังไม่มอบหมาย", unassigned, unassigned > 0 ? B.red : B.dkGray)}
+      </div>
+
+      <div style={{ background: B.white, borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Leads ตาม Stage</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {byStage.map(s => (
+            <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 100, fontSize: 12 }}>{s.label}</div>
+              <div style={{ flex: 1, background: B.gray, borderRadius: 6, height: 22, position: "relative", overflow: "hidden" }}>
+                <div style={{ width: `${(s.count / maxStage) * 100}%`, background: s.color, height: "100%", borderRadius: 6, transition: "width .3s" }}/>
+              </div>
+              <div style={{ width: 40, fontSize: 13, fontWeight: 700, textAlign: "right" }}>{s.count}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginBottom: 12 }}>
+        <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>แหล่งที่มา</div>
+          {sourceRows.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>—</div> : sourceRows.map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${B.gray}`, fontSize: 13 }}>
+              <span>{k}</span>
+              <span style={{ fontWeight: 700 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>ผลงานทีม</div>
+          {byAssignee.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีการมอบหมาย</div> : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead><tr style={{ color: B.dkGray, fontSize: 11 }}>
+                <th style={{ textAlign: "left", padding: "4px 0" }}>ชื่อ</th>
+                <th style={{ textAlign: "right", padding: "4px 0" }}>ทั้งหมด</th>
+                <th style={{ textAlign: "right", padding: "4px 0", color: B.green }}>ปิดได้</th>
+                <th style={{ textAlign: "right", padding: "4px 0", color: B.dkGray }}>เสีย</th>
+              </tr></thead>
+              <tbody>
+                {byAssignee.map(r => (
+                  <tr key={r.name} style={{ borderTop: `1px solid ${B.gray}` }}>
+                    <td style={{ padding: "6px 0", fontWeight: 600 }}>{r.name}</td>
+                    <td style={{ textAlign: "right" }}>{r.total}</td>
+                    <td style={{ textAlign: "right", color: B.green, fontWeight: 600 }}>{r.won}</td>
+                    <td style={{ textAlign: "right", color: B.dkGray }}>{r.lost}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>กิจกรรมล่าสุด ({events.length})</div>
+        {events.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีกิจกรรมในช่วงเวลานี้</div> : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
+            {events.slice(0, 50).map(ev => {
+              const lead = leads.find(l => l.id === ev.lead_id);
+              const data = ev.data || {};
+              let desc = ev.type;
+              if (ev.type === "stage_change") desc = `${STAGE_BY_KEY[data.from]?.label || data.from} → ${STAGE_BY_KEY[data.to]?.label || data.to}`;
+              else if (ev.type === "assign") desc = `มอบหมายให้ ${teamById[data.to]?.name || "ใครก็ตาม"}`;
+              else if (ev.type === "created") desc = `สร้าง (${data.source || ""})`;
+              return (
+                <div key={ev.id} style={{ display: "flex", gap: 8, padding: 8, background: B.gray, borderRadius: 6, fontSize: 12 }}>
+                  <div style={{ minWidth: 90, color: B.dkGray, fontSize: 11 }}>{fmtDT(ev.created_at)}</div>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontWeight: 600 }}>{lead ? (lead.name || lead.display_name || "—") : "(ลบแล้ว)"}</span>
+                    <span style={{ color: B.dkGray, marginLeft: 6 }}>{desc}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1389,8 +1557,9 @@ function Admin() {
           ))}
         </div>
 
-        {/* Custom tabs (Pipeline / Team) */}
+        {/* Custom tabs (Pipeline / Dashboard / Team) */}
         {tab === "pipeline" && <Pipeline/>}
+        {tab === "dashboard" && <Dashboard/>}
         {tab === "team" && <TeamManager/>}
 
         {/* Search & filter (for table tabs only) */}
