@@ -126,6 +126,39 @@ const css = {
   wrap: { maxWidth: 480, margin: "0 auto", padding: "0 20px" },
 };
 
+// ==================== MORROO NETWORK ADS ====================
+const MORROO_ADS = [
+  { id: "advice", brand: "Morroo Advice", emoji: "🩺", tag: "AI ปรึกษาสุขภาพ", headline: "ไม่สบายใจ? ถาม AI หมอก่อน", desc: "ปรึกษาอาการกับ AI ภาษาไทย ตอบใน 5 วินาที — ฟรี 3 ครั้ง/วัน", cta: "เริ่มปรึกษาฟรี", url: "https://advice.morroo.com", bg: "#3B82F6", bgLight: "#3B82F612" },
+  { id: "lab", brand: "Lab.morroo", emoji: "🔬", tag: "AI อ่านผล Lab", headline: "อ่านผล Lab ไม่เข้าใจ?", desc: "ถ่ายรูปใบผลตรวจ → AI อ่านให้ใน 30 วิ พร้อม flag ค่าผิดปกติเป็นภาษาไทย", cta: "ลองอ่านผลฟรี", url: "https://lab.morroo.com", bg: "#0EA5E9", bgLight: "#0EA5E912" },
+  { id: "roodee", brand: "RooDee (รู้ดี)", emoji: "📚", tag: "ติวสอบด้วย AI", headline: "เตรียมลูกสอบ ป.1 / TCAS?", desc: "ข้อสอบ 5,000+ ข้อ · AI วิเคราะห์จุดอ่อน · Mock Exam จำลองสนามจริง", cta: "เริ่มเรียนฟรี", url: "https://pocket.morroo.com", bg: "#8B5CF6", bgLight: "#8B5CF612" },
+  { id: "roodeeme", brand: "คู่มือข้างตัว", emoji: "⚕️", tag: "AI ผู้ช่วยแพทย์", headline: "หมอ/นศพ. พกคู่มือไว้ในมือถือ", desc: "ICD-10 ไทย · ตรวจยาตีกัน · คำนวณ Drug Dose · ฝึก Long Case กับ AI-คนไข้", cta: "ใช้ฟรี 20 ครั้ง/เดือน", url: "https://roodee.me", bg: "#DC2626", bgLight: "#DC262612" },
+];
+
+function MorrooAdBanner() {
+  const [ad] = useState(() => MORROO_ADS[Math.floor(Math.random() * MORROO_ADS.length)]);
+  const trackedUrl = `${ad.url}${ad.url.includes("?") ? "&" : "?"}utm_source=cpr.morroo.com&utm_medium=banner&utm_campaign=morroo_network&utm_content=${ad.id}`;
+  return (
+    <a href={trackedUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none", color: "inherit", marginBottom: 16 }}>
+      <div style={{ background: B.white, borderRadius: 16, padding: 18, border: `1px solid ${ad.bg}30`, position: "relative", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,.04)" }}>
+        <div style={{ position: "absolute", top: 10, right: 12, fontSize: 9, color: B.dkGray, letterSpacing: 1, textTransform: "uppercase", opacity: 0.55 }}>โฆษณา</div>
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+          <div style={{ minWidth: 52, height: 52, borderRadius: 14, background: ad.bgLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>{ad.emoji}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: ad.bg, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>{ad.tag}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: B.black, marginBottom: 4, lineHeight: 1.3 }}>{ad.headline}</div>
+            <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.5, marginBottom: 10 }}>{ad.desc}</div>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: ad.bg, color: B.white, fontSize: 12, fontWeight: 700, padding: "7px 14px", borderRadius: 8 }}>{ad.cta} →</div>
+          </div>
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 8, borderTop: `1px solid ${B.gray}`, fontSize: 10, color: B.dkGray, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>by <strong style={{ color: ad.bg }}>{ad.brand}</strong></span>
+          <span style={{ opacity: 0.6 }}>morroo network</span>
+        </div>
+      </div>
+    </a>
+  );
+}
+
 // ==================== LANDING ====================
 function Landing({ go }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
@@ -177,6 +210,7 @@ function Landing({ go }) {
         {[{ n: "10%", c: B.red, t: "ทุก 1 นาทีที่ไม่ได้ทำ CPR\nโอกาสรอดชีวิตลดลง 10%" }, { n: "3-6 เดือน", c: B.gold, t: "ทักษะ CPR เสื่อมลง\nภายใน 3-6 เดือนหลังอบรม" }, { n: "58%", c: B.green, t: "ผู้ทบทวนทุกเดือนทำได้ \"ดีเยี่ยม\"\nเทียบกับ 15% ที่ทบทวนปีละครั้ง" }].map((r, i) => (<div key={i} style={{ background: `${r.c}08`, borderRadius: 12, padding: 14, marginBottom: 14, borderLeft: `4px solid ${r.c}` }}><div style={{ fontSize: 28, fontWeight: 800, color: r.c }}>{r.n}</div><div style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5, whiteSpace: "pre-line" }}>{r.t}</div></div>))}
       </div>
     </div>
+    <div style={{ ...css.wrap, paddingBottom: 16 }}><MorrooAdBanner/></div>
     <div style={{ ...css.wrap, paddingBottom: 100 }}><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{[{ icon: "play", l: "6 วิดีโอ", s: "เรียนได้ทุกที่" },{ icon: "book", l: "Quiz ทุกบท", s: "ทดสอบความเข้าใจ" },{ icon: "cert", l: "ใบประกาศฯ", s: "มาตรฐาน 2025" },{ icon: "heart", l: "คูปอง ฿100", s: "ใช้ตอนเรียน on-site" }].map((f, i) => (<div key={i} style={{ background: B.white, borderRadius: 14, padding: 16, textAlign: "center" }}><I name={f.icon} size={22} color={B.red}/><div style={{ fontWeight: 600, fontSize: 13, marginTop: 6 }}>{f.l}</div><div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>{f.s}</div></div>))}</div></div>
     <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: B.white, padding: "14px 20px", boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 100 }}><div style={{ maxWidth: 480, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 11, color: B.dkGray }}>{FREE_LAUNCH ? "ช่วง Launch พิเศษ" : "เริ่มต้น"}</div><div style={{ fontSize: 22, fontWeight: 800, color: B.red }}>{FREE_LAUNCH ? "ฟรี!" : "฿35/หัวข้อ"}</div></div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { const txt = "เรียน CPR & AED ออนไลน์! ได้ใบ Certificate + คูปองส่วนลด"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn(B.white, B.red), padding: "10px 14px", border: `1px solid ${B.red}30`, fontSize: 13 }}>แชร์</button><button onClick={() => enrolled ? go("course") : go("register")} style={css.btn(B.red, B.white)}>{enrolled ? "เข้าเรียน" : FREE_LAUNCH ? "เรียนฟรี" : "ลงทะเบียน"}</button></div></div></div>
   </div>);
@@ -532,6 +566,7 @@ function Course({ go, progress, setProgress, user }) {
       {pct === 100 && <button onClick={() => go("certificate")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 16 }}>ดูใบประกาศนียบัตร & คูปอง →</button>}
       {/* Mini cert per module */}
       {progress.done.filter(id => id <= 6).length > 0 && progress.done.filter(id => id <= 6).length < 7 && <button onClick={() => go("minicert")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 8, border: `1px solid ${B.ltGray}`, fontSize: 13 }}>ดูใบ Mini Certificate →</button>}
+      <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
       <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
     </div>
   </div>);
@@ -566,6 +601,7 @@ function Certificate({ user, go }) {
       <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
     </div>
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ jiacpr.com/online"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
+    <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
     <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
   </div></div>);
