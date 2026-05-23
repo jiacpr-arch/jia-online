@@ -850,6 +850,7 @@ function Pipeline() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [filterAssignee, setFilterAssignee] = useState(() => load("pipeline_filter", "mine"));
+  const [stuckOnly, setStuckOnly] = useState(false);
   const [selected, setSelected] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [dragOverStage, setDragOverStage] = useState(null);
@@ -884,6 +885,9 @@ function Pipeline() {
 
   const me = team.find(t => t.id === meId);
 
+  const hoursSince = (iso) => iso ? (Date.now() - new Date(iso).getTime()) / 3600000 : 0;
+  const isStuck = (l) => l.stage !== "won" && l.stage !== "lost" && hoursSince(l.updated_at) >= 24;
+
   const filtered = leads.filter(l => {
     if (filterAssignee === "mine") {
       if (!meId || l.assignee_id !== meId) return false;
@@ -892,6 +896,7 @@ function Pipeline() {
     } else if (filterAssignee !== "all") {
       if (l.assignee_id !== filterAssignee) return false;
     }
+    if (stuckOnly && !isStuck(l)) return false;
     if (search) {
       const s = search.toLowerCase();
       const hay = [l.name, l.display_name, l.phone, l.email, l.notes, l.tags].filter(Boolean).join(" ").toLowerCase();
@@ -952,6 +957,7 @@ function Pipeline() {
             {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </optgroup>
         </select>
+        <button onClick={() => setStuckOnly(s => !s)} style={{ background: stuckOnly ? B.red : B.white, color: stuckOnly ? B.white : B.red, border: `1px solid ${B.red}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🔥 ค้างเกิน 24 ชม</button>
         <button onClick={() => setShowNew(true)} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ เพิ่ม Lead</button>
         <button onClick={reload} style={{ background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, cursor: "pointer" }}>↻</button>
         <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {leads.length} leads</div>
@@ -985,13 +991,18 @@ function Pipeline() {
                   const a = l.assignee_id ? teamById[l.assignee_id] : null;
                   const isMine = l.assignee_id === meId;
                   const unclaimed = !l.assignee_id;
+                  const h = hoursSince(l.updated_at);
+                  const closed = l.stage === "won" || l.stage === "lost";
+                  const ageColor = closed ? null : h >= 72 ? B.red : h >= 24 ? B.gold : null;
+                  const ageLabel = h < 1 ? "เพิ่ง" : h < 24 ? `${Math.floor(h)} ชม` : `${Math.floor(h / 24)} วัน`;
                   return (
                     <div key={l.id}
                       draggable
                       onDragStart={e => { e.dataTransfer.setData("text/plain", l.id); e.dataTransfer.effectAllowed = "move"; }}
                       onClick={() => setSelected(l)}
                       style={{ background: B.white, borderRadius: 10, padding: 10, cursor: "grab", boxShadow: "0 1px 3px rgba(0,0,0,.05)", borderLeft: `3px solid ${s.color}`, position: "relative", outline: isMine ? `2px solid ${B.green}` : "none" }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {ageColor && <div title={`อัปเดตล่าสุด ${ageLabel}ที่แล้ว`} style={{ position: "absolute", top: 8, right: 8, background: ageColor, color: B.white, padding: "1px 6px", borderRadius: 999, fontSize: 9, fontWeight: 700 }}>{h >= 72 ? "🔥" : "⚠"} {ageLabel}</div>}
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", paddingRight: ageColor ? 60 : 0 }}>
                         {l.picture_url && <img src={l.picture_url} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}/>}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name || l.display_name || "(ไม่มีชื่อ)"}</div>
@@ -1042,11 +1053,27 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
   const [messages, setMessages] = useState([]);
   const [tab, setTab] = useState("chat");
   const [saving, setSaving] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+
+  const reloadEvents = useCallback(() => {
+    supaRest("jiaroo_lead_events", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.desc&limit=100`).then(r => setEvents(Array.isArray(r) ? r : []));
+  }, [lead.id]);
 
   useEffect(() => {
-    supaRest("jiaroo_lead_events", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.desc&limit=50`).then(r => setEvents(Array.isArray(r) ? r : []));
+    reloadEvents();
     supaRest("jiaroo_messages", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.asc&limit=500`).then(r => setMessages(Array.isArray(r) ? r : []));
-  }, [lead.id]);
+  }, [lead.id, reloadEvents]);
+
+  const addNote = async () => {
+    const txt = noteText.trim();
+    if (!txt) return;
+    setNoteSaving(true);
+    await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "note", data: { text: txt }, created_by: "admin" });
+    setNoteText("");
+    setNoteSaving(false);
+    reloadEvents();
+  };
 
   const save = async () => {
     setSaving(true);
@@ -1152,6 +1179,7 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
           <div style={{ display: "flex", borderBottom: `1px solid ${B.ltGray}`, marginBottom: 12 }}>
             {[
               { k: "chat", l: `💬 แชท (${messages.length})` },
+              { k: "notes", l: `📝 โน้ต (${events.filter(e => e.type === "note").length})` },
               { k: "timeline", l: `📋 Timeline (${events.length})` },
             ].map(t => (
               <button key={t.k} onClick={() => setTab(t.k)} style={{ background: "transparent", border: "none", padding: "8px 14px", fontSize: 13, fontWeight: tab === t.k ? 700 : 400, color: tab === t.k ? B.red : B.dkGray, borderBottom: `2px solid ${tab === t.k ? B.red : "transparent"}`, cursor: "pointer", marginBottom: -1 }}>{t.l}</button>
@@ -1185,6 +1213,27 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
             )
           )}
 
+          {tab === "notes" && (
+            <div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="เขียนโน้ตเกี่ยวกับลูกค้า เช่น คุยอะไรไปแล้ว สิ่งที่ต้องตามต่อ..." rows={2} style={{ flex: 1, padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }}/>
+                <button onClick={addNote} disabled={!noteText.trim() || noteSaving} style={{ background: B.red, color: B.white, border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: noteText.trim() ? "pointer" : "not-allowed", opacity: noteText.trim() && !noteSaving ? 1 : 0.5, alignSelf: "stretch" }}>{noteSaving ? "..." : "เพิ่ม"}</button>
+              </div>
+              {events.filter(e => e.type === "note").length === 0 ? (
+                <div style={{ fontSize: 12, color: B.dkGray, padding: 20, textAlign: "center" }}>ยังไม่มีโน้ต — เริ่มจดบันทึกได้เลย</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {events.filter(e => e.type === "note").map(ev => (
+                    <div key={ev.id} style={{ padding: 10, background: `${B.gold}10`, border: `1px solid ${B.gold}40`, borderRadius: 8 }}>
+                      <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{ev.data?.text || ""}</div>
+                      <div style={{ color: B.dkGray, fontSize: 11, marginTop: 6 }}>{fmtDT(ev.created_at)} {ev.created_by ? `• ${ev.created_by}` : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {tab === "timeline" && (
             events.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray, padding: 20, textAlign: "center" }}>ยังไม่มีกิจกรรม</div> : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1197,6 +1246,7 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
                   else if (ev.type === "created") label = `สร้าง lead (${d.source || ""})`;
                   else if (ev.type === "follow") label = "เพิ่มเพื่อน LINE";
                   else if (ev.type === "unfollow") label = "บล็อก / ลบเพื่อน";
+                  else if (ev.type === "note") label = `📝 โน้ต: ${(d.text || "").slice(0, 80)}${(d.text || "").length > 80 ? "..." : ""}`;
                   return (
                     <div key={ev.id} style={{ padding: 8, background: B.gray, borderRadius: 8, fontSize: 12 }}>
                       <div style={{ fontWeight: 600 }}>{label}</div>
