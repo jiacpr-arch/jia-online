@@ -849,10 +849,17 @@ function Pipeline() {
   const [team, setTeam] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [filterAssignee, setFilterAssignee] = useState("all");
+  const [filterAssignee, setFilterAssignee] = useState(() => load("pipeline_filter", "mine"));
   const [selected, setSelected] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [dragOverStage, setDragOverStage] = useState(null);
+  const [meId, setMeId] = useState(() => load("pipeline_me", ""));
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg, kind = "ok") => {
+    setToast({ msg, kind });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -866,9 +873,25 @@ function Pipeline() {
   }, []);
   useEffect(() => { reload(); }, [reload]);
 
+  // Auto-refresh every 30s to catch newly claimed leads / new leads
+  useEffect(() => {
+    const id = setInterval(reload, 30000);
+    return () => clearInterval(id);
+  }, [reload]);
+
+  useEffect(() => { save("pipeline_filter", filterAssignee); }, [filterAssignee]);
+  useEffect(() => { save("pipeline_me", meId); }, [meId]);
+
+  const me = team.find(t => t.id === meId);
+
   const filtered = leads.filter(l => {
-    if (filterAssignee === "unassigned" && l.assignee_id) return false;
-    if (filterAssignee !== "all" && filterAssignee !== "unassigned" && l.assignee_id !== filterAssignee) return false;
+    if (filterAssignee === "mine") {
+      if (!meId || l.assignee_id !== meId) return false;
+    } else if (filterAssignee === "unassigned") {
+      if (l.assignee_id) return false;
+    } else if (filterAssignee !== "all") {
+      if (l.assignee_id !== filterAssignee) return false;
+    }
     if (search) {
       const s = search.toLowerCase();
       const hay = [l.name, l.display_name, l.phone, l.email, l.notes, l.tags].filter(Boolean).join(" ").toLowerCase();
@@ -885,17 +908,49 @@ function Pipeline() {
     const prev = lead.stage;
     setLeads(rs => rs.map(r => r.id === lead.id ? { ...r, stage: newStage } : r));
     await supaRest("jiaroo_leads", "PATCH", { stage: newStage }, `?id=eq.${lead.id}`);
-    await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: prev, to: newStage }, created_by: "admin" });
+    await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: prev, to: newStage }, created_by: me?.name || "admin" });
   };
+
+  // Optimistic claim — only succeeds if lead is still unassigned
+  const claim = async (e, lead) => {
+    e.stopPropagation();
+    if (!meId) { showToast("เลือก \"ฉันคือ\" ก่อน", "warn"); return; }
+    if (lead.assignee_id) { showToast("มีคนรับไปแล้ว", "warn"); return; }
+    const result = await supaRest("jiaroo_leads", "PATCH", { assignee_id: meId }, `?id=eq.${lead.id}&assignee_id=is.null`);
+    if (Array.isArray(result) && result.length > 0) {
+      setLeads(rs => rs.map(r => r.id === lead.id ? { ...r, assignee_id: meId } : r));
+      await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "claim", data: { by: meId, name: me?.name }, created_by: me?.name || "admin" });
+      showToast(`✓ รับ ${lead.name || lead.display_name || "lead"} แล้ว`, "ok");
+    } else {
+      showToast("ช้าไป! คนอื่นรับไปก่อนแล้ว", "warn");
+      reload();
+    }
+  };
+
+  const newCount = leads.filter(l => !l.assignee_id && l.stage === "new").length;
 
   return (
     <div>
+      {/* "Me" selector — each sales picks themselves once */}
+      <div style={{ background: meId ? `${B.green}10` : `${B.gold}10`, border: `1px solid ${meId ? B.green : B.gold}40`, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: meId ? B.green : B.gold }}>{meId ? "👤 ฉันคือ" : "⚠ เลือกชื่อตัวเองก่อนเริ่มรับลูกค้า"}</div>
+        <select value={meId} onChange={e => setMeId(e.target.value)} style={{ padding: "8px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white, fontWeight: 600 }}>
+          <option value="">— เลือก —</option>
+          {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        {me?.picture_url && <img src={me.picture_url} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover" }}/>}
+        {newCount > 0 && <div style={{ marginLeft: "auto", background: B.red, color: B.white, padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700 }}>🔔 {newCount} lead รอรับ</div>}
+      </div>
+
       <div style={{ background: B.white, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / โน้ต / แท็ก" style={{ flex: "1 1 220px", padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
         <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
-          <option value="all">ทุกคน</option>
-          <option value="unassigned">ยังไม่มอบหมาย</option>
-          {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          <option value="mine">ของฉัน</option>
+          <option value="unassigned">ยังไม่มีคนรับ</option>
+          <option value="all">ทั้งหมด</option>
+          <optgroup label="— ตามคน —">
+            {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </optgroup>
         </select>
         <button onClick={() => setShowNew(true)} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ เพิ่ม Lead</button>
         <button onClick={reload} style={{ background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, cursor: "pointer" }}>↻</button>
@@ -925,21 +980,32 @@ function Pipeline() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "calc(100vh - 320px)", overflowY: "auto" }}>
                 {byStage[s.key].length === 0 ? (
-                  <div style={{ fontSize: 12, color: B.dkGray, padding: 12, textAlign: "center" }}>— ลากการ์ดมาวางที่นี่ —</div>
+                  <div style={{ fontSize: 12, color: B.dkGray, padding: 12, textAlign: "center" }}>—</div>
                 ) : byStage[s.key].map(l => {
                   const a = l.assignee_id ? teamById[l.assignee_id] : null;
+                  const isMine = l.assignee_id === meId;
+                  const unclaimed = !l.assignee_id;
                   return (
                     <div key={l.id}
                       draggable
                       onDragStart={e => { e.dataTransfer.setData("text/plain", l.id); e.dataTransfer.effectAllowed = "move"; }}
                       onClick={() => setSelected(l)}
-                      style={{ background: B.white, borderRadius: 10, padding: 10, cursor: "grab", boxShadow: "0 1px 3px rgba(0,0,0,.05)", borderLeft: `3px solid ${s.color}` }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{l.name || l.display_name || "(ไม่มีชื่อ)"}</div>
-                      {l.phone && <div style={{ fontSize: 11, color: B.dkGray }}>{l.phone}</div>}
-                      {l.last_message_preview && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>💬 {l.last_message_preview}</div>}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, fontSize: 10, color: B.dkGray }}>
-                        <span>{a ? a.name : "—"}</span>
-                        <span>{fmtDT(l.updated_at)}</span>
+                      style={{ background: B.white, borderRadius: 10, padding: 10, cursor: "grab", boxShadow: "0 1px 3px rgba(0,0,0,.05)", borderLeft: `3px solid ${s.color}`, position: "relative", outline: isMine ? `2px solid ${B.green}` : "none" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {l.picture_url && <img src={l.picture_url} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}/>}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name || l.display_name || "(ไม่มีชื่อ)"}</div>
+                          {l.phone && <div style={{ fontSize: 11, color: B.dkGray }}>{l.phone}</div>}
+                        </div>
+                      </div>
+                      {l.last_message_preview && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>💬 {l.last_message_preview}</div>}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 6 }}>
+                        {unclaimed ? (
+                          <button onClick={e => claim(e, l)} disabled={!meId} style={{ background: meId ? B.red : B.ltGray, color: B.white, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: meId ? "pointer" : "not-allowed", flex: 1 }}>🤚 รับ Lead</button>
+                        ) : (
+                          <span style={{ fontSize: 11, color: isMine ? B.green : B.dkGray, fontWeight: isMine ? 700 : 400 }}>{isMine ? "✓ ของฉัน" : `👤 ${a?.name || "—"}`}</span>
+                        )}
+                        <span style={{ fontSize: 10, color: B.dkGray }}>{fmtDT(l.updated_at)}</span>
                       </div>
                     </div>
                   );
@@ -948,6 +1014,10 @@ function Pipeline() {
             </div>
           ))}
         </div>
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: toast.kind === "warn" ? B.gold : B.green, color: B.white, padding: "12px 24px", borderRadius: 999, fontSize: 14, fontWeight: 700, boxShadow: "0 4px 16px rgba(0,0,0,.2)", zIndex: 2000 }}>{toast.msg}</div>
       )}
 
       {selected && <LeadDetail lead={selected} team={team} onClose={() => setSelected(null)} onChange={reload} onStage={moveStage}/>}
@@ -1004,6 +1074,23 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
     onClose();
   };
 
+  const convertToTeam = async () => {
+    if (!confirm(`แปลง "${lead.display_name || lead.name}" เป็นสมาชิกทีมเซลล์?\n\nLead นี้จะถูกลบ และเมื่อคนนี้ทักเข้ามาอีก ระบบจะไม่สร้าง lead ใหม่`)) return;
+    await supaRest("jiaroo_team", "POST", {
+      tenant_slug: JIAROO_TENANT,
+      name: lead.display_name || lead.name || "(ไม่มีชื่อ)",
+      picture_url: lead.picture_url || null,
+      line_user_id: lead.line_user_id || null,
+      phone: lead.phone || null,
+      email: lead.email || null,
+      role: "sales",
+      active: true,
+    });
+    await supaRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
+    onChange();
+    onClose();
+  };
+
   const Fld = (k, label, type = "text") => (
     <div style={{ marginBottom: 10 }}>
       <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{label}</label>
@@ -1051,6 +1138,12 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
           <button onClick={save} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
           <button onClick={del} style={{ background: B.white, color: B.red, border: `1px solid ${B.red}`, borderRadius: 8, padding: "12px 14px", fontSize: 13, cursor: "pointer" }}>ลบ</button>
         </div>
+
+        {lead.line_user_id && (
+          <button onClick={convertToTeam} style={{ width: "100%", background: B.white, color: B.dkGray, border: `1px dashed ${B.ltGray}`, borderRadius: 8, padding: "10px", fontSize: 13, cursor: "pointer", marginTop: 8 }}>
+            👤 ทำให้เป็นทีมเซลล์ (ไม่ใช่ลูกค้า)
+          </button>
+        )}
 
         <div style={{ marginTop: 24 }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Timeline</div>
