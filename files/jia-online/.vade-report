@@ -1,0 +1,48 @@
+# Vercel Web Analytics Installation Report
+
+## Summary
+Successfully installed and configured Vercel Web Analytics for the JIA Online CPR & AED Course project.
+
+## Changes Implemented
+
+### 1. Package Installation
+- **Package Added**: `@vercel/analytics` version ^2.0.1
+- **Method**: Used npm to install the package
+- **Files Modified**: 
+  - `package.json` - Added dependency
+  - `package-lock.json` - Updated lock file with new dependency tree
+
+### 2. Analytics Integration
+- **File Modified**: `src/App.jsx`
+- **Changes Made**:
+  - Added import statement: `import { Analytics } from "@vercel/analytics/react"`
+  - Integrated `<Analytics />` component into the App component
+  - Wrapped component returns with React fragments to include Analytics in both admin and regular user views
+
+### 3. Implementation Details
+Following the official Vercel documentation for React applications:
+- Used the React-specific package: `@vercel/analytics/react`
+- Added the Analytics component at the root level of the application
+- Analytics will now track page views and user interactions across all pages (landing, course, payment, etc.)
+
+## Build Verification
+✅ Build completed successfully with no errors
+- Command: `npm run build`
+- Output: Generated production build in `dist/` directory
+- Bundle size: 259.33 kB (gzipped: 77.44 kB)
+
+## Framework
+- **Framework**: React 18.2.0 with Vite 5.1.0
+- **Build Tool**: Vite
+- **Implementation Pattern**: React component approach as per Vercel docs
+
+## Notes
+- Analytics component was added to both the admin panel view and all regular user pages
+- The implementation is non-intrusive and preserves all existing functionality
+- Analytics will automatically start tracking once the application is deployed to Vercel
+- No additional configuration is needed - the analytics will work automatically when deployed to Vercel's platform
+
+## Files Staged for Commit
+1. `package.json` - New dependency declaration
+2. `package-lock.json` - Updated dependency lock file
+3. `src/App.jsx` - Analytics component integration

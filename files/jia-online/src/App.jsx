@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/react";
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ==================== BRAND ====================
@@ -1930,17 +1931,29 @@ export default function App() {
     }
   }, []);
 
-  if (isAdmin) return <Admin/>;
+  if (isAdmin) return (
+    <>
+      <Admin/>
+      <Analytics />
+    </>
+  );
 
-  switch (page) {
-    case "landing": return <Landing go={go}/>;
-    case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-    case "payment": return <Payment go={go} user={user}/>;
-    case "store": return <Store go={go}/>;
-    case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user}/>;
-    case "certificate": return <Certificate user={user} go={go}/>;
-    case "minicert": return <MiniCert user={user} go={go}/>;
-    case "booking": return <Booking go={go}/>;
-    default: return <Landing go={go}/>;
-  }
+  return (
+    <>
+      {(() => {
+        switch (page) {
+          case "landing": return <Landing go={go}/>;
+          case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
+          case "payment": return <Payment go={go} user={user}/>;
+          case "store": return <Store go={go}/>;
+          case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user}/>;
+          case "certificate": return <Certificate user={user} go={go}/>;
+          case "minicert": return <MiniCert user={user} go={go}/>;
+          case "booking": return <Booking go={go}/>;
+          default: return <Landing go={go}/>;
+        }
+      })()}
+      <Analytics />
+    </>
+  );
 }
