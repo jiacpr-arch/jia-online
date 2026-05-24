@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
 
 // ========== CONFIG ==========
-const FREE_LAUNCH = true; // เปลี่ยนเป็น false เดือน ส.ค. 2569 เพื่อเริ่มคิดเงิน
+const FREE_LAUNCH = true; // เปลี่ยนเป็น false เดือน ก.ค. 2569 เพื่อเริ่มระบบโค้ด/คิดเงิน (จะเปิด Claim CTA + lock บทที่ 4-6 อัตโนมัติ)
 const LAUNCH_END = "31 กรกฎาคม 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
@@ -224,8 +224,8 @@ function Landing({ go }) {
       </div>
     </div>
 
-    {/* Lead Capture CTA — แสดงเมื่อ promo เปิด และยังไม่เคย claim โค้ด */}
-    {PROMO_ENABLED && !load("promo_code", null) && <div style={{ ...css.wrap, paddingTop: 24 }}>
+    {/* Lead Capture CTA — แสดงเมื่อ promo เปิด หลังจบ free launch และยังไม่เคย claim โค้ด */}
+    {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_code", null) && <div style={{ ...css.wrap, paddingTop: 24 }}>
       <button onClick={() => go("claim")} style={{ width: "100%", background: `linear-gradient(135deg, ${B.gold} 0%, #E08800 100%)`, color: B.white, border: "none", borderRadius: 16, padding: 18, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 16px rgba(245,158,11,.25)" }}>
         <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><I name="star" size={26} color={B.white}/></div>
         <div style={{ flex: 1 }}>
@@ -420,8 +420,8 @@ function Store({ go }) {
           </button>
         ); })}
 
-        {/* Promo code redeem — gateway to Claim component */}
-        {PROMO_ENABLED && !load("promo_redeemed", false) && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 12, padding: "12px 14px", background: B.white, border: `2px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 12, textAlign: "left" }}>
+        {/* Promo code redeem — gateway to Claim component (ซ่อนระหว่าง FREE_LAUNCH เพราะทุกบทฟรีอยู่แล้ว) */}
+        {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 12, padding: "12px 14px", background: B.white, border: `2px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 12, textAlign: "left" }}>
           <div style={{ width: 36, height: 36, borderRadius: 9, background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><I name="star" size={18} color={B.gold}/></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: B.black }}>มีโค้ดส่วนลด 100%?</div>
