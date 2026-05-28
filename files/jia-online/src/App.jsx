@@ -11,6 +11,9 @@ const LAUNCH_END = "31 กรกฎาคม 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
 const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} };
+const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
+const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code)}`;
 const markLineAdded = (user) => {
   save("line_added", true); save("line_added_at", new Date().toISOString());
   safeTrack("line_oa_added");
@@ -461,9 +464,11 @@ function Store({ go }) {
 
 // ==================== LINE ADD PROMPT ====================
 function LineAddPrompt({ go, user, variant = "post-register" }) {
+  const linkCode = getLinkCode();
+  const deepLink = lineLinkDeepLink(linkCode);
   const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); go("course"); };
   const onSkip = () => { safeTrack("line_oa_skipped", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
-  const onClickLine = () => { safeTrack("line_oa_clicked", { variant }); };
+  const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); };
   const title = variant === "post-register" ? "เกือบเสร็จแล้ว! เพิ่ม LINE เพื่อรับสิทธิ์เต็ม" : "อย่าลืมเพิ่ม LINE!";
   return (
     <div style={css.page}>
@@ -487,10 +492,13 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
             <img src={LINE_QR_URL} alt="LINE QR @jiacpr" width="180" height="180" style={{ display: "block" }} onError={(e) => { e.target.style.display = "none"; }}/>
             <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6, color: "#06C755" }}>@jiacpr</div>
           </div>
-          <a href={LINE_URL} onClick={onClickLine} target="_blank" rel="noopener noreferrer"
-             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
-            <I name="line" size={22} color={B.white}/> เพิ่มเพื่อนใน LINE
+          <a href={deepLink} onClick={onClickLink} target="_blank" rel="noopener noreferrer"
+             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+            <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน + ผูกบัญชีอัตโนมัติ
           </a>
+          <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 12, lineHeight: 1.5 }}>
+            (กดปุ่ม → LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{linkCode}</strong> ขึ้นมา → กดส่ง = ผูกบัญชีให้รับโปรอัตโนมัติ)
+          </div>
           <button onClick={onAdded} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>
             <I name="check" size={16} color={B.white}/> เพิ่มเพื่อนแล้ว → เข้าเรียนเลย
           </button>
@@ -512,7 +520,8 @@ function Register({ go, setUser }) {
     const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email };
     setUser(userData); save("user", userData);
     const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
-    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course" });
+    const linkCode = genLinkCode(); save("line_link_code", linkCode);
+    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course", line_link_code: linkCode });
     supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน" });
     save("enrolled", true);
     safeTrack("register_complete", { has_email: !!f.email });
@@ -1044,20 +1053,24 @@ function Course({ go, progress, setProgress, user }) {
   const pct = Math.round((progress.done.length / COURSE.modules.length) * 100);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.black} 0%, #2a2a2a 100%)`, color: B.white, padding: "24px 24px 30px" }}><div style={{ maxWidth: 480, margin: "0 auto" }}><div style={{ fontSize: 11, letterSpacing: 2, opacity: .5, textTransform: "uppercase" }}>JIA TRAINER CENTER</div><h2 style={{ fontSize: 20, fontWeight: 700, margin: "4px 0 14px" }}>CPR & AED ออนไลน์</h2><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)" }}><div style={{ height: "100%", borderRadius: 3, background: B.green, width: `${pct}%`, transition: "width .5s" }}/></div><span style={{ fontSize: 12, fontWeight: 600 }}>{pct}%</span></div><div style={{ fontSize: 11, opacity: .5, marginTop: 4 }}>{progress.done.length}/{COURSE.modules.length} บทเรียน</div></div></div>
-    {!load("line_added", false) && (
-      <div style={{ ...css.wrap, paddingTop: 16 }}>
-        <a href={LINE_URL} target="_blank" rel="noopener noreferrer"
-           onClick={() => safeTrack("line_oa_clicked", { variant: "course-banner" })}
-           style={{ display: "flex", alignItems: "center", gap: 12, background: "#06C75512", border: "1px solid #06C75540", borderRadius: 12, padding: "12px 14px", textDecoration: "none", color: B.black }}>
-          <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: "#06C755", display: "flex", alignItems: "center", justifyContent: "center" }}><I name="line" size={22} color={B.white}/></div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>เพิ่ม LINE @jiacpr</div>
-            <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>รับเตือนทบทวน + โปรต่ออายุ + คูปองพิเศษ</div>
-          </div>
-          <button onClick={(e) => { e.preventDefault(); markLineAdded(); window.open(LINE_URL, "_blank"); }} style={{ background: "#06C755", color: B.white, border: "none", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>เพิ่ม →</button>
-        </a>
-      </div>
-    )}
+    {!load("line_added", false) && (() => {
+      const lc = getLinkCode();
+      const dl = lineLinkDeepLink(lc);
+      return (
+        <div style={{ ...css.wrap, paddingTop: 16 }}>
+          <a href={dl} target="_blank" rel="noopener noreferrer"
+             onClick={() => safeTrack("line_oa_clicked", { variant: "course-banner", has_link_code: true })}
+             style={{ display: "flex", alignItems: "center", gap: 12, background: "#06C75512", border: "1px solid #06C75540", borderRadius: 12, padding: "12px 14px", textDecoration: "none", color: B.black }}>
+            <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: "#06C755", display: "flex", alignItems: "center", justifyContent: "center" }}><I name="line" size={22} color={B.white}/></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>เพิ่ม LINE @jiacpr + ผูกบัญชี</div>
+              <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>รับเตือนทบทวน + โปรต่ออายุ + คูปองพิเศษ อัตโนมัติ</div>
+            </div>
+            <button onClick={(e) => { e.preventDefault(); markLineAdded(user); window.open(dl, "_blank"); }} style={{ background: "#06C755", color: B.white, border: "none", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>เพิ่ม →</button>
+          </a>
+        </div>
+      );
+    })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>{COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy) ? "pointer" : "not-allowed", opacity: (ok || needBuy) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
@@ -1096,18 +1109,24 @@ function Certificate({ user, go }) {
       <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${B.ltGray}`, fontSize: 10, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
     </div></div>
     <button onClick={saveCert} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><I name="save" size={18} color={B.white}/> บันทึกใบประกาศนียบัตร</button>
-    {!load("line_added", false) && (
-      <div style={{ background: "#06C75510", border: "2px solid #06C75540", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
-        <I name="line" size={32} color="#06C755"/>
-        <div style={{ fontSize: 15, fontWeight: 700, color: B.black, margin: "8px 0 4px" }}>อย่าลืม! เพิ่ม LINE @jiacpr</div>
-        <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12 }}>รับเตือนทบทวนทุก 3 เดือน + โปรต่ออายุ Cert</div>
-        <a href={LINE_URL} target="_blank" rel="noopener noreferrer"
-           onClick={() => { safeTrack("line_oa_clicked", { variant: "certificate" }); markLineAdded(user); }}
-           style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}>
-          <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน LINE @jiacpr
-        </a>
-      </div>
-    )}
+    {!load("line_added", false) && (() => {
+      const lc = getLinkCode();
+      return (
+        <div style={{ background: "#06C75510", border: "2px solid #06C75540", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
+          <I name="line" size={32} color="#06C755"/>
+          <div style={{ fontSize: 15, fontWeight: 700, color: B.black, margin: "8px 0 4px" }}>อย่าลืม! เพิ่ม LINE @jiacpr</div>
+          <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12 }}>รับเตือนทบทวนทุก 3 เดือน + โปรต่ออายุ Cert</div>
+          <a href={lineLinkDeepLink(lc)} target="_blank" rel="noopener noreferrer"
+             onClick={() => { safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true }); markLineAdded(user); }}
+             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}>
+            <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน + ผูกบัญชีอัตโนมัติ
+          </a>
+          <div style={{ fontSize: 10, color: B.dkGray, marginTop: 8, lineHeight: 1.5 }}>
+            (LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> → กดส่งเพื่อผูกบัญชี)
+          </div>
+        </div>
+      );
+    })()}
     <div style={{ background: `${B.red}08`, borderRadius: 16, padding: 20, marginTop: 16, textAlign: "center" }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: B.red, marginBottom: 4 }}>คูปองส่วนลด ฿100 สำหรับคอร์ส On-site!</div>
       <div style={{ fontSize: 22, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 }}>{coupon}</div>
