@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
 
 // ========== CONFIG ==========
-const FREE_LAUNCH = true; // เปลี่ยนเป็น false เดือน ก.ค. 2569 เพื่อเริ่มระบบโค้ด/คิดเงิน (จะเปิด Claim CTA + lock บทที่ 4-6 อัตโนมัติ)
+const FREE_LAUNCH = false; // ปิด ก.ค. 2569 — เปิดระบบโค้ด/คิดเงิน. user เก่าที่ enrolled ในช่วง free จะ auto-grandfather (ดู getPurchased)
 const LAUNCH_END = "31 กรกฎาคม 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
@@ -72,7 +72,8 @@ const getPurchased = () => {
   const promoUnlocked = load("promo_unlocked", []);
   if (stored && stored.length) return promoUnlocked.length ? [...new Set([...stored, ...promoUnlocked])] : stored;
   if (load("grandfathered", false)) return [1,2,3,4,5,6,7];
-  if (FREE_LAUNCH) { save("grandfathered", true); return [1,2,3,4,5,6,7]; }
+  // grandfather: user ที่เคย enrolled ในช่วง FREE_LAUNCH ให้คงสิทธิ์เรียนฟรีทุกบท
+  if (FREE_LAUNCH || load("enrolled", false)) { save("grandfathered", true); return [1,2,3,4,5,6,7]; }
   const base = [PRICING.freeModule];
   return promoUnlocked.length ? [...new Set([...base, ...promoUnlocked])] : base;
 };
