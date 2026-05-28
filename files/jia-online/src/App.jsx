@@ -1,13 +1,28 @@
 import { Analytics } from "@vercel/analytics/react";
+import { track } from "@vercel/analytics";
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ==================== BRAND ====================
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
 
 // ========== CONFIG ==========
-const FREE_LAUNCH = true; // เปลี่ยนเป็น false เดือน ส.ค. 2569 เพื่อเริ่มคิดเงิน
+const FREE_LAUNCH = false; // ปิด ก.ค. 2569 — เปิดระบบโค้ด/คิดเงิน. user เก่าที่ enrolled ในช่วง free จะ auto-grandfather (ดู getPurchased)
 const LAUNCH_END = "31 กรกฎาคม 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
+const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
+const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} };
+const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
+const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code)}`;
+const markLineAdded = (user) => {
+  save("line_added", true); save("line_added_at", new Date().toISOString());
+  safeTrack("line_oa_added");
+  const u = user || load("user", null);
+  if (u?.phone) {
+    const tail = u.phone.replace(/\D/g, "").slice(-9);
+    supaRest("customers", "PATCH", { line_added: true, line_added_at: new Date().toISOString() }, `?tel=ilike.*${tail}`);
+  }
+};
 const SUPABASE_URL = "https://tpoiyykbgsgnrdwzgzvn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
 
@@ -19,6 +34,24 @@ const PRICING = {
   freeModule: 1,    // บทที่ 1 ฟรี (CPR ผู้ใหญ่)
 };
 
+// ========== PROMO CODE (Lead Capture) ==========
+const PROMO_ENABLED = true;                 // เปิดระบบ lead-capture (ปิดเพื่อซ่อน CTA ทั้งหมด)
+const PROMO_FREE_MODULES = [1, 2, 3];       // โค้ดปลดล็อก: CPR ผู้ใหญ่ + ทารก + Choking ผู้ใหญ่
+const PROMO_EXPIRY_DAYS = 7;                // โค้ดหมดอายุภายใน 7 วันหลัง claim
+const PROMO_CODE_PREFIX = "LEAD-";          // prefix แยกจาก JIA- (on-site coupon)
+const LEAD_SOURCES = [
+  { value: "facebook",  label: "Facebook (เพจ JIA หรือกลุ่ม)" },
+  { value: "tiktok",    label: "TikTok" },
+  { value: "instagram", label: "Instagram" },
+  { value: "line_oa",   label: "LINE Official @jiacpr" },
+  { value: "google",    label: "Google ค้นหา" },
+  { value: "friend",    label: "เพื่อน/คนรู้จักแนะนำ" },
+  { value: "workplace", label: "ที่ทำงาน/โรงเรียน" },
+  { value: "youtube",   label: "YouTube" },
+  { value: "event",     label: "งาน/อีเวนต์ออฟไลน์" },
+  { value: "other",     label: "อื่นๆ (โปรดระบุ)" },
+];
+
 const supaRest = async (table, method = "GET", body = null, filters = "") => {
   const url = `${SUPABASE_URL}/rest/v1/${table}${filters}`;
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" };
@@ -28,11 +61,25 @@ const supaRest = async (table, method = "GET", body = null, filters = "") => {
   try { const res = await fetch(url, opts); return res.ok ? (await res.text().then(t => t ? JSON.parse(t) : [])) : []; } catch(e) { console.error("Supabase:", e); return []; }
 };
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+const genLeadCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = PROMO_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+const normalizePhone = (s) => (s || "").replace(/\D/g, "");
+const normalizeEmail = (s) => (s || "").trim().toLowerCase();
+const daysUntil = (iso) => { if (!iso) return 0; const ms = new Date(iso).getTime() - Date.now(); return Math.max(0, Math.ceil(ms / 86400000)); };
+const genIdempotencyKey = (email, phone) => `${normalizeEmail(email)}|${normalizePhone(phone)}|${Math.floor(Date.now() / 60000)}`.slice(0, 80);
 const save = (k, v) => { try { localStorage.setItem(`jia_${k}`, JSON.stringify(v)); } catch(e){} };
 const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 
 // ========== PURCHASE HELPERS ==========
-const getPurchased = () => load("purchased", FREE_LAUNCH ? [1,2,3,4,5,6,7] : [PRICING.freeModule]);
+const getPurchased = () => {
+  const stored = load("purchased", null);
+  const promoUnlocked = load("promo_unlocked", []);
+  if (stored && stored.length) return promoUnlocked.length ? [...new Set([...stored, ...promoUnlocked])] : stored;
+  if (load("grandfathered", false)) return [1,2,3,4,5,6,7];
+  // grandfather: user ที่เคย enrolled ในช่วง FREE_LAUNCH ให้คงสิทธิ์เรียนฟรีทุกบท
+  if (FREE_LAUNCH || load("enrolled", false)) { save("grandfathered", true); return [1,2,3,4,5,6,7]; }
+  const base = [PRICING.freeModule];
+  return promoUnlocked.length ? [...new Set([...base, ...promoUnlocked])] : base;
+};
 const savePurchased = (ids) => { save("purchased", ids); };
 const isModuleAccessible = (id, purchased) => purchased.includes(id) || (id === 7 && purchased.filter(x => x <= 6).length === 6);
 const calcPrice = (count) => {
@@ -341,6 +388,19 @@ function Landing({ go, openBlog }) {
       </div>
     </div>
 
+    {/* Lead Capture CTA — แสดงเมื่อ promo เปิด หลังจบ free launch และยังไม่เคย claim โค้ด */}
+    {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_code", null) && <div style={{ ...css.wrap, paddingTop: 24 }}>
+      <button onClick={() => go("claim")} style={{ width: "100%", background: `linear-gradient(135deg, ${B.gold} 0%, #E08800 100%)`, color: B.white, border: "none", borderRadius: 16, padding: 18, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 16px rgba(245,158,11,.25)" }}>
+        <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><I name="star" size={26} color={B.white}/></div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, opacity: .9, textTransform: "uppercase", letterSpacing: 1 }}>โปรพิเศษ</div>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>รับโค้ดเรียนฟรี 3 บทหลัก</div>
+          <div style={{ fontSize: 12, opacity: .95, marginTop: 2 }}>แค่กรอกข้อมูล • มูลค่า ฿{PRICING.bundle3}</div>
+        </div>
+        <I name="arrow" size={18} color={B.white}/>
+      </button>
+    </div>}
+
     {/* Pricing Section */}
     {!FREE_LAUNCH && <div style={{ ...css.wrap, paddingTop: 36, paddingBottom: 24 }}>
       <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20, textAlign: "center" }}>เลือกแพ็กเกจ</h3>
@@ -525,6 +585,16 @@ function Store({ go }) {
           </button>
         ); })}
 
+        {/* Promo code redeem — gateway to Claim component (ซ่อนระหว่าง FREE_LAUNCH เพราะทุกบทฟรีอยู่แล้ว) */}
+        {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 12, padding: "12px 14px", background: B.white, border: `2px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 12, textAlign: "left" }}>
+          <div style={{ width: 36, height: 36, borderRadius: 9, background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><I name="star" size={18} color={B.gold}/></div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: B.black }}>มีโค้ดส่วนลด 100%?</div>
+            <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรี — ใช้โค้ดที่นี่</div>
+          </div>
+          <I name="arrow" size={14} color={B.gold}/>
+        </button>}
+
         {/* Price tiers */}
         <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>ยิ่งซื้อเยอะยิ่งถูก!</div>
@@ -553,6 +623,55 @@ function Store({ go }) {
   </div>);
 }
 
+// ==================== LINE ADD PROMPT ====================
+function LineAddPrompt({ go, user, variant = "post-register" }) {
+  const linkCode = getLinkCode();
+  const deepLink = lineLinkDeepLink(linkCode);
+  const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); go("course"); };
+  const onSkip = () => { safeTrack("line_oa_skipped", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
+  const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); };
+  const title = variant === "post-register" ? "เกือบเสร็จแล้ว! เพิ่ม LINE เพื่อรับสิทธิ์เต็ม" : "อย่าลืมเพิ่ม LINE!";
+  return (
+    <div style={css.page}>
+      <div style={css.header(B.red)}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>เพิ่ม LINE @jiacpr</div>
+      </div>
+      <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        <div style={{ ...css.card, textAlign: "center" }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#06C75518", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+            <I name="line" size={36} color="#06C755"/>
+          </div>
+          <h2 style={{ fontSize: 18, fontWeight: 800, margin: "0 0 8px" }}>{title}</h2>
+          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 16px" }}>
+            แอด LINE @jiacpr เพื่อ:<br/>
+            <strong style={{ color: B.black }}>✓</strong> รับใบ Certificate แบบ PDF<br/>
+            <strong style={{ color: B.black }}>✓</strong> แจ้งเตือนทบทวน CPR ทุก 3 เดือน<br/>
+            <strong style={{ color: B.black }}>✓</strong> รับโปรต่ออายุ + คูปองพิเศษ<br/>
+            <strong style={{ color: B.black }}>✓</strong> สอบถามได้ตลอด
+          </p>
+          <div style={{ background: B.white, border: `2px solid ${B.ltGray}`, borderRadius: 14, padding: 12, display: "inline-block", marginBottom: 14 }}>
+            <img src={LINE_QR_URL} alt="LINE QR @jiacpr" width="180" height="180" style={{ display: "block" }} onError={(e) => { e.target.style.display = "none"; }}/>
+            <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6, color: "#06C755" }}>@jiacpr</div>
+          </div>
+          <a href={deepLink} onClick={onClickLink} target="_blank" rel="noopener noreferrer"
+             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+            <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน + ผูกบัญชีอัตโนมัติ
+          </a>
+          <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 12, lineHeight: 1.5 }}>
+            (กดปุ่ม → LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{linkCode}</strong> ขึ้นมา → กดส่ง = ผูกบัญชีให้รับโปรอัตโนมัติ)
+          </div>
+          <button onClick={onAdded} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>
+            <I name="check" size={16} color={B.white}/> เพิ่มเพื่อนแล้ว → เข้าเรียนเลย
+          </button>
+          <button onClick={onSkip} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: "8px 12px", cursor: "pointer", textDecoration: "underline" }}>
+            ข้ามไปก่อน (เพิ่มได้ทีหลัง)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==================== REGISTER (+ PDPA) ====================
 function Register({ go, setUser }) {
   const [f, setF] = useState({ name: "", phone: "", email: "" }); const [err, setErr] = useState({}); const [pdpa, setPdpa] = useState(false);
@@ -562,10 +681,12 @@ function Register({ go, setUser }) {
     const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email };
     setUser(userData); save("user", userData);
     const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
-    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course" });
+    const linkCode = genLinkCode(); save("line_link_code", linkCode);
+    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course", line_link_code: linkCode });
     supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน" });
     save("enrolled", true);
-    if (FREE_LAUNCH) { go("course"); } else { go("course"); } // ลงทะเบียนแล้วเข้าเรียนได้เลย (บทที่ 1 ฟรี)
+    safeTrack("register_complete", { has_email: !!f.email });
+    go("lineprompt");
   };
   const field = (key, label, ph, type = "text") => (<div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>{label}</label><input type={type} placeholder={ph} value={f[key]} onChange={e => { setF({...f, [key]: e.target.value}); setErr({...err, [key]: undefined}); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${err[key] ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>{err[key] && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err[key]}</div>}</div>);
   return (<div style={css.page}><div style={css.header(B.red)}><button onClick={() => go("landing")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>สมัครเรียน</div></div>
@@ -575,6 +696,376 @@ function Register({ go, setUser }) {
       </div>
       <button onClick={submit} style={{ ...css.btn(B.red, B.white, true), marginTop: 20 }}>{FREE_LAUNCH ? "ลงทะเบียน → เข้าเรียนเลย" : "ถัดไป → ชำระเงิน"}</button>
     </div></div>);
+}
+
+// ==================== CLAIM (Lead Capture + Promo Code) ====================
+function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
+  const [step, setStep] = useState(initialStep);
+  const u0 = load("user", null);
+  const [form, setForm] = useState({
+    name: u0?.name || "",
+    phone: u0?.phone || "",
+    email: u0?.email || "",
+    source: "",
+    sourceOther: "",
+    lineId: "",
+  });
+  const [err, setErr] = useState({});
+  const [pdpa, setPdpa] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [claimed, setClaimed] = useState(() => {
+    const code = load("promo_code", null);
+    const exp = load("promo_expires", null);
+    return code && exp ? { code, expires_at: exp, modules: load("promo_unlocked", []).length ? load("promo_unlocked", []) : PROMO_FREE_MODULES, name: u0?.name || "" } : null;
+  });
+  const [redeemCode, setRedeemCode] = useState(initialCode || "");
+  const [redeemErr, setRedeemErr] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(e => ({ ...e, [k]: undefined })); };
+
+  const checkDuplicate = async () => {
+    const email = normalizeEmail(form.email);
+    const phone = normalizePhone(form.phone);
+    if (!email && !phone) return null;
+    const filters = [];
+    if (email) filters.push(`email.eq.${encodeURIComponent(email)}`);
+    if (phone) filters.push(`phone.eq.${encodeURIComponent(phone)}`);
+    const q = filters.length === 1 ? `?${filters[0]}` : `?or=(${filters.join(",")})`;
+    const res = await supaRest("lead_promo_codes", "GET", null, `${q}&select=code,expires_at,redeemed_at,name,unlock_modules&order=created_at.desc&limit=1`);
+    if (!Array.isArray(res) || !res.length) return null;
+    const r = res[0];
+    return { ...r, expired: new Date(r.expires_at) < new Date() };
+  };
+
+  const submitForm = async () => {
+    const e = {};
+    if (!form.name.trim()) e.name = "กรุณากรอกชื่อ-นามสกุล";
+    const phone = normalizePhone(form.phone);
+    if (phone.length < 9) e.phone = "กรุณากรอกเบอร์โทรที่ถูกต้อง";
+    const email = normalizeEmail(form.email);
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "กรุณากรอกอีเมลที่ถูกต้อง (สำหรับส่งโค้ดสำรอง)";
+    if (!form.source) e.source = "กรุณาเลือกช่องทางที่รู้จัก JIA";
+    if (form.source === "other" && !form.sourceOther.trim()) e.sourceOther = "กรุณาระบุช่องทาง";
+    if (!pdpa) e.pdpa = "กรุณายินยอม PDPA ก่อนรับโค้ด";
+    if (Object.keys(e).length) { setErr(e); return; }
+
+    setSubmitting(true);
+    setStep("checking");
+    try {
+      const dup = await checkDuplicate();
+      if (dup && !dup.expired && !dup.redeemed_at) {
+        const data = { code: dup.code, expires_at: dup.expires_at, name: form.name.trim(), modules: dup.unlock_modules || PROMO_FREE_MODULES };
+        setClaimed(data);
+        save("promo_code", dup.code);
+        save("promo_expires", dup.expires_at);
+        save("promo_email", email);
+        supaRest("lead_capture_events", "POST", { code: dup.code, event_type: "duplicate_attempt", metadata: { source: form.source } });
+        setStep("already");
+        setSubmitting(false);
+        return;
+      }
+
+      const code = genLeadCode();
+      const now = new Date();
+      const expires = new Date(now.getTime() + PROMO_EXPIRY_DAYS * 86400000);
+      const custId = "cust_lead_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+
+      supaRest("customers", "POST", {
+        id: custId, name: form.name.trim(), tel: phone, email, source: "lead-promo-" + form.source,
+      });
+
+      const payload = {
+        code, email, phone, name: form.name.trim(),
+        line_id: form.lineId.trim() || null,
+        source: form.source,
+        source_other: form.source === "other" ? form.sourceOther.trim() : null,
+        unlock_modules: PROMO_FREE_MODULES,
+        created_at: now.toISOString(),
+        expires_at: expires.toISOString(),
+        idempotency_key: genIdempotencyKey(email, phone),
+        customer_id: custId,
+        email_sent_status: "pending",
+      };
+      const created = await supaRest("lead_promo_codes", "POST", payload);
+
+      if (!Array.isArray(created) || !created.length) {
+        // race condition — re-fetch
+        const dup2 = await checkDuplicate();
+        if (dup2 && !dup2.expired && !dup2.redeemed_at) {
+          setClaimed({ code: dup2.code, expires_at: dup2.expires_at, name: form.name.trim(), modules: dup2.unlock_modules || PROMO_FREE_MODULES });
+          save("promo_code", dup2.code);
+          save("promo_expires", dup2.expires_at);
+          save("promo_email", email);
+          setStep("already");
+          setSubmitting(false);
+          return;
+        }
+        throw new Error("สร้างโค้ดไม่สำเร็จ");
+      }
+
+      const row = created[0];
+      const data = { code: row.code, expires_at: row.expires_at, name: form.name.trim(), modules: row.unlock_modules || PROMO_FREE_MODULES };
+      setClaimed(data);
+      save("promo_code", row.code);
+      save("promo_expires", row.expires_at);
+      save("promo_email", email);
+
+      supaRest("lead_capture_events", "POST", {
+        code: row.code, event_type: "claimed",
+        metadata: { source: form.source, source_other: form.source === "other" ? form.sourceOther.trim() : null, has_line_id: !!form.lineId.trim(), ua: (navigator.userAgent || "").slice(0, 200) },
+      });
+
+      const userData = { name: form.name.trim(), phone, email };
+      setUser(userData); save("user", userData);
+
+      setStep("reveal");
+    } catch (ex) {
+      console.error(ex);
+      alert("เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง");
+      setStep("form");
+    }
+    setSubmitting(false);
+  };
+
+  const redeem = async () => {
+    setRedeemErr("");
+    const code = (redeemCode || "").trim().toUpperCase();
+    if (!/^LEAD-[A-Z0-9]{6}$/.test(code)) { setRedeemErr("รหัสไม่ถูกต้อง (รูปแบบ: LEAD-XXXXXX)"); return; }
+    setValidating(true);
+    try {
+      const res = await supaRest("lead_promo_codes", "GET", null, `?code=eq.${encodeURIComponent(code)}&select=code,expires_at,redeemed_at,name,unlock_modules&limit=1`);
+      if (!Array.isArray(res) || !res.length) { setRedeemErr("ไม่พบรหัสนี้ในระบบ"); setValidating(false); return; }
+      const row = res[0];
+      if (new Date(row.expires_at) < new Date()) {
+        setRedeemErr(`รหัสนี้หมดอายุแล้ว (หมดอายุ ${new Date(row.expires_at).toLocaleDateString("th-TH")})`);
+        supaRest("lead_capture_events", "POST", { code, event_type: "expired_attempt" });
+        setValidating(false); return;
+      }
+      if (row.redeemed_at) {
+        setRedeemErr(`รหัสนี้ถูกใช้ไปแล้วเมื่อ ${new Date(row.redeemed_at).toLocaleDateString("th-TH")}`);
+        setValidating(false); return;
+      }
+
+      const u = load("user", null);
+      const patchRes = await supaRest("lead_promo_codes", "PATCH",
+        { redeemed_at: new Date().toISOString(), redeemed_phone: u?.phone || null },
+        `?code=eq.${encodeURIComponent(code)}&redeemed_at=is.null`
+      );
+      if (!Array.isArray(patchRes) || !patchRes.length) {
+        setRedeemErr("รหัสถูกใช้พร้อมกันจากเครื่องอื่น กรุณาขอรหัสใหม่");
+        setValidating(false); return;
+      }
+
+      const unlock = row.unlock_modules && row.unlock_modules.length ? row.unlock_modules : PROMO_FREE_MODULES;
+      save("promo_unlocked", unlock);
+      save("promo_code", code);
+      save("promo_redeemed", true);
+      save("enrolled", true);
+
+      supaRest("lead_capture_events", "POST", { code, event_type: "redeemed", metadata: { modules: unlock } });
+
+      setClaimed({ code, modules: unlock, expires_at: row.expires_at, name: u?.name || row.name });
+      setStep("redeemed");
+    } catch (ex) {
+      console.error(ex);
+      setRedeemErr("เกิดข้อผิดพลาด: กรุณาลองใหม่");
+    }
+    setValidating(false);
+  };
+
+  const copyCode = (code) => {
+    navigator.clipboard?.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
+
+  const modulesText = (ids) => ids.map(id => COURSE.modules.find(m => m.id === id)?.short).filter(Boolean).join(" • ");
+
+  const inp = (key, label, ph, type = "text", required = true) => (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>{label}{required ? " *" : ""}</label>
+      <input type={type} placeholder={ph} value={form[key]} onChange={e => F(key, e.target.value)}
+        style={{ width: "100%", padding: "12px 14px", border: `2px solid ${err[key] ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+      {err[key] && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err[key]}</div>}
+    </div>
+  );
+
+  // ===== Step: form =====
+  if (step === "form") return (
+    <div style={css.page}>
+      <div style={css.header(B.red)}><button onClick={() => go("landing")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>รับโค้ดเรียนฟรี</div></div>
+      <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+        <div style={{ background: `linear-gradient(135deg, ${B.gold} 0%, #E08800 100%)`, color: B.white, borderRadius: 16, padding: 18, marginBottom: 16, textAlign: "center" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, opacity: .9, letterSpacing: 1, textTransform: "uppercase" }}>ส่วนลด 100%</div>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>เรียนฟรี 3 บทหลัก</div>
+          <div style={{ fontSize: 13, marginTop: 6, opacity: .95 }}>{modulesText(PROMO_FREE_MODULES)}</div>
+          <div style={{ fontSize: 11, marginTop: 8, opacity: .85 }}>มูลค่า ฿{PRICING.bundle3} — รับฟรีเมื่อกรอกข้อมูล</div>
+        </div>
+
+        <div style={css.card}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>กรอกข้อมูลเพื่อรับโค้ด</h3>
+          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 18 }}>โค้ดจะแสดงทันที + ส่งสำเนาทางอีเมล</p>
+
+          {inp("name", "ชื่อ-นามสกุล", "เช่น สมชาย ใจดี")}
+          {inp("phone", "เบอร์โทรศัพท์", "เช่น 081-234-5678", "tel")}
+          {inp("email", "อีเมล", "เช่น name@email.com", "email")}
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>รู้จัก JIA จากช่องทางไหน? *</label>
+            <select value={form.source} onChange={e => F("source", e.target.value)}
+              style={{ width: "100%", padding: "12px 14px", border: `2px solid ${err.source ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", background: B.white }}>
+              <option value="">— เลือก —</option>
+              {LEAD_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+            {err.source && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err.source}</div>}
+          </div>
+
+          {form.source === "other" && inp("sourceOther", "โปรดระบุช่องทาง", "เช่น Twitter, Pantip")}
+
+          {inp("lineId", "LINE ID (ไม่บังคับ)", "เช่น jiacpr", "text", false)}
+
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+              <input type="checkbox" checked={pdpa} onChange={e => { setPdpa(e.target.checked); setErr({ ...err, pdpa: undefined }); }} style={{ marginTop: 3, width: 18, height: 18 }}/>
+              <span style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.5 }}>ข้าพเจ้ายินยอมให้ JIA TRAINER CENTER เก็บข้อมูล (ชื่อ, เบอร์, อีเมล, LINE ID) เพื่อจัดการหลักสูตรออนไลน์, ออกใบประกาศนียบัตร และแจ้งข้อมูลหลักสูตร/โปรโมชั่นในอนาคต ข้อมูลจะไม่เปิดเผยต่อบุคคลภายนอก</span>
+            </label>
+            {err.pdpa && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err.pdpa}</div>}
+          </div>
+        </div>
+
+        <button onClick={submitForm} disabled={submitting} style={{ ...css.btn(B.red, B.white, true), marginTop: 18, opacity: submitting ? .6 : 1 }}>รับโค้ดเลย →</button>
+
+        <button onClick={() => setStep("redeem")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 10, border: `1px solid ${B.ltGray}`, fontSize: 13 }}>มีโค้ดอยู่แล้ว? กดใช้รหัส →</button>
+      </div>
+    </div>
+  );
+
+  // ===== Step: checking =====
+  if (step === "checking") return (
+    <div style={css.page}>
+      <div style={{ ...css.wrap, paddingTop: 80, textAlign: "center" }}>
+        <div style={{ width: 60, height: 60, border: `4px solid ${B.ltGray}`, borderTopColor: B.red, borderRadius: "50%", margin: "0 auto 20px", animation: "spin 1s linear infinite" }}/>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>กำลังสร้างโค้ดของคุณ...</div>
+        <div style={{ fontSize: 13, color: B.dkGray, marginTop: 6 }}>กรุณารอสักครู่</div>
+      </div>
+    </div>
+  );
+
+  // ===== Step: reveal / already =====
+  if ((step === "reveal" || step === "already") && claimed) {
+    const days = daysUntil(claimed.expires_at);
+    const isAlready = step === "already";
+    return (
+      <div style={css.page}>
+        <div style={css.header(B.red)}><div style={{ fontSize: 16, fontWeight: 700, flex: 1, textAlign: "center" }}>{isAlready ? "พบโค้ดในระบบแล้ว" : "ได้รับโค้ดสำเร็จ!"}</div></div>
+        <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+          {!isAlready && (
+            <div style={{ textAlign: "center", marginBottom: 18 }}>
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" }}><I name="check" size={32} color={B.green}/></div>
+              <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 4px" }}>ยินดีด้วย {claimed.name}!</h2>
+              <p style={{ fontSize: 13, color: B.dkGray, margin: 0 }}>โค้ดของคุณพร้อมใช้แล้ว</p>
+            </div>
+          )}
+          {isAlready && (
+            <div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, color: B.dkGray, textAlign: "center" }}>
+              คุณเคยรับโค้ดด้วยอีเมล/เบอร์นี้แล้ว นี่คือโค้ดเดิมของคุณ
+            </div>
+          )}
+
+          <div style={{ background: B.white, borderRadius: 16, padding: 20, boxShadow: "0 4px 16px rgba(0,0,0,.08)", border: `2px dashed ${B.red}40`, textAlign: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 6 }}>รหัสส่วนลด 100%</div>
+            <div style={{ fontSize: 30, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 }}>{claimed.code}</div>
+            <button onClick={() => copyCode(claimed.code)} style={{ ...css.btn(copied ? B.green : B.black, B.white), padding: "10px 24px", fontSize: 13 }}>{copied ? "✓ คัดลอกแล้ว" : "คัดลอกโค้ด"}</button>
+            <div style={{ marginTop: 14, padding: "10px 14px", background: `${B.gold}12`, borderRadius: 10, fontSize: 12, color: B.dkGray }}>
+              ⏳ หมดอายุใน <strong style={{ color: B.gold }}>{days} วัน</strong> ({new Date(claimed.expires_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" })})
+            </div>
+          </div>
+
+          <div style={{ ...css.card, marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>ปลดล็อกเมื่อใช้โค้ด:</div>
+            {(claimed.modules || PROMO_FREE_MODULES).map(id => {
+              const m = COURSE.modules.find(x => x.id === id);
+              if (!m) return null;
+              return (
+                <div key={id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${B.gray}` }}>
+                  <I name="check" size={16} color={B.green}/>
+                  <div style={{ fontSize: 13 }}><strong>{m.short}</strong><div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>{m.desc}</div></div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={() => { setRedeemCode(claimed.code); setStep("redeem"); }} style={{ ...css.btn(B.red, B.white, true), marginBottom: 12, fontSize: 15 }}>ใช้โค้ดและเข้าเรียนเลย →</button>
+
+          <div style={{ ...css.card, textAlign: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>เพิ่ม LINE @jiacpr</div>
+            <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12 }}>รับสิทธิพิเศษและสอบถามได้ทันที</div>
+            <img src={LINE_QR_URL} alt="LINE QR @jiacpr" style={{ width: 180, height: 180, borderRadius: 12, border: `1px solid ${B.ltGray}` }}/>
+            <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 12, background: "#06C755", borderRadius: 12, padding: "12px 20px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={20} color={B.white}/> เปิด LINE เพิ่มเพื่อน</a>
+          </div>
+
+          <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: 12, fontSize: 12, color: B.dkGray, textAlign: "center", marginBottom: 12 }}>
+            📧 เราจะส่งสำเนาโค้ดให้ทาง <strong>{load("promo_email", "อีเมล")}</strong><br/>หากไม่ได้รับ ตรวจในกล่อง Spam หรือใช้โค้ดด้านบนได้เลย
+          </div>
+
+          <button onClick={() => go("landing")} style={{ ...css.btn(B.white, B.dkGray, true), border: `1px solid ${B.ltGray}`, fontSize: 13 }}>← กลับหน้าแรก</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== Step: redeem =====
+  if (step === "redeem") return (
+    <div style={css.page}>
+      <div style={css.header(B.red)}><button onClick={() => setStep(claimed ? "reveal" : "form")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ใช้รหัสส่วนลด</div></div>
+      <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        <div style={css.card}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>กรอกรหัสส่วนลด</h3>
+          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX (6 ตัวอักษร)</p>
+          <input type="text" value={redeemCode} onChange={e => { setRedeemCode(e.target.value.toUpperCase()); setRedeemErr(""); }} placeholder="LEAD-XXXXXX" autoCapitalize="characters"
+            style={{ width: "100%", padding: "14px 16px", border: `2px solid ${redeemErr ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 18, outline: "none", boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 2, textAlign: "center", textTransform: "uppercase" }}/>
+          {redeemErr && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{redeemErr}</div>}
+        </div>
+        <button onClick={redeem} disabled={validating || !redeemCode} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: (validating || !redeemCode) ? .5 : 1 }}>{validating ? "กำลังตรวจสอบ..." : "ปลดล็อกบทเรียน →"}</button>
+        {!claimed && <button onClick={() => setStep("form")} style={{ ...css.btn(B.white, B.dkGray, true), border: `1px solid ${B.ltGray}`, marginTop: 10, fontSize: 13 }}>ยังไม่มีโค้ด? รับฟรีที่นี่ →</button>}
+      </div>
+    </div>
+  );
+
+  // ===== Step: redeemed =====
+  if (step === "redeemed" && claimed) return (
+    <div style={css.page}>
+      <div style={{ ...css.wrap, paddingTop: 60, textAlign: "center", paddingBottom: 40 }}>
+        <div style={{ width: 80, height: 80, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}><I name="check" size={40} color={B.green}/></div>
+        <h2 style={{ fontSize: 24, fontWeight: 800, margin: "0 0 8px" }}>ปลดล็อกสำเร็จ!</h2>
+        <p style={{ fontSize: 14, color: B.dkGray, marginBottom: 24 }}>โค้ด {claimed.code} ใช้แล้ว</p>
+
+        <div style={{ ...css.card, textAlign: "left", marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>บทเรียนที่ปลดล็อก ({(claimed.modules || PROMO_FREE_MODULES).length} บท):</div>
+          {(claimed.modules || PROMO_FREE_MODULES).map(id => {
+            const m = COURSE.modules.find(x => x.id === id);
+            return m ? (
+              <div key={id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${B.gray}` }}>
+                <I name="check" size={16} color={B.green}/>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{m.short}</div>
+              </div>
+            ) : null;
+          })}
+        </div>
+
+        <button onClick={() => go("course")} style={{ ...css.btn(B.red, B.white, true), fontSize: 16, padding: "16px 32px" }}>เข้าเรียนเลย →</button>
+      </div>
+    </div>
+  );
+
+  // fallback
+  return (
+    <div style={css.page}><div style={{ ...css.wrap, paddingTop: 60, textAlign: "center" }}>
+      <p style={{ color: B.dkGray }}>เกิดข้อผิดพลาด</p>
+      <button onClick={() => { setStep("form"); setClaimed(null); }} style={{ ...css.btn(B.red, B.white), marginTop: 16 }}>เริ่มใหม่</button>
+    </div></div>
+  );
 }
 
 // ==================== PAYMENT ====================
@@ -723,7 +1214,30 @@ function Course({ go, progress, setProgress, user, openBlog }) {
   const pct = Math.round((progress.done.length / COURSE.modules.length) * 100);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.black} 0%, #2a2a2a 100%)`, color: B.white, padding: "24px 24px 30px" }}><div style={{ maxWidth: 480, margin: "0 auto" }}><div style={{ fontSize: 11, letterSpacing: 2, opacity: .5, textTransform: "uppercase" }}>JIA TRAINER CENTER</div><h2 style={{ fontSize: 20, fontWeight: 700, margin: "4px 0 14px" }}>CPR & AED ออนไลน์</h2><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)" }}><div style={{ height: "100%", borderRadius: 3, background: B.green, width: `${pct}%`, transition: "width .5s" }}/></div><span style={{ fontSize: 12, fontWeight: 600 }}>{pct}%</span></div><div style={{ fontSize: 11, opacity: .5, marginTop: 4 }}>{progress.done.length}/{COURSE.modules.length} บทเรียน</div></div></div>
+    {!load("line_added", false) && (() => {
+      const lc = getLinkCode();
+      const dl = lineLinkDeepLink(lc);
+      return (
+        <div style={{ ...css.wrap, paddingTop: 16 }}>
+          <a href={dl} target="_blank" rel="noopener noreferrer"
+             onClick={() => safeTrack("line_oa_clicked", { variant: "course-banner", has_link_code: true })}
+             style={{ display: "flex", alignItems: "center", gap: 12, background: "#06C75512", border: "1px solid #06C75540", borderRadius: 12, padding: "12px 14px", textDecoration: "none", color: B.black }}>
+            <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: "#06C755", display: "flex", alignItems: "center", justifyContent: "center" }}><I name="line" size={22} color={B.white}/></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>เพิ่ม LINE @jiacpr + ผูกบัญชี</div>
+              <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>รับเตือนทบทวน + โปรต่ออายุ + คูปองพิเศษ อัตโนมัติ</div>
+            </div>
+            <button onClick={(e) => { e.preventDefault(); markLineAdded(user); window.open(dl, "_blank"); }} style={{ background: "#06C755", color: B.white, border: "none", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>เพิ่ม →</button>
+          </a>
+        </div>
+      );
+    })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>{COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy) ? "pointer" : "not-allowed", opacity: (ok || needBuy) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+      {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
+        <I name="star" size={20} color={B.gold}/>
+        <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
+        <I name="arrow" size={14} color={B.gold}/>
+      </button>}
       {!FREE_LAUNCH && purchased.filter(x => x <= 6).length < 6 && <button onClick={() => go("store")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 8, fontSize: 14 }}>ซื้อเพิ่ม / Full Course ฿{PRICING.full} →</button>}
       {pct === 100 && <button onClick={() => go("certificate")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 16 }}>ดูใบประกาศนียบัตร & คูปอง →</button>}
       {/* Mini cert per module */}
@@ -757,11 +1271,29 @@ function Certificate({ user, go }) {
       <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${B.ltGray}`, fontSize: 10, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
     </div></div>
     <button onClick={saveCert} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><I name="save" size={18} color={B.white}/> บันทึกใบประกาศนียบัตร</button>
+    {!load("line_added", false) && (() => {
+      const lc = getLinkCode();
+      return (
+        <div style={{ background: "#06C75510", border: "2px solid #06C75540", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
+          <I name="line" size={32} color="#06C755"/>
+          <div style={{ fontSize: 15, fontWeight: 700, color: B.black, margin: "8px 0 4px" }}>อย่าลืม! เพิ่ม LINE @jiacpr</div>
+          <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12 }}>รับเตือนทบทวนทุก 3 เดือน + โปรต่ออายุ Cert</div>
+          <a href={lineLinkDeepLink(lc)} target="_blank" rel="noopener noreferrer"
+             onClick={() => { safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true }); markLineAdded(user); }}
+             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}>
+            <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน + ผูกบัญชีอัตโนมัติ
+          </a>
+          <div style={{ fontSize: 10, color: B.dkGray, marginTop: 8, lineHeight: 1.5 }}>
+            (LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> → กดส่งเพื่อผูกบัญชี)
+          </div>
+        </div>
+      );
+    })()}
     <div style={{ background: `${B.red}08`, borderRadius: 16, padding: 20, marginTop: 16, textAlign: "center" }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: B.red, marginBottom: 4 }}>คูปองส่วนลด ฿100 สำหรับคอร์ส On-site!</div>
       <div style={{ fontSize: 22, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 }}>{coupon}</div>
       <button onClick={() => go("booking")} style={{ ...css.btn(B.red, B.white, true), display: "block", width: "100%", textAlign: "center", cursor: "pointer" }}>จองคอร์ส On-site ใช้คูปองส่วนลด →</button>
-      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
+      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => safeTrack("line_oa_clicked", { variant: "certificate-inquire" })} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
     </div>
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ jiacpr.com/online"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
@@ -1027,6 +1559,7 @@ const TABS = [
   { key: "bookings",        label: "การจอง On-site", cols: ["name","tel","course_name","start_date","time_slot","total_people","final_price","payment_status","created_at"] },
   { key: "sales_tracking",  label: "ติดตามขาย",      cols: ["name","phone","score","coupon_code","follow_status","completed_date"] },
   { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
+  { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","created_at","expires_at","redeemed_at","email_sent_status"] },
 ];
 
 // ==================== JIAROO CRM ====================
@@ -1886,7 +2419,7 @@ function Admin() {
     if (t?.custom) { setRows([]); return; }
     setLoading(true);
     const orderCol = key === "online_students" ? "registered_at"
-      : key === "bookings" || key === "customers" ? "created_at"
+      : key === "bookings" || key === "customers" || key === "lead_promo_codes" ? "created_at"
       : key === "sales_tracking" ? "completed_date"
       : "id";
     const data = await supaRest(key, "GET", null, `?order=${orderCol}.desc.nullslast&limit=1000`);
@@ -1923,7 +2456,7 @@ function Admin() {
   const filtered = rows.filter(r => {
     if (q) {
       const s = q.toLowerCase();
-      const hay = [r.name, r.phone, r.tel, r.email, r.coupon_code].filter(Boolean).join(" ").toLowerCase();
+      const hay = [r.name, r.phone, r.tel, r.email, r.coupon_code, r.code, r.line_id, r.source].filter(Boolean).join(" ").toLowerCase();
       if (!hay.includes(s)) return false;
     }
     if (statusFilter !== "all") {
@@ -2071,7 +2604,12 @@ function Admin() {
 // ==================== APP ====================
 export default function App() {
   const isAdmin = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
-  const [page, setPage] = useState(() => load("enrolled", false) ? "course" : "landing");
+  const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
+  const [page, setPage] = useState(() => {
+    if (promoParam) return "claim";
+    return load("enrolled", false) ? "course" : "landing";
+  });
+  const [initialClaimCode] = useState(promoParam || "");
   const [user, setUser] = useState(() => load("user", null));
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const [blogSlug, setBlogSlug] = useState(null);
@@ -2079,7 +2617,7 @@ export default function App() {
   const openBlog = useCallback(slug => { setBlogSlug(slug); setPage("blog-detail"); window.scrollTo(0, 0); }, []);
   const backFromBlog = useCallback(() => { setPage(load("enrolled", false) ? "course" : "landing"); window.scrollTo(0, 0); }, []);
 
-  // Handle Stripe success redirect
+  // Handle Stripe success redirect + clean ?promo from URL after consuming
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("stripe") === "success") {
@@ -2093,6 +2631,9 @@ export default function App() {
       }
       window.history.replaceState({}, "", window.location.pathname);
       setPage("course");
+    }
+    if (params.get("promo")) {
+      window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
 
@@ -2109,6 +2650,7 @@ export default function App() {
         switch (page) {
           case "landing": return <Landing go={go} openBlog={openBlog}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
+          case "lineprompt": return <LineAddPrompt go={go} user={user} variant="post-register"/>;
           case "payment": return <Payment go={go} user={user}/>;
           case "store": return <Store go={go}/>;
           case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog}/>;
@@ -2117,6 +2659,7 @@ export default function App() {
           case "booking": return <Booking go={go}/>;
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
+          case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : "form"} initialCode={initialClaimCode}/>;
           default: return <Landing go={go} openBlog={openBlog}/>;
         }
       })()}
