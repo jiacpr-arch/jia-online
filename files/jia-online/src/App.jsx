@@ -160,8 +160,148 @@ function MorrooAdBanner() {
   );
 }
 
+// ==================== NEWS / BLOG ====================
+const NEWS_SITE_SLUG = "jiacpr";
+
+function useNewsList(limit = 6) {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cols = "id,url_slug,title,meta_description,cover_image_url,category,published_at";
+      const data = await supaRest("blog_posts", "GET", null, `?site_slug=eq.${NEWS_SITE_SLUG}&select=${cols}&order=published_at.desc.nullslast&limit=${limit}`);
+      if (!cancelled) { setPosts(Array.isArray(data) ? data : []); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [limit]);
+  return { posts, loading };
+}
+
+const fmtBlogDate = (d, long = false) => {
+  if (!d) return "";
+  try { return new Date(d).toLocaleDateString("th-TH", long ? { day: "numeric", month: "long", year: "numeric" } : { day: "numeric", month: "short" }); }
+  catch (e) { return ""; }
+};
+
+function NewsSection({ openBlog, goAll, title = "ข่าวสาร & บทความ", subtitle = "" }) {
+  const { posts, loading } = useNewsList(8);
+  if (loading || posts.length === 0) return null;
+  return (
+    <div style={{ ...css.wrap, paddingTop: 8, paddingBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{title}</h3>
+        <button onClick={goAll} style={{ background: "none", border: "none", color: B.red, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 4 }}>ดูทั้งหมด →</button>
+      </div>
+      {subtitle && <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12 }}>{subtitle}</div>}
+      <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8, scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch", marginRight: -20, paddingRight: 20 }}>
+        {posts.map(p => (
+          <button key={p.id} onClick={() => openBlog(p.url_slug)} style={{ flex: "0 0 230px", scrollSnapAlign: "start", background: B.white, border: "none", borderRadius: 14, overflow: "hidden", textAlign: "left", cursor: "pointer", padding: 0, boxShadow: "0 2px 8px rgba(0,0,0,.06)" }}>
+            {p.cover_image_url
+              ? <div style={{ width: "100%", aspectRatio: "16/10", background: `${B.gray} url(${p.cover_image_url}) center/cover no-repeat` }}/>
+              : <div style={{ width: "100%", aspectRatio: "16/10", background: `linear-gradient(135deg, ${B.red}, ${B.dkRed})`, display: "flex", alignItems: "center", justifyContent: "center", color: B.white, fontSize: 13, fontWeight: 700, padding: 12, textAlign: "center" }}>{p.category || "บทความ"}</div>}
+            <div style={{ padding: 12 }}>
+              {p.category && <div style={{ fontSize: 10, color: B.red, fontWeight: 700, marginBottom: 4, letterSpacing: .5 }}>{p.category}</div>}
+              <div style={{ fontSize: 13, fontWeight: 700, color: B.black, lineHeight: 1.4, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{p.title}</div>
+              {p.published_at && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6 }}>{fmtBlogDate(p.published_at)}</div>}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BlogList({ goBack, openBlog }) {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cols = "id,url_slug,title,meta_description,cover_image_url,category,published_at";
+      const data = await supaRest("blog_posts", "GET", null, `?site_slug=eq.${NEWS_SITE_SLUG}&select=${cols}&order=published_at.desc.nullslast&limit=60`);
+      if (!cancelled) { setPosts(Array.isArray(data) ? data : []); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return (
+    <div style={css.page}>
+      <div style={css.header(B.red)}>
+        <button onClick={goBack} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>ข่าวสาร & บทความ</div>
+      </div>
+      <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+        {loading ? <div style={{ textAlign: "center", color: B.dkGray, padding: 40 }}>กำลังโหลด...</div>
+          : posts.length === 0 ? <div style={{ textAlign: "center", color: B.dkGray, padding: 40 }}>ยังไม่มีบทความ</div>
+          : posts.map(p => (
+            <button key={p.id} onClick={() => openBlog(p.url_slug)} style={{ display: "flex", gap: 12, width: "100%", padding: 12, marginBottom: 10, background: B.white, border: "none", borderRadius: 14, cursor: "pointer", textAlign: "left", alignItems: "flex-start" }}>
+              {p.cover_image_url
+                ? <div style={{ width: 96, height: 72, flexShrink: 0, borderRadius: 10, background: `${B.gray} url(${p.cover_image_url}) center/cover no-repeat` }}/>
+                : <div style={{ width: 96, height: 72, flexShrink: 0, borderRadius: 10, background: `linear-gradient(135deg, ${B.red}, ${B.dkRed})` }}/>}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {p.category && <div style={{ fontSize: 10, color: B.red, fontWeight: 700, marginBottom: 2 }}>{p.category}</div>}
+                <div style={{ fontSize: 13, fontWeight: 700, color: B.black, lineHeight: 1.4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{p.title}</div>
+                {p.published_at && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 4 }}>{fmtBlogDate(p.published_at, true)}</div>}
+              </div>
+            </button>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function BlogDetail({ slug, goBack, openBlog }) {
+  const [post, setPost] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [related, setRelated] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const data = await supaRest("blog_posts", "GET", null, `?url_slug=eq.${encodeURIComponent(slug)}&select=*&limit=1`);
+      const p = Array.isArray(data) && data[0] ? data[0] : null;
+      if (!cancelled) { setPost(p); setLoading(false); }
+      if (p) {
+        const cols = "id,url_slug,title,cover_image_url,category,published_at";
+        const rel = await supaRest("blog_posts", "GET", null, `?site_slug=eq.${NEWS_SITE_SLUG}&url_slug=neq.${encodeURIComponent(slug)}&select=${cols}&order=published_at.desc.nullslast&limit=4`);
+        if (!cancelled) setRelated(Array.isArray(rel) ? rel : []);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
+  if (loading) return (<div style={css.page}><div style={css.header(B.red)}><button onClick={goBack} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>กำลังโหลด...</div></div></div>);
+  if (!post) return (<div style={css.page}><div style={css.header(B.red)}><button onClick={goBack} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ไม่พบบทความ</div></div><div style={{ ...css.wrap, paddingTop: 40, textAlign: "center", color: B.dkGray }}>บทความนี้อาจถูกลบหรือยังไม่เผยแพร่</div></div>);
+  return (
+    <div style={css.page}>
+      <div style={css.header(B.red)}>
+        <button onClick={goBack} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button>
+        <div style={{ fontSize: 14, fontWeight: 700, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.title}</div>
+      </div>
+      <div style={{ ...css.wrap, paddingTop: 16, paddingBottom: 60 }}>
+        {post.cover_image_url && <img src={post.cover_image_url} alt={post.title} style={{ width: "100%", borderRadius: 14, marginBottom: 14, display: "block" }}/>}
+        {post.category && <div style={{ fontSize: 11, color: B.red, fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>{post.category.toUpperCase()}</div>}
+        <h1 style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.3, margin: "0 0 10px" }}>{post.title}</h1>
+        {post.published_at && <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 18 }}>{fmtBlogDate(post.published_at, true)}</div>}
+        {post.meta_description && <div style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6, marginBottom: 16, padding: "12px 14px", background: `${B.gold}10`, borderLeft: `3px solid ${B.gold}`, borderRadius: 6 }}>{post.meta_description}</div>}
+        {post.content_html && <div className="jia-blog-content" style={{ fontSize: 15, lineHeight: 1.8, color: B.black, wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: post.content_html }}/>}
+        {related.length > 0 && <>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 32, marginBottom: 12 }}>บทความอื่นที่น่าสนใจ</h3>
+          {related.map(p => (
+            <button key={p.id} onClick={() => openBlog(p.url_slug)} style={{ display: "flex", gap: 12, width: "100%", padding: 10, marginBottom: 8, background: B.white, border: "none", borderRadius: 12, cursor: "pointer", textAlign: "left", alignItems: "center" }}>
+              {p.cover_image_url
+                ? <div style={{ width: 64, height: 64, flexShrink: 0, borderRadius: 10, background: `${B.gray} url(${p.cover_image_url}) center/cover no-repeat` }}/>
+                : <div style={{ width: 64, height: 64, flexShrink: 0, borderRadius: 10, background: `linear-gradient(135deg, ${B.red}, ${B.dkRed})` }}/>}
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, lineHeight: 1.4, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{p.title}</div>
+            </button>
+          ))}
+        </>}
+      </div>
+    </div>
+  );
+}
+
 // ==================== LANDING ====================
-function Landing({ go }) {
+function Landing({ go, openBlog }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
   const enrolled = load("enrolled", false);
   return (<div style={css.page}>
@@ -205,6 +345,7 @@ function Landing({ go }) {
       {COURSE.modules.slice(0, 6).map((m, i) => (<div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 12, background: B.white, borderRadius: 14, padding: "14px 16px" }}><div style={{ minWidth: 38, height: 38, borderRadius: 10, background: `${B.red}12`, display: "flex", alignItems: "center", justifyContent: "center", color: B.red, fontWeight: 800, fontSize: 15 }}>{String(i + 1).padStart(2, "0")}</div><div><div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{m.short} {i === 0 && !FREE_LAUNCH ? <span style={{ background: B.green, color: B.white, fontSize: 10, padding: "2px 6px", borderRadius: 4, marginLeft: 6 }}>ฟรี</span> : null}</div><div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.5 }}>{m.desc}</div></div></div>))}
       <div style={{ background: `${B.gold}18`, borderRadius: 14, padding: 16, textAlign: "center", marginTop: 4 }}><I name="cert" size={26} color={B.gold}/><div style={{ fontWeight: 600, fontSize: 14, marginTop: 6 }}>+ แบบทดสอบสุดท้าย & ใบประกาศนียบัตร</div></div>
     </div>
+    <NewsSection openBlog={openBlog} goAll={() => go("blog")} title="ข่าวสาร & บทความ" subtitle="อัปเดตใหม่ทุกวัน — เคสจริง บทความ และทิปส์ช่วยชีวิต"/>
     <div style={{ ...css.wrap, paddingBottom: 24 }}>
       <div style={{ background: B.white, borderRadius: 16, padding: 24, border: `1px solid ${B.red}12` }}>
         <div style={{ textAlign: "center", marginBottom: 16 }}><h3 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>ทำไมต้องเรียน CPR?</h3><p style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>ข้อมูลจากงานวิจัย</p></div>
@@ -498,7 +639,7 @@ function Payment({ go, user }) {
 }
 
 // ==================== COURSE ====================
-function Course({ go, progress, setProgress, user }) {
+function Course({ go, progress, setProgress, user, openBlog }) {
   const [active, setActive] = useState(null); const [quiz, setQuiz] = useState(false); const [ans, setAns] = useState({}); const [result, setResult] = useState(null); const [watched, setWatched] = useState(false); const [reviewMode, setReviewMode] = useState(false); const [timer, setTimer] = useState(0); const [canWatch, setCanWatch] = useState(false); const [mustRewatch, setMustRewatch] = useState(false);
   const timerRef = useRef(null);
   const purchased = getPurchased();
@@ -562,7 +703,8 @@ function Course({ go, progress, setProgress, user }) {
   const pct = Math.round((progress.done.length / COURSE.modules.length) * 100);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.black} 0%, #2a2a2a 100%)`, color: B.white, padding: "24px 24px 30px" }}><div style={{ maxWidth: 480, margin: "0 auto" }}><div style={{ fontSize: 11, letterSpacing: 2, opacity: .5, textTransform: "uppercase" }}>JIA TRAINER CENTER</div><h2 style={{ fontSize: 20, fontWeight: 700, margin: "4px 0 14px" }}>CPR & AED ออนไลน์</h2><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)" }}><div style={{ height: "100%", borderRadius: 3, background: B.green, width: `${pct}%`, transition: "width .5s" }}/></div><span style={{ fontSize: 12, fontWeight: 600 }}>{pct}%</span></div><div style={{ fontSize: 11, opacity: .5, marginTop: 4 }}>{progress.done.length}/{COURSE.modules.length} บทเรียน</div></div></div>
-    <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>{COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy) ? "pointer" : "not-allowed", opacity: (ok || needBuy) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+    <NewsSection openBlog={openBlog} goAll={() => go("blog")} title="ทิปส์ & ทบทวน" subtitle="ทักษะ CPR เสื่อมใน 3-6 เดือน — อ่านบทความใหม่ทุกวันเพื่อทบทวน"/>
+    <div style={{ ...css.wrap, paddingTop: 8, paddingBottom: 40 }}>{COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy) ? "pointer" : "not-allowed", opacity: (ok || needBuy) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {!FREE_LAUNCH && purchased.filter(x => x <= 6).length < 6 && <button onClick={() => go("store")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 8, fontSize: 14 }}>ซื้อเพิ่ม / Full Course ฿{PRICING.full} →</button>}
       {pct === 100 && <button onClick={() => go("certificate")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 16 }}>ดูใบประกาศนียบัตร & คูปอง →</button>}
       {/* Mini cert per module */}
@@ -1912,7 +2054,10 @@ export default function App() {
   const [page, setPage] = useState(() => load("enrolled", false) ? "course" : "landing");
   const [user, setUser] = useState(() => load("user", null));
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
+  const [blogSlug, setBlogSlug] = useState(null);
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
+  const openBlog = useCallback(slug => { setBlogSlug(slug); setPage("blog-detail"); window.scrollTo(0, 0); }, []);
+  const backFromBlog = useCallback(() => { setPage(load("enrolled", false) ? "course" : "landing"); window.scrollTo(0, 0); }, []);
 
   // Handle Stripe success redirect
   useEffect(() => {
@@ -1942,15 +2087,17 @@ export default function App() {
     <>
       {(() => {
         switch (page) {
-          case "landing": return <Landing go={go}/>;
+          case "landing": return <Landing go={go} openBlog={openBlog}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
           case "payment": return <Payment go={go} user={user}/>;
           case "store": return <Store go={go}/>;
-          case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user}/>;
+          case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog}/>;
           case "certificate": return <Certificate user={user} go={go}/>;
           case "minicert": return <MiniCert user={user} go={go}/>;
           case "booking": return <Booking go={go}/>;
-          default: return <Landing go={go}/>;
+          case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
+          case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
+          default: return <Landing go={go} openBlog={openBlog}/>;
         }
       })()}
       <Analytics />
