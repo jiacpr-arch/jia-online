@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
 
 // ========== CONFIG ==========
-const FREE_LAUNCH = false; // ปิด ก.ค. 2569 — เปิดระบบโค้ด/คิดเงิน. user เก่าที่ enrolled ในช่วง free จะ auto-grandfather (ดู getPurchased)
+const FREE_LAUNCH = true; // ยังเปิดฟรีจนถึง ก.ค. 2569 — flip เป็น false เมื่อพร้อม cutover (จะเปิด Claim CTA + lock บทที่ 4-6 อัตโนมัติ)
 const LAUNCH_END = "31 กรกฎาคม 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
