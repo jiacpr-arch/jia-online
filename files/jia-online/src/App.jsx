@@ -1340,7 +1340,7 @@ function Certificate({ user, go }) {
       <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 600, lineHeight: 1.5, color: B.black, borderBottom: `2px solid ${B.gold}40`, paddingBottom: 10, display: "inline-block", minWidth: 180, marginBottom: 12 }}>{user?.name || "ชื่อผู้เรียน"}</div>
       <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.7 }}>ผ่านหลักสูตร<br/><strong style={{ fontSize: 13 }}>การช่วยชีวิตขั้นพื้นฐาน CPR & AED ออนไลน์</strong><br/>มาตรฐาน 2025</div>
       <div style={{ marginTop: 14, fontSize: 12, color: B.dkGray }}>วันที่ {ds}</div>
-      <div style={{ marginTop: 14, padding: "12px 14px", background: `${B.gold}10`, borderRadius: 10, fontSize: 11.5, color: B.dkGray, lineHeight: 1.8 }}>💡 แนะนำให้ไปเรียนภาคปฏิบัติเพิ่มเติม<br/>ที่ศูนย์การเรียนรู้ใกล้บ้าน<br/>เพื่อการเรียนรู้ที่สมบูรณ์</div>
+      <div style={{ marginTop: 14, padding: "12px 14px", background: `${B.gold}10`, borderRadius: 10, fontSize: 12, color: B.dkGray, lineHeight: 1.8 }}>💡 ฝึกภาคปฏิบัติกับผู้สอนตัวจริง<br/>เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
       <div style={{ marginTop: 16, background: `${B.red}08`, borderRadius: 10, padding: "10px 16px", border: `1px dashed ${B.red}40` }}><div style={{ fontSize: 10, color: B.dkGray, marginBottom: 4 }}>รหัสคูปองส่วนลด ฿100</div><div style={{ fontSize: 20, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace" }}>{coupon}</div><div style={{ fontSize: 10, color: B.dkGray, marginTop: 4 }}>แจ้งรหัสนี้เมื่อมาเรียน on-site</div></div>
       <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${B.ltGray}`, fontSize: 10, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
     </div></div>
