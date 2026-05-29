@@ -1347,14 +1347,14 @@ function Certificate({ user, go }) {
           <div style={{ position: "absolute", inset: 16, border: `3px solid ${B.gold}`, borderRadius: 6 }}/>
           <div style={{ position: "absolute", inset: 24, border: `1px solid ${B.gold}99`, borderRadius: 4 }}/>
           {[{top:9,left:9},{top:9,right:9},{bottom:9,left:9},{bottom:9,right:9}].map((p, i) => (<div key={i} style={{ position: "absolute", ...p, width: 14, height: 14, background: B.gold, transform: "rotate(45deg)" }}/>))}
-          <div style={{ position: "absolute", top: 44, left: 56, right: 56, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-            <Logo size={150}/>
-            <div style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1.2, color: B.black, marginTop: 8 }}>ใบประกาศนียบัตร</div>
-            <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: 5, color: B.gold, marginTop: 4 }}>CERTIFICATE OF COMPLETION</div>
-            <div style={{ fontSize: 15, color: B.dkGray, marginTop: 20 }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
-            <div style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1.4, color: B.black, borderBottom: `2px solid ${B.gold}66`, padding: "2px 44px 10px", marginTop: 8 }}>{user?.name || "ชื่อผู้เรียน"}</div>
-            <div style={{ fontSize: 15, color: B.dkGray, lineHeight: 1.7, marginTop: 18, maxWidth: 660 }}>ได้สำเร็จหลักสูตร <strong style={{ color: B.black }}>การช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED ออนไลน์</strong> ตามมาตรฐาน 2025</div>
-            <div style={{ fontSize: 13, fontStyle: "italic", color: B.dkGray, marginTop: 10 }}>ฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
+          <div style={{ position: "absolute", top: 40, left: 56, right: 56, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+            <Logo size={138}/>
+            <div style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1.2, color: B.black, marginTop: 22 }}>ใบประกาศนียบัตร</div>
+            <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: 5, color: B.gold, marginTop: 6 }}>CERTIFICATE OF COMPLETION</div>
+            <div style={{ fontSize: 15, color: B.dkGray, marginTop: 38 }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
+            <div style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1.4, color: B.black, borderBottom: `2px solid ${B.gold}66`, padding: "2px 44px 12px", marginTop: 16 }}>{user?.name || "ชื่อผู้เรียน"}</div>
+            <div style={{ fontSize: 15, color: B.dkGray, lineHeight: 1.7, marginTop: 32, maxWidth: 660 }}>ได้สำเร็จหลักสูตร <strong style={{ color: B.black }}>การช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED ออนไลน์</strong> ตามมาตรฐาน 2025</div>
+            <div style={{ fontSize: 13, fontStyle: "italic", color: B.dkGray, marginTop: 16 }}>ฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
           </div>
           <div style={{ position: "absolute", left: 60, right: 60, bottom: 58, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div style={{ textAlign: "center", minWidth: 170 }}>
