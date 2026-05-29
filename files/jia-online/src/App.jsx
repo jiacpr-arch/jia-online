@@ -108,6 +108,55 @@ const deliverBlob = async (blob, filename, mime) => {
 };
 const dataUrlToBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
 
+// กราฟิกตกแต่งใบประกาศ (กรอบทอง + คลื่นน้ำเงิน + ซีล + ริบบิ้น) — ไม่มีข้อความ วางเป็นเลเยอร์พื้นหลัง
+const CERT_DECO = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 900 636" preserveAspectRatio="none">
+<defs>
+<linearGradient id="cg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1D481"/><stop offset="0.5" stop-color="#C49A48"/><stop offset="1" stop-color="#8C6B22"/></linearGradient>
+<linearGradient id="ch" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#B8862F"/><stop offset="0.5" stop-color="#F3DB8E"/><stop offset="1" stop-color="#B8862F"/></linearGradient>
+<radialGradient id="cs" cx="0.35" cy="0.3" r="0.85"><stop offset="0" stop-color="#F6E3A0"/><stop offset="0.55" stop-color="#C9A24B"/><stop offset="1" stop-color="#8C6B22"/></radialGradient>
+</defs>
+<rect width="900" height="636" fill="#FFFDF7"/>
+<g>
+<path d="M0,0 L232,0 C168,44 92,40 76,112 C60,176 40,170 0,212 Z" fill="#1B315A"/>
+<path d="M0,0 L198,0 C146,36 88,33 74,108 C58,172 36,156 0,186 Z" fill="#0E1E3C"/>
+<path d="M198,0 C146,36 88,33 74,108 C58,172 36,156 0,186" fill="none" stroke="url(#ch)" stroke-width="5.5"/>
+<path d="M232,0 C168,44 92,40 76,112 C60,176 40,170 0,212" fill="none" stroke="url(#ch)" stroke-width="2.2" opacity="0.8"/>
+</g>
+<g transform="translate(900,636) rotate(180)">
+<path d="M0,0 L232,0 C168,44 92,40 76,112 C60,176 40,170 0,212 Z" fill="#1B315A"/>
+<path d="M0,0 L198,0 C146,36 88,33 74,108 C58,172 36,156 0,186 Z" fill="#0E1E3C"/>
+<path d="M198,0 C146,36 88,33 74,108 C58,172 36,156 0,186" fill="none" stroke="url(#ch)" stroke-width="5.5"/>
+<path d="M232,0 C168,44 92,40 76,112 C60,176 40,170 0,212" fill="none" stroke="url(#ch)" stroke-width="2.2" opacity="0.8"/>
+</g>
+<rect x="22" y="22" width="856" height="592" fill="none" stroke="url(#cg)" stroke-width="2.5"/>
+<rect x="30" y="30" width="840" height="576" fill="none" stroke="url(#cg)" stroke-width="1" opacity="0.6"/>
+<g stroke="url(#cg)" stroke-width="2" fill="none">
+<path d="M838,30 h34 v34"/><path d="M845,38 h22 v22" stroke-width="1"/>
+<path d="M62,606 h-34 v-34"/><path d="M55,598 h-22 v-22" stroke-width="1"/>
+</g>
+<g fill="url(#cg)" stroke="url(#cg)">
+<line x1="305" y1="350" x2="438" y2="350" stroke-width="1.4"/><line x1="462" y1="350" x2="595" y2="350" stroke-width="1.4"/>
+<rect x="445" y="345" width="10" height="10" transform="rotate(45 450 350)"/>
+<circle cx="305" cy="350" r="2.2" stroke="none"/><circle cx="595" cy="350" r="2.2" stroke="none"/>
+</g>
+<g transform="translate(160,452)">
+<circle r="34" fill="url(#cs)" stroke="#8C6B22" stroke-width="1.5"/><circle r="26.5" fill="none" stroke="#FFF4D6" stroke-width="1.1" opacity="0.7"/>
+<rect x="-13" y="-11" width="26" height="22" rx="3" fill="#0E1E3C"/><rect x="-13" y="-11" width="26" height="7" rx="3" fill="#1B315A"/>
+<line x1="-7" y1="-15" x2="-7" y2="-8" stroke="#FFF4D6" stroke-width="2.4" stroke-linecap="round"/><line x1="7" y1="-15" x2="7" y2="-8" stroke="#FFF4D6" stroke-width="2.4" stroke-linecap="round"/>
+<g fill="#FFF4D6"><circle cx="-6" cy="0" r="1.5"/><circle cx="0" cy="0" r="1.5"/><circle cx="6" cy="0" r="1.5"/><circle cx="-6" cy="6" r="1.5"/><circle cx="0" cy="6" r="1.5"/></g>
+</g>
+<g transform="translate(740,452)">
+<circle r="34" fill="url(#cs)" stroke="#8C6B22" stroke-width="1.5"/><circle r="26.5" fill="none" stroke="#FFF4D6" stroke-width="1.1" opacity="0.7"/>
+<path transform="translate(-12,-11)" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="#C8102E"/>
+<polyline points="-10,0 -4,0 -1,-5 2,4 5,-1 8,0 11,0" fill="none" stroke="#FFF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+</g>
+<g transform="translate(450,458)">
+<path d="M-150,-4 l-26,0 l8,15 l-8,15 l26,0 Z" fill="#8C6B22"/><path d="M150,-4 l26,0 l-8,15 l8,15 l-26,0 Z" fill="#8C6B22"/>
+<rect x="-150" y="-29" width="300" height="58" rx="6" fill="#0E1E3C" stroke="url(#ch)" stroke-width="2.5"/>
+<rect x="-144" y="-23" width="288" height="46" rx="4" fill="none" stroke="url(#ch)" stroke-width="0.8" opacity="0.55"/>
+</g>
+</svg>`;
+
 // ========== PURCHASE HELPERS ==========
 const getPurchased = () => {
   const stored = load("purchased", null);
@@ -1343,34 +1392,26 @@ function Certificate({ user, go }) {
     <div style={{ textAlign: "center", marginBottom: 24 }}><div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><I name="star" size={38} color={B.gold}/></div><h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>ยินดีด้วย!</h2><p style={{ fontSize: 14, color: B.dkGray }}>คุณผ่านคอร์ส CPR & AED ออนไลน์แล้ว</p></div>
     <div ref={wrapRef} style={{ width: "100%", height: CERT_H * scale, overflow: "hidden", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.12)" }}>
       <div style={{ width: CERT_W, height: CERT_H, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-        <div ref={certRef} style={{ position: "relative", width: CERT_W, height: CERT_H, boxSizing: "border-box", background: "linear-gradient(135deg, #FFFDF6 0%, #FFFFFF 55%, #FFFCF2 100%)" }}>
-          <div style={{ position: "absolute", inset: 16, border: `3px solid ${B.gold}`, borderRadius: 6 }}/>
-          <div style={{ position: "absolute", inset: 24, border: `1px solid ${B.gold}99`, borderRadius: 4 }}/>
-          {[{top:9,left:9},{top:9,right:9},{bottom:9,left:9},{bottom:9,right:9}].map((p, i) => (<div key={i} style={{ position: "absolute", ...p, width: 14, height: 14, background: B.gold, transform: "rotate(45deg)" }}/>))}
-          <div style={{ position: "absolute", top: 40, left: 56, right: 56, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-            <Logo size={138}/>
-            <div style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1.2, color: B.black, marginTop: 22 }}>ใบประกาศนียบัตร</div>
-            <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: 5, color: B.gold, marginTop: 6 }}>CERTIFICATE OF COMPLETION</div>
-            <div style={{ fontSize: 15, color: B.dkGray, marginTop: 38 }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
-            <div style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1.4, color: B.black, borderBottom: `2px solid ${B.gold}66`, padding: "2px 44px 12px", marginTop: 16 }}>{user?.name || "ชื่อผู้เรียน"}</div>
-            <div style={{ fontSize: 15, color: B.dkGray, lineHeight: 1.7, marginTop: 32, maxWidth: 660 }}>ได้สำเร็จหลักสูตร <strong style={{ color: B.black }}>การช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED ออนไลน์</strong> ตามมาตรฐาน 2025</div>
-            <div style={{ fontSize: 13, fontStyle: "italic", color: B.dkGray, marginTop: 16 }}>ฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
+        <div ref={certRef} style={{ position: "relative", width: CERT_W, height: CERT_H, boxSizing: "border-box", background: "#FFFDF7", overflow: "hidden" }}>
+          <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: CERT_DECO }}/>
+          <div style={{ position: "absolute", top: 38, left: 0, right: 0, display: "flex", justifyContent: "center" }}><Logo size={138}/></div>
+          <div style={{ position: "absolute", top: 150, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>ใบประกาศนียบัตร</div>
+          <div style={{ position: "absolute", top: 210, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 13, fontWeight: 700, letterSpacing: 4, color: "#B8862F" }}>CERTIFICATE OF COMPLETION</div>
+          <div style={{ position: "absolute", top: 245, left: 0, right: 0, textAlign: "center", fontSize: 15, color: B.dkGray }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
+          <div style={{ position: "absolute", top: 286, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>{user?.name || "ชื่อผู้เรียน"}</div>
+          <div style={{ position: "absolute", top: 374, left: 70, right: 70, textAlign: "center", fontSize: 15, lineHeight: 1.5, color: B.dkGray }}>ได้สำเร็จหลักสูตร <strong style={{ color: B.black }}>การช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED ออนไลน์</strong> ตามมาตรฐาน 2025</div>
+          <div style={{ position: "absolute", top: 404, left: 0, right: 0, textAlign: "center", fontSize: 13, fontStyle: "italic", color: B.dkGray }}>ฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
+          <div style={{ position: "absolute", top: 440, left: 0, right: 0, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: "#FFF9E8" }}>ส่วนลด ฿100 คอร์ส On-site</div>
+          <div style={{ position: "absolute", top: 461, left: 0, right: 0, textAlign: "center", fontSize: 15, fontWeight: 800, letterSpacing: 1, color: "#F3DB8E", fontFamily: "monospace" }}>• {coupon} •</div>
+          <div style={{ position: "absolute", top: 506, left: 50, width: 220, textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: B.black }}>{ds}</div>
+            <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
           </div>
-          <div style={{ position: "absolute", left: 60, right: 60, bottom: 58, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-            <div style={{ textAlign: "center", minWidth: 170 }}>
-              <div style={{ fontSize: 15, color: B.black, marginBottom: 6 }}>{ds}</div>
-              <div style={{ borderTop: `1.5px solid ${B.dkGray}66`, paddingTop: 6, fontSize: 12, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
-            </div>
-            <div style={{ display: "inline-block", padding: "7px 18px", borderRadius: 22, background: `${B.red}0D`, border: `1px dashed ${B.red}66`, whiteSpace: "nowrap", marginBottom: 4 }}>
-              <span style={{ fontSize: 12, color: B.dkGray }}>ส่วนลด ฿100 คอร์ส On-site • </span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: B.red, fontFamily: "monospace", letterSpacing: 1 }}>{coupon}</span>
-            </div>
-            <div style={{ textAlign: "center", minWidth: 170 }}>
-              <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 600, color: B.black, marginBottom: 6 }}>JIA TRAINER CENTER</div>
-              <div style={{ borderTop: `1.5px solid ${B.dkGray}66`, paddingTop: 6, fontSize: 12, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
-            </div>
+          <div style={{ position: "absolute", top: 506, right: 50, width: 220, textAlign: "center" }}>
+            <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 600, color: "#0E1E3C" }}>JIA TRAINER CENTER</div>
+            <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
           </div>
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 30, textAlign: "center", fontSize: 11, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
+          <div style={{ position: "absolute", bottom: 26, left: 0, right: 0, textAlign: "center", fontSize: 11, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
         </div>
       </div>
     </div>
