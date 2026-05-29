@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 // ==================== BRAND ====================
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
+const SERIF = "'Trirong', 'Noto Sans Thai', Georgia, serif"; // ฟอนต์เซริฟไทยสำหรับใบประกาศ (หัวข้อ + ชื่อผู้เรียน)
 
 // ========== CONFIG ==========
 const FREE_LAUNCH = true; // ยังเปิดฟรีจนถึง ก.ค. 2569 — flip เป็น false เมื่อพร้อม cutover (จะเปิด Claim CTA + lock บทที่ 4-6 อัตโนมัติ)
@@ -1333,12 +1334,13 @@ function Certificate({ user, go }) {
     <div style={{ background: B.white, borderRadius: 20, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,.1)" }}><div ref={certRef} style={{ position: "relative", border: `3px solid ${B.gold}`, borderRadius: 16, padding: "32px 20px", textAlign: "center", background: "linear-gradient(180deg, #FFFEF7 0%, #FFFFFF 100%)" }}>
       {[{top:8,left:8},{top:8,right:8},{bottom:8,left:8},{bottom:8,right:8}].map((p, i) => (<div key={i} style={{ position: "absolute", ...p, width: 18, height: 18 }}/>))}
       <div style={{ marginBottom: 12 }}><Logo size={132}/></div>
-      <div style={{ fontSize: 20, fontWeight: 300, color: B.dkGray, marginBottom: 3 }}>ใบประกาศนียบัตร</div>
-      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 16 }}>CERTIFICATE OF COMPLETION</div>
+      <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 500, color: B.black, marginBottom: 3 }}>ใบประกาศนียบัตร</div>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, color: B.dkGray, marginBottom: 16 }}>CERTIFICATE OF COMPLETION</div>
       <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 6 }}>มอบให้แก่</div>
-      <div style={{ fontSize: 24, fontWeight: 700, borderBottom: `2px solid ${B.gold}40`, paddingBottom: 8, display: "inline-block", minWidth: 180, marginBottom: 12 }}>{user?.name || "ชื่อผู้เรียน"}</div>
+      <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 600, color: B.black, borderBottom: `2px solid ${B.gold}40`, paddingBottom: 8, display: "inline-block", minWidth: 180, marginBottom: 12 }}>{user?.name || "ชื่อผู้เรียน"}</div>
       <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.6 }}>ผ่านหลักสูตร<br/><strong style={{ fontSize: 13 }}>การช่วยชีวิตขั้นพื้นฐาน CPR & AED ออนไลน์</strong><br/>มาตรฐาน 2025</div>
       <div style={{ marginTop: 14, fontSize: 12, color: B.dkGray }}>วันที่ {ds}</div>
+      <div style={{ marginTop: 14, padding: "10px 14px", background: `${B.gold}10`, borderRadius: 10, fontSize: 11, color: B.dkGray, lineHeight: 1.6 }}>💡 แนะนำให้ไปเรียนภาคปฏิบัติเพิ่มเติมที่ศูนย์การเรียนรู้ใกล้บ้าน<br/>เพื่อการเรียนรู้ที่สมบูรณ์</div>
       <div style={{ marginTop: 16, background: `${B.red}08`, borderRadius: 10, padding: "10px 16px", border: `1px dashed ${B.red}40` }}><div style={{ fontSize: 10, color: B.dkGray, marginBottom: 4 }}>รหัสคูปองส่วนลด ฿100</div><div style={{ fontSize: 20, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace" }}>{coupon}</div><div style={{ fontSize: 10, color: B.dkGray, marginTop: 4 }}>แจ้งรหัสนี้เมื่อมาเรียน on-site</div></div>
       <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${B.ltGray}`, fontSize: 10, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
     </div></div>
@@ -1402,7 +1404,7 @@ function MiniCert({ user, go }) {
             <div style={{ fontSize: 14, fontWeight: 300, color: B.dkGray }}>Mini Certificate</div>
             <div style={{ fontSize: 16, fontWeight: 700, margin: "6px 0", color: B.black }}>{m.short}</div>
             <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 6 }}>มอบให้แก่</div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{user?.name || "ชื่อผู้เรียน"}</div>
+            <div style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 600, color: B.black, marginBottom: 8 }}>{user?.name || "ชื่อผู้เรียน"}</div>
             <div style={{ fontSize: 11, color: B.dkGray }}>คะแนน: {progress.scores[m.id]}% • วันที่ {ds}</div>
           </div>
         </div>
