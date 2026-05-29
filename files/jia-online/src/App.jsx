@@ -1399,8 +1399,9 @@ function Certificate({ user, go }) {
           <div style={{ position: "absolute", top: 260, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 13, fontWeight: 700, letterSpacing: 4, color: "#B8862F" }}>CERTIFICATE OF COMPLETION</div>
           <div style={{ position: "absolute", top: 292, left: 0, right: 0, textAlign: "center", fontSize: 15, lineHeight: 1, color: B.dkGray }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
           <div style={{ position: "absolute", top: 322, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>{user?.name || "ชื่อผู้เรียน"}</div>
-          <div style={{ position: "absolute", top: 398, left: 70, right: 70, textAlign: "center", fontSize: 15, lineHeight: 1.5, color: B.dkGray }}>ได้สำเร็จหลักสูตร <strong style={{ color: B.black }}>การช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED ออนไลน์</strong> ตามมาตรฐาน 2025</div>
-          <div style={{ position: "absolute", top: 428, left: 0, right: 0, textAlign: "center", fontSize: 13, fontStyle: "italic", color: B.dkGray }}>ฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
+          <div style={{ position: "absolute", top: 392, left: 70, right: 70, textAlign: "center", fontSize: 14, color: B.dkGray }}>ได้ผ่านการอบรม <strong style={{ color: "#0E1E3C" }}>ภาคทฤษฎี (ออนไลน์)</strong></div>
+          <div style={{ position: "absolute", top: 412, left: 70, right: 70, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>หลักสูตรการช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED · มาตรฐาน 2025</div>
+          <div style={{ position: "absolute", top: 436, left: 0, right: 0, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: B.red }}>ขอเชิญฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
           <div style={{ position: "absolute", top: 464, left: 0, right: 0, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: "#FFF9E8" }}>ส่วนลด ฿100 คอร์ส On-site</div>
           <div style={{ position: "absolute", top: 485, left: 0, right: 0, textAlign: "center", fontSize: 15, fontWeight: 800, letterSpacing: 1, color: "#F3DB8E", fontFamily: "monospace" }}>• {coupon} •</div>
           <div style={{ position: "absolute", top: 524, left: 50, width: 220, textAlign: "center" }}>
