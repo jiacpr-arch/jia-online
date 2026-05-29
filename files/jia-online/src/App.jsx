@@ -1329,21 +1329,51 @@ function Certificate({ user, go }) {
     } catch (e) { safeTrack("cert_download_error", { format: "pdf" }); saveCertFallback(); }
     finally { setGen(null); }
   };
+  const CERT_W = 900, CERT_H = 636;
+  const wrapRef = useRef(null);
+  const [scale, setScale] = useState(0.5);
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const update = () => setScale(Math.min(1, el.clientWidth / CERT_W));
+    update();
+    const ro = new ResizeObserver(update); ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (<div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto" }}>
     <div style={{ textAlign: "center", marginBottom: 24 }}><div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><I name="star" size={38} color={B.gold}/></div><h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>ยินดีด้วย!</h2><p style={{ fontSize: 14, color: B.dkGray }}>คุณผ่านคอร์ส CPR & AED ออนไลน์แล้ว</p></div>
-    <div style={{ background: B.white, borderRadius: 20, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,.1)" }}><div ref={certRef} style={{ position: "relative", border: `3px solid ${B.gold}`, borderRadius: 16, padding: "32px 20px", textAlign: "center", background: "linear-gradient(180deg, #FFFEF7 0%, #FFFFFF 100%)" }}>
-      {[{top:8,left:8},{top:8,right:8},{bottom:8,left:8},{bottom:8,right:8}].map((p, i) => (<div key={i} style={{ position: "absolute", ...p, width: 18, height: 18 }}/>))}
-      <div style={{ marginBottom: 12 }}><Logo size={132}/></div>
-      <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 500, lineHeight: 1.5, color: B.black, marginBottom: 3 }}>ใบประกาศนียบัตร</div>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, color: B.dkGray, marginBottom: 16 }}>CERTIFICATE OF COMPLETION</div>
-      <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 6 }}>มอบให้แก่</div>
-      <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 600, lineHeight: 1.5, color: B.black, borderBottom: `2px solid ${B.gold}40`, paddingBottom: 10, display: "inline-block", minWidth: 180, marginBottom: 12 }}>{user?.name || "ชื่อผู้เรียน"}</div>
-      <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.7 }}>ผ่านหลักสูตร<br/><strong style={{ fontSize: 13 }}>การช่วยชีวิตขั้นพื้นฐาน CPR & AED ออนไลน์</strong><br/>มาตรฐาน 2025</div>
-      <div style={{ marginTop: 14, fontSize: 12, color: B.dkGray }}>วันที่ {ds}</div>
-      <div style={{ marginTop: 14, padding: "12px 14px", background: `${B.gold}10`, borderRadius: 10, fontSize: 12, color: B.dkGray, lineHeight: 1.8 }}>💡 ฝึกภาคปฏิบัติกับผู้สอนตัวจริง<br/>เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
-      <div style={{ marginTop: 16, background: `${B.red}08`, borderRadius: 10, padding: "10px 16px", border: `1px dashed ${B.red}40` }}><div style={{ fontSize: 10, color: B.dkGray, marginBottom: 4 }}>รหัสคูปองส่วนลด ฿100</div><div style={{ fontSize: 20, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace" }}>{coupon}</div><div style={{ fontSize: 10, color: B.dkGray, marginTop: 4 }}>แจ้งรหัสนี้เมื่อมาเรียน on-site</div></div>
-      <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${B.ltGray}`, fontSize: 10, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
-    </div></div>
+    <div ref={wrapRef} style={{ width: "100%", height: CERT_H * scale, overflow: "hidden", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.12)" }}>
+      <div style={{ width: CERT_W, height: CERT_H, transform: `scale(${scale})`, transformOrigin: "top left" }}>
+        <div ref={certRef} style={{ position: "relative", width: CERT_W, height: CERT_H, boxSizing: "border-box", background: "linear-gradient(135deg, #FFFDF6 0%, #FFFFFF 55%, #FFFCF2 100%)" }}>
+          <div style={{ position: "absolute", inset: 16, border: `3px solid ${B.gold}`, borderRadius: 6 }}/>
+          <div style={{ position: "absolute", inset: 24, border: `1px solid ${B.gold}99`, borderRadius: 4 }}/>
+          {[{top:9,left:9},{top:9,right:9},{bottom:9,left:9},{bottom:9,right:9}].map((p, i) => (<div key={i} style={{ position: "absolute", ...p, width: 14, height: 14, background: B.gold, transform: "rotate(45deg)" }}/>))}
+          <div style={{ position: "absolute", top: 44, left: 56, right: 56, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+            <Logo size={150}/>
+            <div style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1.2, color: B.black, marginTop: 8 }}>ใบประกาศนียบัตร</div>
+            <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: 5, color: B.gold, marginTop: 4 }}>CERTIFICATE OF COMPLETION</div>
+            <div style={{ fontSize: 15, color: B.dkGray, marginTop: 20 }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
+            <div style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1.4, color: B.black, borderBottom: `2px solid ${B.gold}66`, padding: "2px 44px 10px", marginTop: 8 }}>{user?.name || "ชื่อผู้เรียน"}</div>
+            <div style={{ fontSize: 15, color: B.dkGray, lineHeight: 1.7, marginTop: 18, maxWidth: 660 }}>ได้สำเร็จหลักสูตร <strong style={{ color: B.black }}>การช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED ออนไลน์</strong> ตามมาตรฐาน 2025</div>
+            <div style={{ fontSize: 13, fontStyle: "italic", color: B.dkGray, marginTop: 10 }}>ฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
+          </div>
+          <div style={{ position: "absolute", left: 60, right: 60, bottom: 58, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+            <div style={{ textAlign: "center", minWidth: 170 }}>
+              <div style={{ fontSize: 15, color: B.black, marginBottom: 6 }}>{ds}</div>
+              <div style={{ borderTop: `1.5px solid ${B.dkGray}66`, paddingTop: 6, fontSize: 12, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
+            </div>
+            <div style={{ display: "inline-block", padding: "7px 18px", borderRadius: 22, background: `${B.red}0D`, border: `1px dashed ${B.red}66`, whiteSpace: "nowrap", marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: B.dkGray }}>ส่วนลด ฿100 คอร์ส On-site • </span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: B.red, fontFamily: "monospace", letterSpacing: 1 }}>{coupon}</span>
+            </div>
+            <div style={{ textAlign: "center", minWidth: 170 }}>
+              <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 600, color: B.black, marginBottom: 6 }}>JIA TRAINER CENTER</div>
+              <div style={{ borderTop: `1.5px solid ${B.dkGray}66`, paddingTop: 6, fontSize: 12, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
+            </div>
+          </div>
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 30, textAlign: "center", fontSize: 11, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
+        </div>
+      </div>
+    </div>
     <button onClick={downloadImage} disabled={!!gen} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="save" size={18} color={B.white}/> {gen === "img" ? "กำลังสร้างรูป..." : "บันทึกเป็นรูปภาพ"}</button>
     <button onClick={downloadPDF} disabled={!!gen} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="cert" size={18} color={B.black}/> {gen === "pdf" ? "กำลังสร้าง PDF..." : "ดาวน์โหลด PDF"}</button>
     {!load("line_added", false) && (() => {
