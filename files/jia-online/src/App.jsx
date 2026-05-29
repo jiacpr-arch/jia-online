@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 // ==================== BRAND ====================
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
+const SERIF = "'Trirong', 'Noto Sans Thai', Georgia, serif"; // ฟอนต์เซริฟไทยสำหรับใบประกาศ (หัวข้อ + ชื่อผู้เรียน)
 
 // ========== CONFIG ==========
 const FREE_LAUNCH = true; // ยังเปิดฟรีจนถึง ก.ค. 2569 — flip เป็น false เมื่อพร้อม cutover (จะเปิด Claim CTA + lock บทที่ 4-6 อัตโนมัติ)
@@ -68,6 +69,44 @@ const daysUntil = (iso) => { if (!iso) return 0; const ms = new Date(iso).getTim
 const genIdempotencyKey = (email, phone) => `${normalizeEmail(email)}|${normalizePhone(phone)}|${Math.floor(Date.now() / 60000)}`.slice(0, 80);
 const save = (k, v) => { try { localStorage.setItem(`jia_${k}`, JSON.stringify(v)); } catch(e){} };
 const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
+
+// ========== CERTIFICATE EXPORT HELPERS (PDF / รูปภาพ) ==========
+const LOGO_SRC = "/logo.png"; // วางไฟล์โลโก้ไว้ที่ files/jia-online/public/logo.png
+const sanitizeFileName = (name) => (name || "ใบประกาศนียบัตร")
+  .normalize("NFC")
+  .replace(/[\\/:*?"<>|]+/g, "")
+  .replace(/\s+/g, "_")
+  .slice(0, 40) || "certificate";
+// แปลง DOM node เป็น PNG data URL ความละเอียดสูง (retina) ด้วย html-to-image (dynamic import → code-split)
+const captureNodeToPng = async (node) => {
+  const { toPng } = await import("html-to-image");
+  return await toPng(node, {
+    pixelRatio: Math.max(2, window.devicePixelRatio || 1),
+    backgroundColor: "#FFFFFF",
+    cacheBust: true,
+    width: node.offsetWidth,
+    height: node.offsetHeight,
+  });
+};
+// แชร์ไฟล์ผ่าน share sheet ของมือถือก่อน (เซฟลง Photos/Files หรือส่ง LINE ได้); ถ้าไม่รองรับ → ดาวน์โหลดแบบ <a download>
+const deliverBlob = async (blob, filename, mime) => {
+  try {
+    const file = new File([blob], filename, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "JIA Certificate" });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return; // ผู้ใช้กดยกเลิก share sheet — ถือว่าปกติ
+    // อื่น ๆ: ตกไปใช้ดาวน์โหลดด้านล่าง
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.style.display = "none";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+const dataUrlToBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
 
 // ========== PURCHASE HELPERS ==========
 const getPurchased = () => {
@@ -164,6 +203,13 @@ const icons = {
   warn: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2L1 21h22L12 2zm0 15a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm-1-2h2V10h-2v5z"/></svg>,
 };
 const I = ({ name, size = 20, color = B.black }) => icons[name]?.(size, color) || null;
+
+// โลโก้ JIA TRAINER CENTER — แสดงรูปจาก public/logo.png ถ้าโหลดไม่ได้ fallback เป็นไอคอน cert เดิม
+const Logo = ({ size = 120 }) => {
+  const [err, setErr] = useState(false);
+  if (err) return (<div style={{ margin: "0 auto", width: size * 0.5, height: size * 0.5, borderRadius: "50%", background: `${B.gold}15`, display: "flex", alignItems: "center", justifyContent: "center" }}><I name="cert" size={size * 0.3} color={B.gold}/></div>);
+  return <img src={LOGO_SRC} alt="JIA TRAINER CENTER" onError={() => setErr(true)} style={{ width: size, height: "auto", maxWidth: "100%", display: "block", margin: "0 auto" }}/>;
+};
 
 // ==================== STYLES ====================
 const css = {
@@ -1253,24 +1299,53 @@ function Course({ go, progress, setProgress, user, openBlog }) {
 function Certificate({ user, go }) {
   const d = new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   const coupon = load("coupon", null) || (() => { const c = genCoupon(); save("coupon", c); return c; })();
-  const saveCert = () => { alert("กด screenshot หน้าจอเพื่อบันทึกใบประกาศนียบัตร\n\niPhone: กดปุ่ม Power + Volume Up\nAndroid: กดปุ่ม Power + Volume Down\n\nรหัสคูปอง: " + coupon); };
+  const certRef = useRef(null);
+  const [gen, setGen] = useState(null); // null | "img" | "pdf"
+  const fileBase = `JIA_Certificate_${sanitizeFileName(user?.name)}`;
+  // fallback สุดท้าย ถ้าสร้างไฟล์ไม่สำเร็จ — บอกผู้ใช้ screenshot เอง
+  const saveCertFallback = () => { alert("บันทึกอัตโนมัติไม่สำเร็จ กรุณา screenshot หน้าจอเพื่อบันทึกใบประกาศนียบัตร\n\niPhone: กดปุ่ม Power + Volume Up\nAndroid: กดปุ่ม Power + Volume Down\n\nรหัสคูปอง: " + coupon); };
+  const downloadImage = async () => {
+    if (gen) return; setGen("img");
+    try {
+      const dataUrl = await captureNodeToPng(certRef.current);
+      await deliverBlob(await dataUrlToBlob(dataUrl), `${fileBase}.png`, "image/png");
+      safeTrack("cert_download", { format: "png" });
+    } catch (e) { safeTrack("cert_download_error", { format: "png" }); saveCertFallback(); }
+    finally { setGen(null); }
+  };
+  const downloadPDF = async () => {
+    if (gen) return; setGen("pdf");
+    try {
+      const dataUrl = await captureNodeToPng(certRef.current);
+      const { jsPDF } = await import("jspdf");
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
+      const pr = Math.max(2, window.devicePixelRatio || 1);
+      const wMm = (img.width / pr) * 25.4 / 96, hMm = (img.height / pr) * 25.4 / 96;
+      const pdf = new jsPDF({ orientation: wMm >= hMm ? "landscape" : "portrait", unit: "mm", format: [wMm, hMm] });
+      pdf.addImage(dataUrl, "PNG", 0, 0, wMm, hMm, undefined, "FAST");
+      await deliverBlob(pdf.output("blob"), `${fileBase}.pdf`, "application/pdf");
+      safeTrack("cert_download", { format: "pdf" });
+    } catch (e) { safeTrack("cert_download_error", { format: "pdf" }); saveCertFallback(); }
+    finally { setGen(null); }
+  };
   return (<div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto" }}>
     <div style={{ textAlign: "center", marginBottom: 24 }}><div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><I name="star" size={38} color={B.gold}/></div><h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>ยินดีด้วย!</h2><p style={{ fontSize: 14, color: B.dkGray }}>คุณผ่านคอร์ส CPR & AED ออนไลน์แล้ว</p></div>
-    <div style={{ background: B.white, borderRadius: 20, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,.1)" }}><div style={{ border: `3px solid ${B.gold}`, borderRadius: 16, padding: "32px 20px", textAlign: "center", background: "linear-gradient(180deg, #FFFEF7 0%, #FFFFFF 100%)" }}>
+    <div style={{ background: B.white, borderRadius: 20, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,.1)" }}><div ref={certRef} style={{ position: "relative", border: `3px solid ${B.gold}`, borderRadius: 16, padding: "32px 20px", textAlign: "center", background: "linear-gradient(180deg, #FFFEF7 0%, #FFFFFF 100%)" }}>
       {[{top:8,left:8},{top:8,right:8},{bottom:8,left:8},{bottom:8,right:8}].map((p, i) => (<div key={i} style={{ position: "absolute", ...p, width: 18, height: 18 }}/>))}
-      <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: B.red, fontWeight: 700, marginBottom: 4 }}>JIA TRAINER CENTER</div>
-      <div style={{ fontSize: 10, color: B.dkGray, marginBottom: 16 }}>ศูนย์ฝึกอบรม CPR & AED มาตรฐาน 2025</div>
-      <div style={{ margin: "0 auto 12px", width: 48, height: 48, borderRadius: "50%", background: `${B.gold}15`, display: "flex", alignItems: "center", justifyContent: "center" }}><I name="cert" size={28} color={B.gold}/></div>
-      <div style={{ fontSize: 20, fontWeight: 300, color: B.dkGray, marginBottom: 3 }}>ใบประกาศนียบัตร</div>
-      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 16 }}>CERTIFICATE OF COMPLETION</div>
+      <div style={{ marginBottom: 12 }}><Logo size={132}/></div>
+      <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 500, lineHeight: 1.5, color: B.black, marginBottom: 3 }}>ใบประกาศนียบัตร</div>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, color: B.dkGray, marginBottom: 16 }}>CERTIFICATE OF COMPLETION</div>
       <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 6 }}>มอบให้แก่</div>
-      <div style={{ fontSize: 24, fontWeight: 700, borderBottom: `2px solid ${B.gold}40`, paddingBottom: 8, display: "inline-block", minWidth: 180, marginBottom: 12 }}>{user?.name || "ชื่อผู้เรียน"}</div>
-      <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.6 }}>ผ่านหลักสูตร<br/><strong style={{ fontSize: 13 }}>การช่วยชีวิตขั้นพื้นฐาน CPR & AED ออนไลน์</strong><br/>มาตรฐาน 2025</div>
+      <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 600, lineHeight: 1.5, color: B.black, borderBottom: `2px solid ${B.gold}40`, paddingBottom: 10, display: "inline-block", minWidth: 180, marginBottom: 12 }}>{user?.name || "ชื่อผู้เรียน"}</div>
+      <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.7 }}>ผ่านหลักสูตร<br/><strong style={{ fontSize: 13 }}>การช่วยชีวิตขั้นพื้นฐาน CPR & AED ออนไลน์</strong><br/>มาตรฐาน 2025</div>
       <div style={{ marginTop: 14, fontSize: 12, color: B.dkGray }}>วันที่ {ds}</div>
+      <div style={{ marginTop: 14, padding: "12px 14px", background: `${B.gold}10`, borderRadius: 10, fontSize: 12, color: B.dkGray, lineHeight: 1.8 }}>💡 ฝึกภาคปฏิบัติกับผู้สอนตัวจริง<br/>เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
       <div style={{ marginTop: 16, background: `${B.red}08`, borderRadius: 10, padding: "10px 16px", border: `1px dashed ${B.red}40` }}><div style={{ fontSize: 10, color: B.dkGray, marginBottom: 4 }}>รหัสคูปองส่วนลด ฿100</div><div style={{ fontSize: 20, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace" }}>{coupon}</div><div style={{ fontSize: 10, color: B.dkGray, marginTop: 4 }}>แจ้งรหัสนี้เมื่อมาเรียน on-site</div></div>
       <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${B.ltGray}`, fontSize: 10, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
     </div></div>
-    <button onClick={saveCert} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><I name="save" size={18} color={B.white}/> บันทึกใบประกาศนียบัตร</button>
+    <button onClick={downloadImage} disabled={!!gen} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="save" size={18} color={B.white}/> {gen === "img" ? "กำลังสร้างรูป..." : "บันทึกเป็นรูปภาพ"}</button>
+    <button onClick={downloadPDF} disabled={!!gen} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="cert" size={18} color={B.black}/> {gen === "pdf" ? "กำลังสร้าง PDF..." : "ดาวน์โหลด PDF"}</button>
     {!load("line_added", false) && (() => {
       const lc = getLinkCode();
       return (
@@ -1307,20 +1382,33 @@ function MiniCert({ user, go }) {
   const progress = load("progress", { done: [], scores: {} });
   const d = new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   const completed = COURSE.modules.filter(m => m.id <= 6 && progress.done.includes(m.id));
+  const refs = useRef({});
+  const [genId, setGenId] = useState(null);
+  const saveMiniImage = async (m) => {
+    if (genId) return; setGenId(m.id);
+    try {
+      const dataUrl = await captureNodeToPng(refs.current[m.id]);
+      await deliverBlob(await dataUrlToBlob(dataUrl), `JIA_${sanitizeFileName(m.short)}_${sanitizeFileName(user?.name)}.png`, "image/png");
+      safeTrack("minicert_download", { module: m.id });
+    } catch (e) { safeTrack("minicert_download_error", { module: m.id }); alert("บันทึกอัตโนมัติไม่สำเร็จ กรุณา screenshot หน้าจอเพื่อบันทึกใบประกาศ"); }
+    finally { setGenId(null); }
+  };
   return (<div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto" }}>
     <button onClick={() => go("course")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: B.dkGray, fontSize: 14, marginBottom: 16 }}><I name="back" size={18} color={B.dkGray}/> กลับ</button>
     <h2 style={{ fontSize: 20, fontWeight: 800, textAlign: "center", marginBottom: 20 }}>Mini Certificate</h2>
     {completed.map(m => (
-      <div key={m.id} style={{ background: B.white, borderRadius: 16, padding: 4, boxShadow: "0 4px 16px rgba(0,0,0,.08)", marginBottom: 20 }}>
-        <div style={{ border: `2px solid ${B.gold}`, borderRadius: 12, padding: "24px 16px", textAlign: "center", background: "linear-gradient(180deg, #FFFEF7 0%, #FFFFFF 100%)" }}>
-          <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: B.red, fontWeight: 700, marginBottom: 4 }}>JIA TRAINER CENTER</div>
-          <div style={{ margin: "0 auto 8px", width: 36, height: 36, borderRadius: "50%", background: `${B.gold}15`, display: "flex", alignItems: "center", justifyContent: "center" }}><I name="cert" size={20} color={B.gold}/></div>
-          <div style={{ fontSize: 14, fontWeight: 300, color: B.dkGray }}>Mini Certificate</div>
-          <div style={{ fontSize: 16, fontWeight: 700, margin: "6px 0", color: B.black }}>{m.short}</div>
-          <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 6 }}>มอบให้แก่</div>
-          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{user?.name || "ชื่อผู้เรียน"}</div>
-          <div style={{ fontSize: 11, color: B.dkGray }}>คะแนน: {progress.scores[m.id]}% • วันที่ {ds}</div>
+      <div key={m.id} style={{ marginBottom: 20 }}>
+        <div style={{ background: B.white, borderRadius: 16, padding: 4, boxShadow: "0 4px 16px rgba(0,0,0,.08)" }}>
+          <div ref={el => { refs.current[m.id] = el; }} style={{ position: "relative", border: `2px solid ${B.gold}`, borderRadius: 12, padding: "24px 16px", textAlign: "center", background: "linear-gradient(180deg, #FFFEF7 0%, #FFFFFF 100%)" }}>
+            <div style={{ marginBottom: 8 }}><Logo size={64}/></div>
+            <div style={{ fontSize: 14, fontWeight: 300, color: B.dkGray }}>Mini Certificate</div>
+            <div style={{ fontSize: 16, fontWeight: 700, margin: "6px 0", color: B.black }}>{m.short}</div>
+            <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 6 }}>มอบให้แก่</div>
+            <div style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 600, lineHeight: 1.5, color: B.black, marginBottom: 8 }}>{user?.name || "ชื่อผู้เรียน"}</div>
+            <div style={{ fontSize: 11, color: B.dkGray }}>คะแนน: {progress.scores[m.id]}% • วันที่ {ds}</div>
+          </div>
         </div>
+        <button onClick={() => saveMiniImage(m)} disabled={!!genId} style={{ ...css.btn(B.white, B.black, true), marginTop: 8, fontSize: 13, border: `1px solid ${B.ltGray}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: genId ? .6 : 1, cursor: genId ? "default" : "pointer" }}><I name="save" size={16} color={B.black}/> {genId === m.id ? "กำลังสร้างรูป..." : "บันทึกเป็นรูปภาพ"}</button>
       </div>
     ))}
     {completed.length === 0 && <div style={{ textAlign: "center", color: B.dkGray, padding: 20 }}>ยังไม่มีหัวข้อที่ผ่าน</div>}
