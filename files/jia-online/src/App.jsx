@@ -2605,7 +2605,9 @@ function Admin() {
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, bookings: 0 });
+  const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, bookings: 0, new_24h: 0, new_7d: 0 });
+  // "เห็นแล้วล่าสุด" — ใช้ไฮไลต์นักเรียนที่สมัครหลังจากครั้งที่เปิดดูรอบก่อน
+  const [studentsSeenAt, setStudentsSeenAt] = useState(() => load("admin_students_seen_at", null));
 
   const currentTab = TABS.find(t => t.key === tab);
   const isCustomTab = !!currentTab?.custom;
@@ -2625,17 +2627,21 @@ function Admin() {
 
   const fetchStats = useCallback(async () => {
     const [students, customers, bookings] = await Promise.all([
-      supaRest("online_students", "GET", null, "?select=status"),
+      supaRest("online_students", "GET", null, "?select=status,registered_at&limit=10000"),
       supaRest("customers", "GET", null, "?select=id&limit=10000"),
       supaRest("bookings", "GET", null, "?select=id&limit=10000"),
     ]);
     const s = Array.isArray(students) ? students : [];
+    const now = Date.now();
+    const since = (ms) => s.filter(x => x.registered_at && (now - new Date(x.registered_at).getTime()) <= ms).length;
     setStats({
       total: s.length,
       finished: s.filter(x => (x.status || "").startsWith("จบคอร์ส")).length,
       in_progress: s.filter(x => x.status === "กำลังเรียน").length,
       customers: Array.isArray(customers) ? customers.length : 0,
       bookings: Array.isArray(bookings) ? bookings.length : 0,
+      new_24h: since(24 * 60 * 60 * 1000),
+      new_7d: since(7 * 24 * 60 * 60 * 1000),
     });
   }, []);
 
@@ -2692,6 +2698,16 @@ function Admin() {
     return String(v);
   };
 
+  // นักเรียนใหม่ = แถวที่สมัครหลังจาก timestamp ที่เปิดดูครั้งก่อน (เก็บใน localStorage)
+  const seenMs = studentsSeenAt ? new Date(studentsSeenAt).getTime() : null;
+  const isNewStudent = (r) => tab === "online_students" && seenMs != null && r.registered_at && new Date(r.registered_at).getTime() > seenMs;
+  const newSinceSeen = tab === "online_students" ? rows.filter(isNewStudent).length : 0;
+  const markStudentsSeen = () => {
+    const ts = new Date().toISOString();
+    save("admin_students_seen_at", ts);
+    setStudentsSeenAt(ts);
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: B.gray }}>
       <div style={{ background: B.black, color: B.white, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -2710,6 +2726,8 @@ function Admin() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
           {[
             { label: "นักเรียนทั้งหมด", value: stats.total, color: B.red },
+            { label: "🆕 ใหม่ 24 ชม.", value: stats.new_24h, color: B.gold },
+            { label: "🆕 ใหม่ 7 วัน", value: stats.new_7d, color: B.gold },
             { label: "จบคอร์สแล้ว", value: stats.finished, color: B.green },
             { label: "กำลังเรียน", value: stats.in_progress, color: B.gold },
             { label: "ลูกค้าทั้งหมด", value: stats.customers, color: B.black },
@@ -2757,6 +2775,14 @@ function Admin() {
           <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {rows.length} แถว</div>
         </div>
 
+        {/* แบนเนอร์นักเรียนใหม่ตั้งแต่ครั้งก่อน */}
+        {tab === "online_students" && newSinceSeen > 0 && (
+          <div style={{ background: `${B.green}12`, border: `1px solid ${B.green}55`, borderRadius: 12, padding: "12px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: B.black }}>🆕 มีนักเรียนใหม่ {newSinceSeen} คน ตั้งแต่ครั้งก่อน</span>
+            <button onClick={markStudentsSeen} style={{ marginLeft: "auto", background: B.green, color: B.white, border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>ทำเครื่องหมายว่าดูแล้ว</button>
+          </div>
+        )}
+
         {/* Table */}
         <div style={{ background: B.white, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
           {loading ? (
@@ -2774,13 +2800,19 @@ function Admin() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((r, i) => (
-                    <tr key={r.id || i} style={{ borderBottom: `1px solid ${B.ltGray}` }}>
-                      {currentTab.cols.map(c => (
-                        <td key={c} style={{ padding: "10px 12px", verticalAlign: "top" }}>{fmt(r[c])}</td>
+                  {filtered.map((r, i) => {
+                    const isNew = isNewStudent(r);
+                    return (
+                    <tr key={r.id || i} style={{ borderBottom: `1px solid ${B.ltGray}`, background: isNew ? `${B.green}10` : "transparent" }}>
+                      {currentTab.cols.map((c, ci) => (
+                        <td key={c} style={{ padding: "10px 12px", verticalAlign: "top" }}>
+                          {ci === 0 && isNew && <span style={{ display: "inline-block", background: B.green, color: B.white, fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4, marginRight: 6 }}>ใหม่</span>}
+                          {fmt(r[c])}
+                        </td>
                       ))}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
