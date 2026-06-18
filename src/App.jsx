@@ -129,7 +129,6 @@ const css = {
 // ==================== LANDING ====================
 function Landing({ go }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
-  const enrolled = load("enrolled", false);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.red} 0%, ${B.dkRed} 100%)`, color: B.white, padding: "52px 24px 56px", textAlign: "center", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: -60, right: -60, width: 240, height: 240, borderRadius: "50%", background: "rgba(255,255,255,.06)" }}/>
@@ -143,7 +142,7 @@ function Landing({ go }) {
         <div style={{ display: "inline-flex", alignItems: "center", gap: 14, background: "rgba(255,255,255,.15)", borderRadius: 16, padding: "14px 28px", marginBottom: 28 }}>
           {FREE_LAUNCH ? (<><span style={{ fontSize: 44, fontWeight: 800 }}>ฟรี!</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ textDecoration: "line-through", opacity: .7 }}>ปกติ ฿100</div><div style={{ opacity: .85 }}>+ คูปองส่วนลด ฿100</div></div></>) : (<><span style={{ fontSize: 44, fontWeight: 800 }}>฿35</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ opacity: .85 }}>ต่อหัวข้อ</div><div style={{ opacity: .7 }}>Full Course ฿149</div></div></>)}
         </div>
-        <div><button onClick={() => enrolled ? go("course") : go("register")} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{enrolled ? "เข้าเรียนต่อ →" : FREE_LAUNCH ? "ลงทะเบียนเรียนฟรี →" : "ลงทะเบียน — เรียนบทแรกฟรี →"}</button></div>
+        <div><button onClick={() => go("course")} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{FREE_LAUNCH ? "เรียนฟรีเลย →" : "เรียนเลย →"}</button></div>
       </div>
     </div>
 
@@ -163,7 +162,7 @@ function Landing({ go }) {
           </div>
         </div>
       ))}
-      <button onClick={() => enrolled ? go("store") : go("register")} style={{ ...css.btn(B.red, B.white, true), marginTop: 4 }}>{enrolled ? "เลือกซื้อหัวข้อ →" : "ลงทะเบียนก่อน →"}</button>
+      <button onClick={() => go("store")} style={{ ...css.btn(B.red, B.white, true), marginTop: 4 }}>เลือกซื้อหัวข้อ →</button>
     </div>}
 
     <div style={{ ...css.wrap, paddingTop: FREE_LAUNCH ? 36 : 0, paddingBottom: 24 }}>
@@ -365,19 +364,31 @@ function Register({ go, setUser }) {
     const cleanPhone = f.phone.replace(/\D/g, "");
     const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email };
     setUser(userData); save("user", userData);
-    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
+    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const finalProgress = load("progress", { done: [], scores: {} });
+    const finalModId = COURSE.modules[COURSE.modules.length - 1].id;
+    const completed = finalProgress.done.includes(finalModId);
+    const coupon = load("coupon", null) || (completed ? (() => { const c = genCoupon(); save("coupon", c); return c; })() : null);
+    const finalScore = finalProgress.scores[finalModId] || null;
     supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course" });
-    supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน" });
+    if (completed) {
+      const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
+      supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: finalScore, coupon_code: coupon, renew_date: renew.toISOString().split("T")[0] });
+      supaRest("sales_tracking", "POST", { name: userData.name, phone: cleanPhone, completed_date: new Date().toISOString(), score: finalScore, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
+      if (coupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
+    } else {
+      supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน" });
+    }
     save("enrolled", true);
-    if (FREE_LAUNCH) { go("course"); } else { go("course"); } // ลงทะเบียนแล้วเข้าเรียนได้เลย (บทที่ 1 ฟรี)
+    go("certificate");
   };
   const field = (key, label, ph, type = "text") => (<div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>{label}</label><input type={type} placeholder={ph} value={f[key]} onChange={e => { setF({...f, [key]: e.target.value}); setErr({...err, [key]: undefined}); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${err[key] ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>{err[key] && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err[key]}</div>}</div>);
-  return (<div style={css.page}><div style={css.header(B.red)}><button onClick={() => go("landing")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>สมัครเรียน</div></div>
+  return (<div style={css.page}><div style={css.header(B.red)}><button onClick={() => go("course")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ลงทะเบียนรับใบเกียรติบัตร</div></div>
     <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
-      <div style={css.card}><h3 style={{ fontSize: 17, fontWeight: 700, marginTop: 0, marginBottom: 18 }}>ข้อมูลผู้เรียน</h3>{field("name", "ชื่อ-นามสกุล *", "เช่น สมชาย ใจดี")}{field("phone", "เบอร์โทรศัพท์ *", "เช่น 081-234-5678", "tel")}{field("email", "อีเมล (ไม่บังคับ)", "เช่น name@email.com", "email")}
+      <div style={css.card}><h3 style={{ fontSize: 17, fontWeight: 700, marginTop: 0, marginBottom: 6 }}>ยินดีด้วย! คุณผ่านข้อสอบแล้ว</h3><p style={{ fontSize: 13, color: B.dkGray, margin: "0 0 18px", lineHeight: 1.6 }}>กรอกข้อมูลด้านล่างเพื่อออกใบประกาศนียบัตรในชื่อของคุณ</p>{field("name", "ชื่อ-นามสกุล *", "เช่น สมชาย ใจดี")}{field("phone", "เบอร์โทรศัพท์ *", "เช่น 081-234-5678", "tel")}{field("email", "อีเมล (ไม่บังคับ)", "เช่น name@email.com", "email")}
         <div style={{ marginTop: 8 }}><label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}><input type="checkbox" checked={pdpa} onChange={e => { setPdpa(e.target.checked); setErr({...err, pdpa: undefined}); }} style={{ marginTop: 3, width: 18, height: 18 }}/><span style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.5 }}>ข้าพเจ้ายินยอมให้ JIA TRAINER CENTER เก็บรวบรวมและใช้ข้อมูลส่วนบุคคล (ชื่อ, เบอร์โทร, อีเมล) เพื่อจัดการหลักสูตรออนไลน์ การออกใบประกาศนียบัตร และการแจ้งข้อมูลหลักสูตร ข้อมูลจะไม่ถูกเปิดเผยต่อบุคคลภายนอก</span></label>{err.pdpa && <div style={{ color: B.red, fontSize: 12, marginTop: 4 }}>{err.pdpa}</div>}</div>
       </div>
-      <button onClick={submit} style={{ ...css.btn(B.red, B.white, true), marginTop: 20 }}>{FREE_LAUNCH ? "ลงทะเบียน → เข้าเรียนเลย" : "ถัดไป → ชำระเงิน"}</button>
+      <button onClick={submit} style={{ ...css.btn(B.red, B.white, true), marginTop: 20 }}>ลงทะเบียนรับใบประกาศนียบัตร →</button>
     </div></div>);
 }
 
@@ -462,6 +473,8 @@ function Payment({ go, user }) {
   );
 }
 
+const ENCOURAGE = ["","เยี่ยมมาก! รู้เรื่อง CPR ผู้ใหญ่แล้ว ไปบทต่อไปเลย","ดีมาก! รู้ทั้ง CPR และ AED แล้ว","เก่งมาก! CPR เด็กก็ไม่ยากเลย","สุดยอด! เรียนมาครึ่งทางแล้ว","ใกล้จบแล้ว! อีกบทเดียว","ผ่านครบทุกบทแล้ว! พร้อมสอบข้อสอบสุดท้ายได้เลย"];
+
 // ==================== COURSE ====================
 function Course({ go, progress, setProgress, user }) {
   const [active, setActive] = useState(null); const [quiz, setQuiz] = useState(false); const [ans, setAns] = useState({}); const [result, setResult] = useState(null); const [watched, setWatched] = useState(false); const [reviewMode, setReviewMode] = useState(false); const [timer, setTimer] = useState(0); const [canWatch, setCanWatch] = useState(false); const [mustRewatch, setMustRewatch] = useState(false);
@@ -515,7 +528,9 @@ function Course({ go, progress, setProgress, user }) {
             {mod.quiz.map((q, qi) => (<div key={qi} style={{ marginBottom: 22 }}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{qi + 1}. {q.q}</div>{q.c.map((c, ci) => { let bg = B.gray, border = "transparent"; if (result) { if (ci === q.a) { bg = `${B.green}18`; border = B.green; } else if (ans[qi] === ci) { bg = `${B.red}12`; border = B.red; } } else if (ans[qi] === ci) { bg = `${B.red}10`; border = B.red; } return <button key={ci} onClick={() => !result && setAns({...ans, [qi]: ci})} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", marginBottom: 5, background: bg, border: `2px solid ${border}`, borderRadius: 8, fontSize: 13, cursor: result ? "default" : "pointer" }}>{c}</button>; })}</div>))}
             {!result ? <button onClick={submitQuiz} disabled={Object.keys(ans).length < mod.quiz.length} style={css.btn(Object.keys(ans).length >= mod.quiz.length ? B.red : B.ltGray, Object.keys(ans).length >= mod.quiz.length ? B.white : B.dkGray, true)}>ส่งคำตอบ</button>
             : <div style={{ textAlign: "center" }}><div style={{ background: result.passed ? `${B.green}12` : `${B.red}08`, borderRadius: 12, padding: 20, marginBottom: 16 }}><div style={{ fontSize: 40, fontWeight: 800, color: result.passed ? B.green : B.red }}>{result.score}%</div><div style={{ fontSize: 14, fontWeight: 600, color: result.passed ? B.green : B.red }}>{result.passed ? "ผ่าน!" : "ไม่ผ่าน"}</div><div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>ตอบถูก {result.correct}/{result.total} ข้อ</div></div>
-              {result.passed ? (<button onClick={() => { resetLesson(); if (isFinal) go("certificate"); }} style={css.btn(B.green, B.white)}>{isFinal ? "รับใบประกาศนียบัตร →" : "กลับหน้าบทเรียน →"}</button>)
+              {result.passed && !isFinal && <div style={{ background: `${B.green}08`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.green}20` }}><div style={{ fontSize: 14, fontWeight: 600, color: B.green, textAlign: "center" }}>{ENCOURAGE[mod.id] || "เยี่ยมมาก! ไปต่อได้เลย"}</div></div>}
+              {!result.passed && <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 12, textAlign: "center" }}>ไม่เป็นไร ทบทวนวิดีโออีกครั้ง แล้วสอบใหม่ได้เลย</div>}
+              {result.passed ? (<button onClick={() => { resetLesson(); if (isFinal) go("register"); }} style={css.btn(B.green, B.white)}>{isFinal ? "ลงทะเบียนรับใบประกาศนียบัตร →" : "กลับหน้าบทเรียน →"}</button>)
               : mod.vid ? (<button onClick={() => { setQuiz(false); setResult(null); setAns({}); setWatched(false); setMustRewatch(true); setCanWatch(false); setTimer(Math.floor(mod.dur * 0.9)); }} style={css.btn(B.red, B.white)}>← กลับดูวิดีโอใหม่แล้วสอบอีกครั้ง</button>)
               : (<button onClick={() => { setAns({}); setResult(null); }} style={css.btn(B.red, B.white)}>ทำใหม่</button>)}
             </div>}
@@ -527,7 +542,9 @@ function Course({ go, progress, setProgress, user }) {
   const pct = Math.round((progress.done.length / COURSE.modules.length) * 100);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.black} 0%, #2a2a2a 100%)`, color: B.white, padding: "24px 24px 30px" }}><div style={{ maxWidth: 480, margin: "0 auto" }}><div style={{ fontSize: 11, letterSpacing: 2, opacity: .5, textTransform: "uppercase" }}>JIA TRAINER CENTER</div><h2 style={{ fontSize: 20, fontWeight: 700, margin: "4px 0 14px" }}>CPR & AED ออนไลน์</h2><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)" }}><div style={{ height: "100%", borderRadius: 3, background: B.green, width: `${pct}%`, transition: "width .5s" }}/></div><span style={{ fontSize: 12, fontWeight: 600 }}>{pct}%</span></div><div style={{ fontSize: 11, opacity: .5, marginTop: 4 }}>{progress.done.length}/{COURSE.modules.length} บทเรียน</div></div></div>
-    <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>{COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy) ? "pointer" : "not-allowed", opacity: (ok || needBuy) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+    <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+      {progress.done.length > 0 && progress.done.length < COURSE.modules.length && <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.gold}30`, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 600, color: "#B45309" }}>{progress.done.length < 3 ? "เรียนมาได้ดีมาก ไปต่อได้เลย!" : progress.done.length < 6 ? "เลยครึ่งทางแล้ว อีกนิดเดียว!" : "เกือบถึงแล้ว ลุยต่อได้เลย!"}</div></div>}
+      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy) ? "pointer" : "not-allowed", opacity: (ok || needBuy) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {!FREE_LAUNCH && purchased.filter(x => x <= 6).length < 6 && <button onClick={() => go("store")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 8, fontSize: 14 }}>ซื้อเพิ่ม / Full Course ฿{PRICING.full} →</button>}
       {pct === 100 && <button onClick={() => go("certificate")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 16 }}>ดูใบประกาศนียบัตร & คูปอง →</button>}
       {/* Mini cert per module */}
@@ -1872,7 +1889,7 @@ function Admin() {
 // ==================== APP ====================
 export default function App() {
   const isAdmin = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
-  const [page, setPage] = useState(() => load("enrolled", false) ? "course" : "landing");
+  const [page, setPage] = useState(() => load("progress", { done: [] }).done.length > 0 ? "course" : "landing");
   const [user, setUser] = useState(() => load("user", null));
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
