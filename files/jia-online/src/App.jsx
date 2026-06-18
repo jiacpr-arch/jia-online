@@ -2831,7 +2831,11 @@ function Admin() {
 
 // ==================== APP ====================
 export default function App() {
-  const isAdmin = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
+  // เข้าหน้า admin ได้ทั้ง path /admin (เช่น cpr.morroo.com/admin) และ ?admin=1 (เดิม)
+  const isAdmin = typeof window !== "undefined" && (
+    new URLSearchParams(window.location.search).get("admin") === "1" ||
+    /\/admin\/?$/.test(window.location.pathname)
+  );
   const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
   const [page, setPage] = useState(() => {
     if (promoParam) return "claim";
