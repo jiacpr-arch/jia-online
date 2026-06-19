@@ -1404,6 +1404,12 @@ function Certificate({ user, go }) {
   const certRef = useRef(null);
   const [gen, setGen] = useState(null); // null | "img" | "pdf"
   const fileBase = `JIA_Certificate_${sanitizeFileName(user?.name)}`;
+  // ===== Strong-soft LINE gate =====
+  const lc = getLinkCode();
+  const [lineLinked, setLineLinked] = useState(() => load("line_linked", false));
+  const [skipGate, setSkipGate] = useState(() => load("line_linked", false));
+  const [linkWaiting, setLinkWaiting] = useState(false);
+  const pollRef = useRef(null);
   // fallback สุดท้าย ถ้าสร้างไฟล์ไม่สำเร็จ — บอกผู้ใช้ screenshot เอง
   const saveCertFallback = () => { alert("บันทึกอัตโนมัติไม่สำเร็จ กรุณา screenshot หน้าจอเพื่อบันทึกใบประกาศนียบัตร\n\niPhone: กดปุ่ม Power + Volume Up\nAndroid: กดปุ่ม Power + Volume Down\n\nรหัสคูปอง: " + coupon); };
   const downloadImage = async () => {
@@ -1441,6 +1447,32 @@ function Certificate({ user, go }) {
     const ro = new ResizeObserver(update); ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  // เปิด LINE พร้อมโค้ด แล้ว poll หา line_user_id ที่ webhook เขียนกลับมา = ยืนยันการผูกจริง
+  const startLineLink = () => {
+    safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true });
+    const u = user || load("user", null);
+    const tail = u?.phone ? u.phone.replace(/\D/g, "").slice(-9) : null;
+    // ผูกโค้ดนี้กับเรคคอร์ดลูกค้า เพื่อให้ webhook จับคู่ได้แน่นอน
+    if (tail) supaRest("customers", "PATCH", { line_link_code: lc }, `?tel=ilike.*${tail}`);
+    setLinkWaiting(true);
+    if (pollRef.current) clearInterval(pollRef.current);
+    let tries = 0;
+    pollRef.current = setInterval(async () => {
+      tries++;
+      if (tail) {
+        const rows = await supaRest("customers", "GET", null, `?tel=ilike.*${tail}&select=line_user_id&limit=1`);
+        if (Array.isArray(rows) && rows[0]?.line_user_id) {
+          clearInterval(pollRef.current); pollRef.current = null;
+          save("line_linked", true); save("line_added", true);
+          setLineLinked(true); setLinkWaiting(false);
+          safeTrack("line_oa_linked", { variant: "certificate" });
+          return;
+        }
+      }
+      if (tries >= 40) { clearInterval(pollRef.current); pollRef.current = null; setLinkWaiting(false); }
+    }, 3000);
+  };
   return (<div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto" }}>
     <div style={{ textAlign: "center", marginBottom: 24 }}><div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><I name="star" size={38} color={B.gold}/></div><h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>ยินดีด้วย!</h2><p style={{ fontSize: 14, color: B.dkGray }}>คุณผ่านคอร์ส CPR & AED ออนไลน์แล้ว</p></div>
     <div ref={wrapRef} style={{ width: "100%", height: CERT_H * scale, overflow: "hidden", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.12)" }}>
@@ -1469,32 +1501,44 @@ function Certificate({ user, go }) {
         </div>
       </div>
     </div>
-    <button onClick={downloadImage} disabled={!!gen} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="save" size={18} color={B.white}/> {gen === "img" ? "กำลังสร้างรูป..." : "บันทึกเป็นรูปภาพ"}</button>
-    <button onClick={downloadPDF} disabled={!!gen} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="cert" size={18} color={B.black}/> {gen === "pdf" ? "กำลังสร้าง PDF..." : "ดาวน์โหลด PDF"}</button>
-    {!load("line_added", false) && (() => {
-      const lc = getLinkCode();
-      return (
-        <div style={{ background: "#06C75510", border: "2px solid #06C75540", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
-          <I name="line" size={32} color="#06C755"/>
-          <div style={{ fontSize: 15, fontWeight: 700, color: B.black, margin: "8px 0 4px" }}>อย่าลืม! เพิ่ม LINE @jiacpr</div>
-          <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12 }}>รับเตือนทบทวนทุก 3 เดือน + โปรต่ออายุ Cert</div>
-          <a href={lineLinkDeepLink(lc)} target="_blank" rel="noopener noreferrer"
-             onClick={() => { safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true }); markLineAdded(user); }}
-             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}>
-            <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน + ผูกบัญชีอัตโนมัติ
-          </a>
-          <div style={{ fontSize: 10, color: B.dkGray, marginTop: 8, lineHeight: 1.5 }}>
-            (LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> → กดส่งเพื่อผูกบัญชี)
-          </div>
+    {/* ===== Strong-soft LINE gate: เลือก "ผูก LINE" หรือ "ข้าม" ก่อนถึงดาวน์โหลด ===== */}
+    {lineLinked ? (
+      <div style={{ background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 16, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>
+        ✓ ผูก LINE @jiacpr เรียบร้อย — จะได้รับใบเซอร์ เตือนทบทวน และโปรทาง LINE
+      </div>
+    ) : !skipGate ? (
+      <div style={{ background: "#06C75510", border: "2px solid #06C75540", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
+        <I name="line" size={32} color="#06C755"/>
+        <div style={{ fontSize: 16, fontWeight: 800, color: B.black, margin: "8px 0 4px" }}>ผูก LINE @jiacpr เพื่อรับใบเซอร์ + คูปอง</div>
+        <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12, lineHeight: 1.6 }}>แอดแล้วผูกบัญชี รับ: ใบประกาศทาง LINE · คูปองส่วนลด on-site ฿100 · เตือนทบทวน CPR ทุก 3 เดือน</div>
+        <a href={lineLinkDeepLink(lc)} onClick={startLineLink} target="_blank" rel="noopener noreferrer"
+           style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}>
+          <I name="line" size={22} color={B.white}/> ผูก LINE รับใบเซอร์ + คูปอง
+        </a>
+        <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8, lineHeight: 1.5 }}>
+          (LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> ขึ้นมา → <strong>กดส่ง</strong> ในแชต @jiacpr = ผูกบัญชีอัตโนมัติ)
         </div>
-      );
-    })()}
-    <div style={{ background: `${B.red}08`, borderRadius: 16, padding: 20, marginTop: 16, textAlign: "center" }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: B.red, marginBottom: 4 }}>คูปองส่วนลด ฿100 สำหรับคอร์ส On-site!</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 }}>{coupon}</div>
-      <button onClick={() => go("booking")} style={{ ...css.btn(B.red, B.white, true), display: "block", width: "100%", textAlign: "center", cursor: "pointer" }}>จองคอร์ส On-site ใช้คูปองส่วนลด →</button>
-      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => safeTrack("line_oa_clicked", { variant: "certificate-inquire" })} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
-    </div>
+        {linkWaiting && (
+          <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#06A047" }}>⏳ กำลังรอการยืนยัน... กดส่งข้อความในแอป LINE แล้วรอสักครู่</div>
+        )}
+        <button onClick={() => { setSkipGate(true); safeTrack("line_oa_skipped", { variant: "certificate" }); }}
+          style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: "10px 12px", marginTop: 8, cursor: "pointer", textDecoration: "underline" }}>
+          ข้าม รับแค่ใบเซอร์ (ไม่รับคูปอง/การแจ้งเตือน)
+        </button>
+      </div>
+    ) : null}
+
+    {/* ดาวน์โหลด + คูปอง: ปลดล็อกเมื่อผูก LINE แล้ว หรือกดข้าม */}
+    {(lineLinked || skipGate) && (<>
+      <button onClick={downloadImage} disabled={!!gen} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="save" size={18} color={B.white}/> {gen === "img" ? "กำลังสร้างรูป..." : "บันทึกเป็นรูปภาพ"}</button>
+      <button onClick={downloadPDF} disabled={!!gen} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="cert" size={18} color={B.black}/> {gen === "pdf" ? "กำลังสร้าง PDF..." : "ดาวน์โหลด PDF"}</button>
+      <div style={{ background: `${B.red}08`, borderRadius: 16, padding: 20, marginTop: 16, textAlign: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: B.red, marginBottom: 4 }}>คูปองส่วนลด ฿100 สำหรับคอร์ส On-site!</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 }}>{coupon}</div>
+        <button onClick={() => go("booking")} style={{ ...css.btn(B.red, B.white, true), display: "block", width: "100%", textAlign: "center", cursor: "pointer" }}>จองคอร์ส On-site ใช้คูปองส่วนลด →</button>
+        <a href={LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => safeTrack("line_oa_clicked", { variant: "certificate-inquire" })} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
+      </div>
+    </>)}
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ jiacpr.com/online"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
@@ -2622,7 +2666,7 @@ function Admin() {
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, bookings: 0, new_24h: 0, new_7d: 0 });
+  const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, line_linked: 0, bookings: 0, new_24h: 0, new_7d: 0 });
   // "เห็นแล้วล่าสุด" — ใช้ไฮไลต์นักเรียนที่สมัครหลังจากครั้งที่เปิดดูรอบก่อน
   const [studentsSeenAt, setStudentsSeenAt] = useState(() => load("admin_students_seen_at", null));
 
@@ -2645,17 +2689,19 @@ function Admin() {
   const fetchStats = useCallback(async () => {
     const [students, customers, bookings] = await Promise.all([
       supaRest("online_students", "GET", null, "?select=status,registered_at&limit=10000"),
-      supaRest("customers", "GET", null, "?select=id&limit=10000"),
+      supaRest("customers", "GET", null, "?select=id,line_user_id&limit=10000"),
       supaRest("bookings", "GET", null, "?select=id&limit=10000"),
     ]);
     const s = Array.isArray(students) ? students : [];
+    const cust = Array.isArray(customers) ? customers : [];
     const now = Date.now();
     const since = (ms) => s.filter(x => x.registered_at && (now - new Date(x.registered_at).getTime()) <= ms).length;
     setStats({
       total: s.length,
       finished: s.filter(x => (x.status || "").startsWith("จบคอร์ส")).length,
       in_progress: s.filter(x => x.status === "กำลังเรียน").length,
-      customers: Array.isArray(customers) ? customers.length : 0,
+      customers: cust.length,
+      line_linked: cust.filter(x => x.line_user_id).length,
       bookings: Array.isArray(bookings) ? bookings.length : 0,
       new_24h: since(24 * 60 * 60 * 1000),
       new_7d: since(7 * 24 * 60 * 60 * 1000),
@@ -2748,6 +2794,7 @@ function Admin() {
             { label: "จบคอร์สแล้ว", value: stats.finished, color: B.green },
             { label: "กำลังเรียน", value: stats.in_progress, color: B.gold },
             { label: "ลูกค้าทั้งหมด", value: stats.customers, color: B.black },
+            { label: "🟢 ผูก LINE แล้ว", value: stats.line_linked, color: "#06C755" },
             { label: "การจอง On-site", value: stats.bookings, color: B.dkGray },
           ].map(c => (
             <div key={c.label} style={{ background: B.white, borderRadius: 12, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
