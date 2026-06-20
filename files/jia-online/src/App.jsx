@@ -29,7 +29,7 @@ const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
 
 // ========== AUTH GATE (บังคับสมัครหลังจบบท 1) ==========
 const AUTH_GATE_ENABLED = true;          // เปิดด่านบังคับสมัคร (false = กลับไป flow เดิม)
-const LIFF_ID = "";                       // ⚠️ ใส่ LIFF ID จาก LINE Developers (PUBLIC). ว่าง = ปุ่ม LINE ปิดชั่วคราว
+const LIFF_ID = "2010458255-JAxIKawy";     // LIFF ID จาก LINE Developers (PUBLIC) — channel "JIA CPR Online" / provider JiaTrainingcenter
 const GOOGLE_LOGIN_ENABLED = true;        // ต้องเปิด Google provider ใน Supabase Auth ก่อนใช้จริง
 const EMAIL_OTP_ENABLED = true;           // ต้องเปิด Email (OTP) provider ใน Supabase Auth
 const POSTHOG_KEY = "";                   // PUBLIC PostHog project key. ว่าง = ไม่ทำ A/B (ใช้ตัวแปรด่าน default)
