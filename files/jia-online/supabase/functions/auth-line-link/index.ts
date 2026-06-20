@@ -133,12 +133,9 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // 5) ยิงใบผ่านบท 1 + คูปองเข้าแชต LINE (เฉพาะคนผ่านบท 1 แล้ว)
-  let coupon: string | null = null;
-  if (merged.done.includes(1)) {
-    const push = await runSignupPush({ line_user_id: lineUserId, name });
-    coupon = (push as any)?.coupon || null;
-  }
+  // 5) ยิงข้อความต้อนรับ + คูปอง ฿100 เข้าแชต LINE ทุกครั้งที่สมัครสำเร็จ (ด่านอยู่ก่อนเรียน)
+  const push = await runSignupPush({ line_user_id: lineUserId, name });
+  const coupon: string | null = (push as any)?.coupon || null;
 
   return json({ ok: true, customer_id: customerId, line_user_id: lineUserId, name, progress: merged, coupon });
 });

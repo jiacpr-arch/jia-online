@@ -53,10 +53,10 @@ export async function runSignupPush(opts: { line_user_id: string; name?: string;
   }
 
   const text =
-    `🎉 ยินดีด้วย${name ? " คุณ" + name : ""}! ผ่านบทที่ 1 เรียบร้อย\n\n` +
-    `คุณได้รับ "คูปองส่วนลด ฿100" สำหรับคอร์ส CPR & AED ภาคปฏิบัติ (on-site) ที่ JIA Trainer Center\n\n` +
+    `🎉 ยินดีต้อนรับ${name ? " คุณ" + name : ""}! สมัครคอร์ส CPR & AED ออนไลน์เรียบร้อย\n\n` +
+    `ขอบคุณที่ลองทำควิซกับเรา 💙 คุณได้รับ "คูปองส่วนลด ฿100" สำหรับคอร์สภาคปฏิบัติ (on-site) ที่ JIA Trainer Center\n\n` +
     `รหัสคูปอง: ${coupon}\n\n` +
-    `เรียนบทต่อไปให้จบเพื่อรับใบประกาศนียบัตร แล้วทักแชตนี้เพื่อจองรอบ on-site ได้เลย 💙`;
+    `เริ่มเรียนคอร์สออนไลน์ได้เลย เรียนจบรับใบประกาศนียบัตร แล้วทักแชตนี้เพื่อจองรอบ on-site ได้ทันที`;
 
   if (opts.dry_run) return { ok: true, dry_run: true, coupon, preview: text };
 
