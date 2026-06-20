@@ -14,7 +14,8 @@ const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
 const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} };
 const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
-const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code + " (มาจากเรียน CPR&AED ออนไลน์)")}` ;
+// ข้อความ prefill ที่ลูกค้ากดส่งเข้า @jiacpr — โค้ด JIA-LINK ต้องอยู่หน้าสุดเสมอ (webhook ภายนอกจับคู่กับ customers.line_link_code → เขียน line_user_id กลับ)
+const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code + "\nสนใจคอร์ส CPR & AED 🙏 เรียนออนไลน์อยู่และได้รับส่วนลดแล้ว อยากนัดวันมาเรียนภาคปฏิบัติ ไม่ทราบว่าสะดวกวันไหนบ้างครับ/ค่ะ")}`;
 const markLineAdded = (user) => {
   save("line_added", true); save("line_added_at", new Date().toISOString());
   safeTrack("line_oa_added");
@@ -932,7 +933,7 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
             <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน + ผูกบัญชีอัตโนมัติ
           </a>
           <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 12, lineHeight: 1.5 }}>
-            (กดปุ่ม → LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{linkCode}</strong> ขึ้นมา → กดส่ง เพื่อให้ admin รู้ว่ามาจากเรียนออนไลน์)
+            (กดปุ่ม → LINE จะเด้งข้อความพร้อมโค้ด <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{linkCode}</strong> + ข้อความนัดเรียนภาคปฏิบัติ → กดส่ง = admin รับเรื่อง + ผูกบัญชีให้อัตโนมัติ)
           </div>
           <button onClick={onAdded} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>
             <I name="check" size={16} color={B.white}/> เพิ่มเพื่อนแล้ว → เข้าเรียนเลย
@@ -1817,7 +1818,7 @@ function Certificate({ user, go }) {
           <I name="line" size={22} color={B.white}/> ผูก LINE รับใบเซอร์ + คูปอง
         </a>
         <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8, lineHeight: 1.5 }}>
-          (LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> ขึ้นมา → <strong>กดส่ง</strong> ในแชต @jiacpr = ผูกบัญชีอัตโนมัติ)
+          (LINE จะเด้งข้อความพร้อมโค้ด <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> + ข้อความนัดเรียนภาคปฏิบัติ → <strong>กดส่ง</strong> ในแชต @jiacpr = ผูกบัญชีอัตโนมัติ)
         </div>
         {linkWaiting && (
           <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#06A047" }}>⏳ กำลังรอการยืนยัน... กดส่งข้อความในแอป LINE แล้วรอสักครู่</div>
