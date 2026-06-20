@@ -1,8 +1,16 @@
 # ตั้งค่าด่านบังคับสมัคร (LINE LIFF + Google + Email OTP)
 
 ฟีเจอร์ (flow ปัจจุบัน — `GATE_VARIANT_DEFAULT = "before-course"`):
-เปิดเว็บครั้งแรก → **ควิซเกริ่นนำ CPR 5 ข้อ (พร้อมรูป)** → **บังคับสมัคร** (LINE หลัก / Google / Email OTP) → เด้งแอด @jiacpr → **ปลดคอร์สทั้งหมด** + ส่งคูปอง ฿100 เข้าแชต LINE
-โค้ดทั้งหมด deploy ได้เลย แต่ **การล็อกอินจริงจะทำงานเมื่อตั้งค่าด้านล่างครบ** (ระหว่างนี้ปุ่ม LINE จะซ่อนถ้า `LIFF_ID` ว่าง — ทดสอบ Email OTP แทนได้)
+เปิดเว็บครั้งแรก → **ควิซเกริ่นนำ CPR 5 ข้อ (พร้อมรูป)** → **บังคับสมัคร** (LINE หลัก / Google / Email OTP) → หน้าแอด @jiacpr (โชว์คูปอง ฿100 บนจอ) → **ปลดคอร์สทั้งหมด**
+LINE Login ทำงานแล้ว (LIFF `2010458255-JAxIKawy`, Channel ID `2010458255`, secret `LINE_LOGIN_CHANNEL_ID` ตั้งใน `jiaroo_secrets` แล้ว)
+
+### ⚠️ ข้อจำกัด cross-provider (@jiacpr) — flow ที่ใช้จริงตอนนี้
+Login channel "JIA CPR Online" อยู่ใต้ provider **JiaTrainingcenter** แต่ OA **@jiacpr** (Messaging API Channel ID `1657175600`) อยู่ใต้ provider ของอีกบัญชี (เข้าถึงไม่ได้) → LINE ออก `userId` แยกตาม provider ทำให้:
+- ❌ LIFF เด้งแอด @jiacpr อัตโนมัติไม่ได้ · ❌ push คูปองเข้าแชต @jiacpr ตรงจาก login ไม่ได้ · ✅ ใช้ login ยืนยันตัวตน/เก็บลูกค้าได้ปกติ
+
+**วิธีรับมือ (ทำไว้แล้วในโค้ด):** หลังสมัคร (LINE/Google/Email) → ไปหน้า `LineAddPrompt` เสมอ → **โชว์คูปอง ฿100 บนจอ** (บันทึก `promo_codes` ใช้หน้าร้านได้) + ให้แอด @jiacpr ผ่าน QR/deep link เอง
+
+**ถ้าต้องการ auto add-friend + push คูปองเข้าแชตในอนาคต:** ขอสิทธิ์ admin ใน provider ของ @jiacpr → ย้าย Login channel ไป provider เดียวกัน → link OA → เปลี่ยน routing กลับมาเช็ค `isFriend` ใน `finishLineSignup`/App mount (`src/App.jsx`)
 
 ### รูปควิซเกริ่นนำ
 วางไฟล์รูปจริงใน `public/teaser/q1.png`..`q5.png` (ดู `public/teaser/README.md`) — ถ้ายังไม่มีไฟล์ ระบบโชว์กล่อง emoji ประกอบให้อัตโนมัติ (ไม่มีรูปแตก). คำถาม/รูปแก้ได้ที่ `TEASER_QUIZ` ใน `src/App.jsx`

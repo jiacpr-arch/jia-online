@@ -155,7 +155,7 @@ const finishLineSignup = async () => {
   let data = {}; try { data = await res.json(); } catch (e) {}
   if (!data?.ok) return null;
   const u = { name: data.name || profile.displayName || pending.name || "", phone: pending.phone || "", line_user_id: data.line_user_id, customer_id: data.customer_id };
-  save("user", u); save("signed_up", true); save("line_added", isFriend);
+  save("user", u); save("signed_up", true); save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
   if (data.progress) save("progress", data.progress);
   if (data.coupon) save("coupon", data.coupon);
   save("signup_pending", null); save("line_login_pending", false); save("enrolled", true);
@@ -886,6 +886,10 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
   const linkCode = getLinkCode();
   const deepLink = lineLinkDeepLink(linkCode);
   const preCourse = variant === "pre-course";
+  // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ (ออก/บันทึกถ้ายังไม่มี — ครอบคลุมทั้ง LINE/Google/Email)
+  const coupon = (!preCourse && isSignedUp())
+    ? (load("coupon", null) || (() => { const c = genCoupon(); save("coupon", c); try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {} return c; })())
+    : null;
   // gate ก่อนเรียน = ข้ามได้ (strong-soft) แต่จด line_skipped_at ไว้เพื่อไม่เด้งซ้ำ + ให้แบนเนอร์ในคอร์สตามต่อ
   useEffect(() => { safeTrack("line_gate_view", { variant }); }, [variant]);
   const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); go("course"); };
@@ -901,6 +905,11 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
         <div style={{ fontSize: 16, fontWeight: 700 }}>เพิ่ม LINE @jiacpr</div>
       </div>
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        {coupon && <div style={{ ...css.card, textAlign: "center", marginBottom: 14, border: `2px solid ${B.gold}`, background: `${B.gold}10` }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: B.black }}>🎉 สมัครสำเร็จ! รับคูปองส่วนลด ฿100</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", margin: "10px 0" }}>{coupon}</div>
+          <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.6 }}>เก็บรหัสนี้ไว้ใช้เป็นส่วนลดคอร์สภาคปฏิบัติ (on-site) — แจ้งตอนจอง หรือกรอกตอนชำระเงิน</div>
+        </div>}
         <div style={{ ...css.card, textAlign: "center" }}>
           <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#06C75518", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
             <I name="line" size={36} color="#06C755"/>
@@ -1049,7 +1058,8 @@ function SignupGate({ go, setUser, setProgress }) {
     try {
       if (!liff.isLoggedIn()) { liff.login({ botPrompt: "aggressive" }); return; } // redirect ออก → กลับมาเสร็จที่ App mount
       const r = await finishLineSignup();
-      if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); go(r.isFriend ? "course" : "lineprompt"); }
+      // @jiacpr อยู่คนละ provider → liff.getFriendship() เชื่อถือไม่ได้ → ไปหน้าแอด @jiacpr เสมอ (โชว์คูปองที่นั่น)
+      if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); go("lineprompt"); }
       else { setErr("เข้าสู่ระบบ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
     } catch (e) { setErr("เข้าสู่ระบบ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
   };
@@ -3288,7 +3298,7 @@ export default function App() {
     captureUTM();
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
     if (load("line_login_pending", false)) {
-      finishLineSignup().then(r => { if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); setPage(r.isFriend ? "course" : "lineprompt"); window.scrollTo(0, 0); } });
+      finishLineSignup().then(r => { if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); setPage("lineprompt"); window.scrollTo(0, 0); } });
     } else if (load("oauth_pending", false) || /[?#].*(code=|access_token=)/.test(window.location.href)) {
       finalizeOAuthSignup("google").then(r => { if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); window.history.replaceState({}, "", window.location.pathname); setPage("lineprompt"); window.scrollTo(0, 0); } });
     }
