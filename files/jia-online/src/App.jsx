@@ -27,6 +27,16 @@ const markLineAdded = (user) => {
 const SUPABASE_URL = "https://tpoiyykbgsgnrdwzgzvn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
 
+// ========== AUTH GATE (บังคับสมัครหลังจบบท 1) ==========
+const AUTH_GATE_ENABLED = true;          // เปิดด่านบังคับสมัคร (false = กลับไป flow เดิม)
+const LIFF_ID = "2010458255-JAxIKawy";     // LIFF ID จาก LINE Developers (PUBLIC) — channel "JIA CPR Online" / provider JiaTrainingcenter
+const GOOGLE_LOGIN_ENABLED = true;        // ต้องเปิด Google provider ใน Supabase Auth ก่อนใช้จริง
+const EMAIL_OTP_ENABLED = true;           // ต้องเปิด Email (OTP) provider ใน Supabase Auth
+const POSTHOG_KEY = "";                   // PUBLIC PostHog project key. ว่าง = ไม่ทำ A/B (ใช้ตัวแปรด่าน default)
+const POSTHOG_HOST = "https://us.i.posthog.com";
+const GATE_VARIANT_DEFAULT = "before-course"; // before-course (ควิซเกริ่นนำ→สมัคร→เข้าคอร์ส) | after-lesson-1 | soft
+const FN_URL = (n) => `${SUPABASE_URL}/functions/v1/${n}`;
+
 // ========== PRICING ==========
 const PRICING = {
   single: 35,       // ฿35 ต่อหัวข้อ
@@ -69,6 +79,114 @@ const daysUntil = (iso) => { if (!iso) return 0; const ms = new Date(iso).getTim
 const genIdempotencyKey = (email, phone) => `${normalizeEmail(email)}|${normalizePhone(phone)}|${Math.floor(Date.now() / 60000)}`.slice(0, 80);
 const save = (k, v) => { try { localStorage.setItem(`jia_${k}`, JSON.stringify(v)); } catch(e){} };
 const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
+
+// ========== AUTH HELPERS (LIFF / Supabase Auth / PostHog — โหลดแบบ on-demand) ==========
+let _liff = null;
+const loadLiff = async () => {
+  if (_liff) return _liff;
+  if (!LIFF_ID) return null;
+  try { const mod = await import("@line/liff"); const liff = mod.default || mod; await liff.init({ liffId: LIFF_ID }); _liff = liff; return liff; }
+  catch (e) { console.error("liff init", e); return null; }
+};
+let _supa = null;
+const getSupabase = async () => {
+  if (_supa) return _supa;
+  const { createClient } = await import("@supabase/supabase-js");
+  _supa = createClient(SUPABASE_URL, SUPABASE_KEY);
+  return _supa;
+};
+let _ph = null, _phTried = false;
+const getPosthog = async () => {
+  if (_phTried) return _ph;
+  _phTried = true;
+  if (!POSTHOG_KEY) return null;
+  try { const mod = await import("posthog-js"); const posthog = mod.default || mod; posthog.init(POSTHOG_KEY, { api_host: POSTHOG_HOST, capture_pageview: false }); _ph = posthog; return posthog; }
+  catch (e) { return null; }
+};
+const phCapture = (name, props) => { getPosthog().then(ph => { try { ph && ph.capture(name, props); } catch(e){} }); };
+
+const getGateVariant = () => load("gate_variant", GATE_VARIANT_DEFAULT);
+const isSignedUp = () => { const u = load("user", null); return !!(load("signed_up", false) || u?.line_user_id || u?.auth_user_id); };
+
+// UTM: เก็บครั้งแรกที่เข้า ก่อน replaceState จะลบ query ทิ้ง
+const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
+const captureUTM = () => {
+  try {
+    const p = new URLSearchParams(window.location.search); const got = {};
+    UTM_KEYS.forEach(k => { const v = p.get(k); if (v) got[k] = v; });
+    if (Object.keys(got).length && !load("utm", null)) { save("utm", got); save("landing_url", window.location.href.slice(0, 500)); }
+  } catch (e) {}
+};
+const getUTM = () => load("utm", {});
+
+const mergeProgressLocal = (a, b) => {
+  const done = [...new Set([...(a?.done || []), ...(b?.done || [])])].sort((x, y) => x - y);
+  const scores = { ...(a?.scores || {}) };
+  for (const [k, v] of Object.entries(b?.scores || {})) scores[k] = Math.max(Number(scores[k] || 0), Number(v || 0));
+  return { done, scores };
+};
+
+const FN_HEADERS = { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
+
+// บันทึก progress ขึ้น account (เรียนต่อข้ามเครื่อง) — เรียกหลัง save("progress") ทุกครั้งถ้า signedUp
+const syncProgressRemote = async (np) => {
+  try {
+    const u = load("user", null); if (!u) return;
+    if (u.line_user_id) { const idt = load("line_id_token", null); if (idt) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", id_token: idt, progress: np }) }); }
+    else if (u.auth_user_id) { const at = load("sb_access_token", null); if (at) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: at, progress: np }) }); }
+  } catch (e) {}
+};
+
+// ทำ LINE signup ให้เสร็จ (เรียกหลัง LIFF login redirect กลับมา / หรือกรณี login อยู่แล้ว)
+const finishLineSignup = async () => {
+  const liff = await loadLiff();
+  if (!liff || !liff.isLoggedIn()) return null;
+  const pending = load("signup_pending", {}) || {};
+  let idToken = null; try { idToken = liff.getIDToken(); } catch (e) {}
+  if (!idToken) return null;
+  let profile = {}; try { profile = await liff.getProfile(); } catch (e) {}
+  let isFriend = true; try { const fs = await liff.getFriendship(); isFriend = !!fs?.friendFlag; } catch (e) {}
+  save("line_id_token", idToken);
+  const res = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
+    id_token: idToken, phone: pending.phone || "", pdpa: true, display_name: profile.displayName || "",
+    utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
+    gate_variant: pending.gate_variant || getGateVariant(),
+  }) });
+  let data = {}; try { data = await res.json(); } catch (e) {}
+  if (!data?.ok) return null;
+  const u = { name: data.name || profile.displayName || pending.name || "", phone: pending.phone || "", line_user_id: data.line_user_id, customer_id: data.customer_id };
+  save("user", u); save("signed_up", true); save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
+  if (data.progress) save("progress", data.progress);
+  if (data.coupon) save("coupon", data.coupon);
+  save("signup_pending", null); save("line_login_pending", false); save("enrolled", true);
+  safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
+  phCapture("signup_complete", { provider: "line", variant: getGateVariant() });
+  return { user: u, progress: data.progress, isFriend };
+};
+
+// ทำ signup ให้เสร็จสำหรับ Google/Email (มี Supabase session แล้ว)
+const finalizeOAuthSignup = async (provider) => {
+  const supa = await getSupabase();
+  const { data: { session } } = await supa.auth.getSession();
+  if (!session) return null;
+  const pending = load("signup_pending", {}) || {};
+  const authUserId = session.user.id;
+  const email = session.user.email || "";
+  const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || "";
+  save("sb_access_token", session.access_token);
+  const fields = { auth_provider: provider, auth_user_id: authUserId, oauth_sub: authUserId, email, name: name || undefined, display_name: name || undefined, tel: pending.phone || undefined, pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), source: "online-course", gate_variant: pending.gate_variant || getGateVariant(), landing_url: load("landing_url", null), ...getUTM() };
+  const existing = await supaRest("customers", "GET", null, `?auth_user_id=eq.${authUserId}&select=id&limit=1`);
+  let customerId;
+  if (Array.isArray(existing) && existing[0]) { customerId = existing[0].id; await supaRest("customers", "PATCH", fields, `?id=eq.${customerId}`); }
+  else { customerId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6); await supaRest("customers", "POST", { id: customerId, ...fields }); await supaRest("online_students", "POST", { customer_id: customerId, name: name || "", phone: pending.phone || "", email, status: "กำลังเรียน" }); }
+  let progress = load("progress", { done: [], scores: {} });
+  try { const r = await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress }) }); const d = await r.json(); if (d?.progress) progress = mergeProgressLocal(progress, d.progress); } catch (e) {}
+  const u = { name: name || "", phone: pending.phone || "", email, auth_user_id: authUserId, customer_id: customerId };
+  save("user", u); save("signed_up", true); save("progress", progress); save("signup_pending", null); save("oauth_pending", false); save("enrolled", true);
+  safeTrack("signup_complete", { provider });
+  phCapture("signup_complete", { provider, variant: getGateVariant() });
+  return { user: u, progress };
+};
 
 // ========== CERTIFICATE EXPORT HELPERS (PDF / รูปภาพ) ==========
 const LOGO_SRC = "/logo.png"; // วางไฟล์โลโก้ไว้ที่ files/jia-online/public/logo.png
@@ -177,6 +295,16 @@ const calcPrice = (count) => {
 };
 
 // ========== COURSE DATA ==========
+// ควิซเกริ่นนำหน้าแรก (CPR ผู้ใหญ่ ง่ายๆ เน้นกำลังใจ ไม่มีเกณฑ์ผ่าน) — ตัวล่อก่อนเก็บ LINE
+// img: รูปประกอบ (วางไฟล์จริงทับใน public/teaser/ ภายหลัง) — ถ้าโหลดไม่ได้ใช้ emoji fallback
+const TEASER_QUIZ = [
+  { q: "เจอคนหมดสติล้มอยู่ สิ่งแรกที่ควรทำคืออะไร?", c: ["รีบวิ่งเข้าไปทันที", "ดูความปลอดภัยรอบตัวก่อนเข้าไป", "ถ่ายคลิปไว้ก่อน", "เดินเลี่ยงไป"], a: 1, img: "/teaser/q1.png", emoji: "⚠️", hint: "ความปลอดภัยของผู้ช่วยมาก่อนเสมอ" },
+  { q: "เบอร์โทรขอรถพยาบาล/แพทย์ฉุกเฉินในไทยคือเบอร์อะไร?", c: ["191", "1669", "1112", "1133"], a: 1, img: "/teaser/q2.png", emoji: "📞", hint: "จำง่ายๆ 1669 — สายด่วนการแพทย์ฉุกเฉิน" },
+  { q: "การกดหน้าอก CPR ควรกดตรงไหน?", c: ["กลางหน้าอก", "ที่ท้อง", "ที่คอ", "ที่ไหล่"], a: 0, img: "/teaser/q3.png", emoji: "🫶", hint: "วางส้นมือกลางหน้าอก" },
+  { q: "ควรกดหน้าอกเร็วประมาณเท่าไร?", c: ["ช้าๆ สบายๆ", "100–120 ครั้งต่อนาที", "เร็วที่สุดเท่าที่ทำได้", "ไม่สำคัญ"], a: 1, img: "/teaser/q4.png", emoji: "🥁", hint: "จังหวะพอๆ กับเพลงเร็ว ~100–120/นาที" },
+  { q: "เครื่อง AED (เครื่องกระตุกหัวใจ) คนทั่วไปใช้ได้ไหม?", c: ["ใช้ได้ เครื่องมีเสียงบอกทุกขั้นตอน", "ใช้ได้เฉพาะหมอ", "อันตราย ห้ามแตะ", "ต้องเรียน 1 ปีก่อน"], a: 0, img: "/teaser/q5.png", emoji: "❤️‍🩹", hint: "AED ออกแบบให้คนทั่วไปใช้ได้ มีเสียงนำทุกขั้นตอน" },
+];
+
 const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 0 : PRICING.full, modules: [
   { id: 1, title: "บทที่ 1: CPR ผู้ใหญ่", short: "CPR ผู้ใหญ่", desc: "เทคนิคการช่วยชีวิตผู้ใหญ่ขั้นพื้นฐาน ตามมาตรฐาน 2025", vid: "IbvE4PnW_80", dur: 54, quiz: [
     { q: "ขั้นตอนแรกก่อนเข้าช่วยเหลือผู้หมดสติคืออะไร?", c: ["ทำ CPR ทันที", "โทร 1669", "ประเมินความปลอดภัยของที่เกิดเหตุ (Scene Safety)", "ใช้ AED"], a: 2 },
@@ -498,7 +626,7 @@ function BlogDetail({ slug, goBack, openBlog }) {
 }
 
 // ==================== LANDING ====================
-function Landing({ go, openBlog }) {
+function Landing({ go, enterCourse, openBlog }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.red} 0%, ${B.dkRed} 100%)`, color: B.white, padding: "52px 24px 56px", textAlign: "center", position: "relative", overflow: "hidden" }}>
@@ -513,7 +641,7 @@ function Landing({ go, openBlog }) {
         <div style={{ display: "inline-flex", alignItems: "center", gap: 14, background: "rgba(255,255,255,.15)", borderRadius: 16, padding: "14px 28px", marginBottom: 28 }}>
           {FREE_LAUNCH ? (<><span style={{ fontSize: 44, fontWeight: 800 }}>ฟรี!</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ textDecoration: "line-through", opacity: .7 }}>ปกติ ฿100</div><div style={{ opacity: .85 }}>+ คูปองส่วนลด ฿100</div></div></>) : (<><span style={{ fontSize: 44, fontWeight: 800 }}>฿35</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ opacity: .85 }}>ต่อหัวข้อ</div><div style={{ opacity: .7 }}>Full Course ฿149</div></div></>)}
         </div>
-        <div><button onClick={() => go("course")} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{FREE_LAUNCH ? "เรียนฟรีเลย →" : "เรียนเลย →"}</button></div>
+        <div><button onClick={enterCourse} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{FREE_LAUNCH ? "เรียนฟรีเลย →" : "เรียนเลย →"}</button></div>
       </div>
     </div>
 
@@ -564,7 +692,7 @@ function Landing({ go, openBlog }) {
     </div>
     <div style={{ ...css.wrap, paddingBottom: 16 }}><MorrooAdBanner/></div>
     <div style={{ ...css.wrap, paddingBottom: 100 }}><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{[{ icon: "play", l: "6 วิดีโอ", s: "เรียนได้ทุกที่" },{ icon: "book", l: "Quiz ทุกบท", s: "ทดสอบความเข้าใจ" },{ icon: "cert", l: "ใบประกาศฯ", s: "มาตรฐาน 2025" },{ icon: "heart", l: "คูปอง ฿100", s: "ใช้ตอนเรียน on-site" }].map((f, i) => (<div key={i} style={{ background: B.white, borderRadius: 14, padding: 16, textAlign: "center" }}><I name={f.icon} size={22} color={B.red}/><div style={{ fontWeight: 600, fontSize: 13, marginTop: 6 }}>{f.l}</div><div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>{f.s}</div></div>))}</div></div>
-    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: B.white, padding: "14px 20px", boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 100 }}><div style={{ maxWidth: 480, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 11, color: B.dkGray }}>{FREE_LAUNCH ? "ช่วง Launch พิเศษ" : "เริ่มต้น"}</div><div style={{ fontSize: 22, fontWeight: 800, color: B.red }}>{FREE_LAUNCH ? "ฟรี!" : "฿35/หัวข้อ"}</div></div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { const txt = "เรียน CPR & AED ออนไลน์! ได้ใบ Certificate + คูปองส่วนลด"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn(B.white, B.red), padding: "10px 14px", border: `1px solid ${B.red}30`, fontSize: 13 }}>แชร์</button><button onClick={() => go("course")} style={css.btn(B.red, B.white)}>{FREE_LAUNCH ? "เรียนฟรี" : "เรียนเลย"}</button></div></div></div>
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: B.white, padding: "14px 20px", boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 100 }}><div style={{ maxWidth: 480, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 11, color: B.dkGray }}>{FREE_LAUNCH ? "ช่วง Launch พิเศษ" : "เริ่มต้น"}</div><div style={{ fontSize: 22, fontWeight: 800, color: B.red }}>{FREE_LAUNCH ? "ฟรี!" : "฿35/หัวข้อ"}</div></div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { const txt = "เรียน CPR & AED ออนไลน์! ได้ใบ Certificate + คูปองส่วนลด"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn(B.white, B.red), padding: "10px 14px", border: `1px solid ${B.red}30`, fontSize: 13 }}>แชร์</button><button onClick={enterCourse} style={css.btn(B.red, B.white)}>{FREE_LAUNCH ? "เรียนฟรี" : "เรียนเลย"}</button></div></div></div>
   </div>);
 }
 
@@ -757,21 +885,37 @@ function Store({ go }) {
 function LineAddPrompt({ go, user, variant = "post-register" }) {
   const linkCode = getLinkCode();
   const deepLink = lineLinkDeepLink(linkCode);
+  const preCourse = variant === "pre-course";
+  // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ (ออก/บันทึกถ้ายังไม่มี — ครอบคลุมทั้ง LINE/Google/Email)
+  const coupon = (!preCourse && isSignedUp())
+    ? (load("coupon", null) || (() => { const c = genCoupon(); save("coupon", c); try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {} return c; })())
+    : null;
+  // gate ก่อนเรียน = ข้ามได้ (strong-soft) แต่จด line_skipped_at ไว้เพื่อไม่เด้งซ้ำ + ให้แบนเนอร์ในคอร์สตามต่อ
+  useEffect(() => { safeTrack("line_gate_view", { variant }); }, [variant]);
   const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); go("course"); };
   const onSkip = () => { safeTrack("line_oa_skipped", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
   const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); };
-  const title = variant === "post-register" ? "เกือบเสร็จแล้ว! เพิ่ม LINE เพื่อรับสิทธิ์เต็ม" : "อย่าลืมเพิ่ม LINE!";
+  const title = preCourse ? "เพิ่ม LINE ก่อนเริ่มเรียน 🎓"
+    : variant === "post-register" ? "เกือบเสร็จแล้ว! เพิ่ม LINE เพื่อรับสิทธิ์เต็ม"
+    : "อย่าลืมเพิ่ม LINE!";
   return (
     <div style={css.page}>
       <div style={css.header(B.red)}>
+        {preCourse && <button onClick={() => go("landing")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button>}
         <div style={{ fontSize: 16, fontWeight: 700 }}>เพิ่ม LINE @jiacpr</div>
       </div>
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        {coupon && <div style={{ ...css.card, textAlign: "center", marginBottom: 14, border: `2px solid ${B.gold}`, background: `${B.gold}10` }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: B.black }}>🎉 สมัครสำเร็จ! รับคูปองส่วนลด ฿100</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", margin: "10px 0" }}>{coupon}</div>
+          <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.6 }}>เก็บรหัสนี้ไว้ใช้เป็นส่วนลดคอร์สภาคปฏิบัติ (on-site) — แจ้งตอนจอง หรือกรอกตอนชำระเงิน</div>
+        </div>}
         <div style={{ ...css.card, textAlign: "center" }}>
           <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#06C75518", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
             <I name="line" size={36} color="#06C755"/>
           </div>
           <h2 style={{ fontSize: 18, fontWeight: 800, margin: "0 0 8px" }}>{title}</h2>
+          {preCourse && <p style={{ fontSize: 13, color: "#06994A", fontWeight: 600, lineHeight: 1.6, margin: "0 0 12px" }}>แอด LINE @jiacpr เพื่อปลดล็อกคอร์สเรียนฟรี + เก็บสิทธิ์ไว้เรียนต่อได้ทุกอุปกรณ์ — ใช้เวลาไม่ถึง 10 วินาที</p>}
           <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 16px" }}>
             แอด LINE @jiacpr เพื่อ:<br/>
             <strong style={{ color: B.black }}>✓</strong> รับใบ Certificate แบบ PDF<br/>
@@ -796,6 +940,204 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
           <button onClick={onSkip} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: "8px 12px", cursor: "pointer", textDecoration: "underline" }}>
             ข้ามไปก่อน (เพิ่มได้ทีหลัง)
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== TEASER QUIZ (ควิซเกริ่นนำหน้าแรก) ====================
+// 5 ข้อ ทีละข้อ + รูป + feedback ทันที (ตอบผิดไปต่อได้) → จอสรุป → ปุ่มสมัคร (เก็บ LINE)
+function TeaserQuizImg({ item }) {
+  const [broken, setBroken] = useState(false);
+  if (broken || !item.img) return (
+    <div style={{ width: "100%", aspectRatio: "16/10", borderRadius: 14, background: `linear-gradient(135deg, ${B.red}10, ${B.gold}12)`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 16, border: `1px solid ${B.ltGray}` }}>
+      <div style={{ fontSize: 56, lineHeight: 1 }}>{item.emoji || "❤️"}</div>
+    </div>
+  );
+  return <img src={item.img} alt="" onError={() => setBroken(true)} style={{ width: "100%", aspectRatio: "16/10", objectFit: "cover", borderRadius: 14, marginBottom: 16, display: "block", background: B.gray }}/>;
+}
+
+function TeaserQuiz({ go }) {
+  const [idx, setIdx] = useState(0);
+  const [picked, setPicked] = useState(null);   // index ที่เลือกในข้อปัจจุบัน (null = ยังไม่เลือก)
+  const [correct, setCorrect] = useState(0);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => { safeTrack("teaser_quiz_view", {}); phCapture("teaser_quiz_view", {}); }, []);
+  const total = TEASER_QUIZ.length;
+  const item = TEASER_QUIZ[idx];
+
+  const choose = (ci) => { if (picked !== null) return; setPicked(ci); if (ci === item.a) setCorrect(c => c + 1); };
+  const next = () => {
+    if (idx + 1 < total) { setIdx(idx + 1); setPicked(null); }
+    else { const score = correct; setFinished(true); safeTrack("teaser_quiz_complete", { score, total }); phCapture("teaser_quiz_complete", { score, total }); }
+  };
+  const startSignup = () => { save("teaser_done", true); go("signupgate"); };
+
+  if (finished) {
+    return (
+      <div style={css.page}>
+        <div style={{ ...css.wrap, paddingTop: 40, paddingBottom: 40 }}>
+          <div style={{ ...css.card, textAlign: "center" }}>
+            <div style={{ fontSize: 56, marginBottom: 8 }}>🎉</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>เก่งมาก! ทำได้ {correct}/{total} ข้อ</h2>
+            <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.7, margin: "0 0 20px" }}>นี่เป็นแค่น้ำจิ้ม 😉 คอร์สเต็มมีวิดีโอสอนละเอียด + ฝึกจริง + ใบประกาศนียบัตร<br/><strong style={{ color: B.black }}>สมัครฟรีเพื่อปลดคอร์สทั้งหมด + รับคูปองส่วนลด ฿100</strong></p>
+            <button onClick={startSignup} style={{ ...css.btn(B.red, B.white, true), marginBottom: 10 }}>สมัครฟรี & เริ่มเรียน →</button>
+            <button onClick={() => { save("teaser_done", true); go("landing"); }} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "6px 12px", cursor: "pointer", textDecoration: "underline" }}>ดูรายละเอียดคอร์สก่อน</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={css.page}>
+      <div style={css.header(B.red)}>
+        <div style={{ fontSize: 16, fontWeight: 800 }}>JIA TRAINER CENTER</div>
+        <div style={{ flex: 1 }}/>
+        <div style={{ fontSize: 12, fontWeight: 700, opacity: .9 }}>ทดสอบความรู้ CPR</div>
+      </div>
+      <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+        {/* progress dots */}
+        <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 16 }}>
+          {TEASER_QUIZ.map((_, i) => <div key={i} style={{ width: i === idx ? 22 : 8, height: 8, borderRadius: 4, background: i < idx ? B.green : i === idx ? B.red : B.ltGray, transition: "all .3s" }}/>)}
+        </div>
+        <div style={css.card}>
+          <TeaserQuizImg item={item}/>
+          <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 4 }}>ข้อ {idx + 1} จาก {total}</div>
+          <h3 style={{ fontSize: 17, fontWeight: 700, margin: "0 0 16px", lineHeight: 1.5 }}>{item.q}</h3>
+          {item.c.map((c, ci) => {
+            let bg = B.gray, border = "transparent", color = B.black;
+            if (picked !== null) {
+              if (ci === item.a) { bg = `${B.green}18`; border = B.green; }
+              else if (ci === picked) { bg = `${B.red}12`; border = B.red; }
+            }
+            return (
+              <button key={ci} onClick={() => choose(ci)} disabled={picked !== null} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "13px 16px", marginBottom: 8, background: bg, border: `2px solid ${border}`, borderRadius: 10, fontSize: 14, color, cursor: picked === null ? "pointer" : "default" }}>
+                <span style={{ flex: 1 }}>{c}</span>
+                {picked !== null && ci === item.a && <I name="check" size={18} color={B.green}/>}
+              </button>
+            );
+          })}
+          {picked !== null && (
+            <div style={{ background: `${B.gold}10`, borderRadius: 10, padding: "10px 14px", margin: "6px 0 12px", fontSize: 13, color: "#92600A", textAlign: "center" }}>
+              {picked === item.a ? "✅ ถูกต้อง! " : "💡 "}{item.hint}
+            </div>
+          )}
+          {picked !== null && <button onClick={next} style={css.btn(B.red, B.white, true)}>{idx + 1 < total ? "ข้อต่อไป →" : "ดูผลลัพธ์ →"}</button>}
+        </div>
+        <div style={{ textAlign: "center", marginTop: 14 }}>
+          <button onClick={() => { save("teaser_done", true); go("signupgate"); }} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: 6, cursor: "pointer", textDecoration: "underline" }}>ข้ามไปสมัครเลย</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== SIGNUP GATE (บังคับสมัคร) ====================
+// จอเดียว: เลือก LINE / Google / Email (OTP) + กรอกเบอร์ + ยินยอม PDPA → ปลดเนื้อหา
+function SignupGate({ go, setUser, setProgress }) {
+  const [phone, setPhone] = useState(() => load("user", {})?.phone || "");
+  const [pdpa, setPdpa] = useState(false);
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [step, setStep] = useState("choose"); // choose | email | otp
+  const [busy, setBusy] = useState(null);      // null | 'line' | 'google' | 'email'
+  const [err, setErr] = useState("");
+  useEffect(() => { safeTrack("signup_gate_view", { variant: getGateVariant() }); phCapture("gate_shown", { variant: getGateVariant() }); }, []);
+
+  const phoneOk = phone.replace(/\D/g, "").length >= 9;
+  const baseOk = () => { if (!phoneOk) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return false; } if (!pdpa) { setErr("กรุณายินยอม PDPA ก่อนสมัคร"); return false; } setErr(""); return true; };
+  const savePending = () => save("signup_pending", { phone: phone.replace(/\D/g, ""), pdpa: true, gate_variant: getGateVariant() });
+
+  const handleLine = async () => {
+    if (!baseOk()) return;
+    setBusy("line"); savePending(); save("line_login_pending", true);
+    const liff = await loadLiff();
+    if (!liff) { setErr("ยังไม่ได้ตั้งค่า LINE Login — ลองเข้าด้วย Google หรืออีเมลก่อนได้เลย"); setBusy(null); save("line_login_pending", false); return; }
+    try {
+      if (!liff.isLoggedIn()) { liff.login({ botPrompt: "aggressive" }); return; } // redirect ออก → กลับมาเสร็จที่ App mount
+      const r = await finishLineSignup();
+      // @jiacpr อยู่คนละ provider → liff.getFriendship() เชื่อถือไม่ได้ → ไปหน้าแอด @jiacpr เสมอ (โชว์คูปองที่นั่น)
+      if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); go("lineprompt"); }
+      else { setErr("เข้าสู่ระบบ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
+    } catch (e) { setErr("เข้าสู่ระบบ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
+  };
+  const handleGoogle = async () => {
+    if (!baseOk()) return;
+    setBusy("google"); savePending(); save("oauth_pending", true);
+    try { const supa = await getSupabase(); await supa.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin + window.location.pathname } }); }
+    catch (e) { setErr("เข้าสู่ระบบ Google ไม่สำเร็จ"); setBusy(null); save("oauth_pending", false); }
+  };
+  const sendOtp = async () => {
+    if (!baseOk()) return;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setErr("กรุณากรอกอีเมลที่ถูกต้อง"); return; }
+    setBusy("email");
+    try { const supa = await getSupabase(); const { error } = await supa.auth.signInWithOtp({ email }); if (error) throw error; setStep("otp"); setErr(""); }
+    catch (e) { setErr("ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    setBusy(null);
+  };
+  const verifyOtp = async () => {
+    setBusy("email");
+    try {
+      const supa = await getSupabase();
+      const { error } = await supa.auth.verifyOtp({ email, token: otp.trim(), type: "email" });
+      if (error) { setErr("รหัสไม่ถูกต้องหรือหมดอายุ"); setBusy(null); return; }
+      savePending(); save("oauth_pending", true);
+      const r = await finalizeOAuthSignup("email");
+      if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); go("lineprompt"); }
+      else { setErr("ยืนยันไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
+    } catch (e) { setErr("ยืนยันไม่สำเร็จ"); setBusy(null); }
+  };
+
+  const phoneField = (
+    <div style={{ marginBottom: 12, textAlign: "left" }}>
+      <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทรศัพท์ *</label>
+      <input type="tel" placeholder="เช่น 081-234-5678" value={phone} onChange={e => { setPhone(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+    </div>
+  );
+  const pdpaField = (
+    <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", marginBottom: 16, textAlign: "left" }}>
+      <input type="checkbox" checked={pdpa} onChange={e => { setPdpa(e.target.checked); setErr(""); }} style={{ marginTop: 3, width: 18, height: 18 }}/>
+      <span style={{ fontSize: 11, color: B.dkGray, lineHeight: 1.5 }}>ข้าพเจ้ายินยอมให้ JIA TRAINER CENTER เก็บและใช้ข้อมูลส่วนบุคคล (ชื่อ, เบอร์โทร, อีเมล/LINE) เพื่อจัดการหลักสูตร ออกใบประกาศนียบัตร และแจ้งข้อมูลหลักสูตร</span>
+    </label>
+  );
+
+  return (
+    <div style={css.page}>
+      <div style={css.header(B.red)}>
+        <button onClick={() => go("course")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>สมัครเพื่อเรียนต่อ</div>
+      </div>
+      <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        <div style={{ ...css.card, textAlign: "center" }}>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><I name="star" size={36} color={B.gold}/></div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 6px" }}>อีกขั้นเดียว! 🎉</h2>
+          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>สมัครฟรีเพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong> — เรียนต่อข้ามเครื่องได้ด้วย</p>
+
+          {step !== "otp" && <>{phoneField}{pdpaField}</>}
+
+          {step === "choose" && <>
+            {LIFF_ID && <button onClick={handleLine} disabled={!!busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, marginBottom: 10, cursor: "pointer", opacity: busy ? .6 : 1 }}><I name="line" size={22} color={B.white}/> {busy === "line" ? "กำลังเข้าสู่ระบบ..." : "เข้าด้วย LINE (แนะนำ)"}</button>}
+            {GOOGLE_LOGIN_ENABLED && <button onClick={handleGoogle} disabled={!!busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: B.white, borderRadius: 12, padding: "13px 24px", color: B.black, border: `2px solid ${B.ltGray}`, fontWeight: 700, fontSize: 15, marginBottom: 10, cursor: "pointer", opacity: busy ? .6 : 1 }}><span style={{ fontSize: 18, fontWeight: 800, color: "#4285F4" }}>G</span> {busy === "google" ? "กำลังเปิด Google..." : "เข้าด้วย Google"}</button>}
+            {EMAIL_OTP_ENABLED && <button onClick={() => { if (baseOk()) setStep("email"); }} disabled={!!busy} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "8px 12px", cursor: "pointer", textDecoration: "underline" }}>ใช้อีเมลแทน (รับรหัส OTP)</button>}
+            {!LIFF_ID && <div style={{ fontSize: 11, color: B.gold, marginTop: 10 }}>* ปุ่ม LINE จะใช้งานได้เมื่อตั้งค่า LIFF เสร็จ</div>}
+          </>}
+
+          {step === "email" && <>
+            <input type="email" placeholder="อีเมลของคุณ" value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 12 }}/>
+            <button onClick={sendOtp} disabled={busy === "email"} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>{busy === "email" ? "กำลังส่ง..." : "ส่งรหัส OTP →"}</button>
+            <button onClick={() => { setStep("choose"); setErr(""); }} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: 6, cursor: "pointer", textDecoration: "underline" }}>← กลับ</button>
+          </>}
+
+          {step === "otp" && <>
+            <p style={{ fontSize: 12, color: B.dkGray, margin: "0 0 12px" }}>กรอกรหัส 6 หลักที่ส่งไปยัง<br/><strong style={{ color: B.black }}>{email}</strong></p>
+            <input type="text" inputMode="numeric" placeholder="รหัส 6 หลัก" value={otp} onChange={e => { setOtp(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 18, letterSpacing: 4, textAlign: "center", outline: "none", boxSizing: "border-box", marginBottom: 12 }}/>
+            <button onClick={verifyOtp} disabled={busy === "email"} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>{busy === "email" ? "กำลังยืนยัน..." : "ยืนยัน & เรียนต่อ →"}</button>
+            <button onClick={() => { setStep("email"); setOtp(""); setErr(""); }} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: 6, cursor: "pointer", textDecoration: "underline" }}>← เปลี่ยนอีเมล</button>
+          </>}
+
+          {err && <div style={{ color: B.red, fontSize: 12, marginTop: 12 }}>{err}</div>}
         </div>
       </div>
     </div>
@@ -1299,7 +1641,15 @@ function Course({ go, progress, setProgress, user, openBlog }) {
   const timerRef = useRef(null);
   const purchased = getPurchased();
   const hasMod = (id) => isModuleAccessible(id, purchased);
-  const unlocked = id => hasMod(id) && (id === 1 || progress.done.includes(id - 1) || FREE_LAUNCH);
+  const signedUp = isSignedUp();
+  const gateOn = AUTH_GATE_ENABLED && getGateVariant() !== "soft"; // ด่านบังคับสมัครหลังจบบท 1
+  const unlocked = id => {
+    if (!hasMod(id)) return false;
+    if (id === 1) return true;                                     // บทที่ 1 เรียนฟรีเสมอ
+    if (!(progress.done.includes(id - 1) || FREE_LAUNCH)) return false;
+    if (gateOn && !signedUp) return false;                         // บท 2+ ต้องสมัครก่อน
+    return true;
+  };
   const done = id => progress.done.includes(id);
 
   // Timer for video watching (70% of duration)
@@ -1307,7 +1657,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
 
   const submitQuiz = () => {
     const mod = COURSE.modules.find(m => m.id === active); let correct = 0; mod.quiz.forEach((q, i) => { if (ans[i] === q.a) correct++; }); const score = Math.round((correct / mod.quiz.length) * 100); const passed = score >= 80; setResult({ score, correct, total: mod.quiz.length, passed });
-    if (passed && !progress.done.includes(active)) { const np = { ...progress, done: [...progress.done, active], scores: { ...progress.scores, [active]: score } }; setProgress(np); save("progress", np);
+    if (passed && !progress.done.includes(active)) { const np = { ...progress, done: [...progress.done, active], scores: { ...progress.scores, [active]: score } }; setProgress(np); save("progress", np); syncProgressRemote(np);
       if (!mod.vid && mod.id === COURSE.modules[COURSE.modules.length - 1].id) { 
         const u = user || load("user", null);
         const coupon = genCoupon(); save("coupon", coupon); 
@@ -1348,7 +1698,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
             : <div style={{ textAlign: "center" }}><div style={{ background: result.passed ? `${B.green}12` : `${B.red}08`, borderRadius: 12, padding: 20, marginBottom: 16 }}><div style={{ fontSize: 40, fontWeight: 800, color: result.passed ? B.green : B.red }}>{result.score}%</div><div style={{ fontSize: 14, fontWeight: 600, color: result.passed ? B.green : B.red }}>{result.passed ? "ผ่าน!" : "ไม่ผ่าน"}</div><div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>ตอบถูก {result.correct}/{result.total} ข้อ</div></div>
               {result.passed && !isFinal && <div style={{ background: `${B.green}08`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.green}20` }}><div style={{ fontSize: 14, fontWeight: 600, color: B.green, textAlign: "center" }}>{ENCOURAGE[mod.id] || "เยี่ยมมาก! ไปต่อได้เลย"}</div></div>}
               {!result.passed && <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 12, textAlign: "center" }}>ไม่เป็นไร ทบทวนวิดีโออีกครั้ง แล้วสอบใหม่ได้เลย</div>}
-              {result.passed ? (<button onClick={() => { resetLesson(); if (isFinal) go("register"); }} style={css.btn(B.green, B.white)}>{isFinal ? "ลงทะเบียนรับใบประกาศนียบัตร →" : "กลับหน้าบทเรียน →"}</button>)
+              {result.passed ? (<button onClick={() => { const gate = gateOn && mod.id === 1 && !isFinal && !signedUp; resetLesson(); if (isFinal) go("register"); else if (gate) go("signupgate"); }} style={css.btn(B.green, B.white)}>{isFinal ? "ลงทะเบียนรับใบประกาศนียบัตร →" : (gateOn && mod.id === 1 && !signedUp ? "สมัครเพื่อรับใบผ่าน + เรียนต่อ →" : "กลับหน้าบทเรียน →")}</button>)
               : mod.vid ? (<button onClick={() => { setQuiz(false); setResult(null); setAns({}); setWatched(false); setMustRewatch(true); setCanWatch(false); setTimer(Math.floor(mod.dur * 0.9)); }} style={css.btn(B.red, B.white)}>← กลับดูวิดีโอใหม่แล้วสอบอีกครั้ง</button>)
               : (<button onClick={() => { setAns({}); setResult(null); }} style={css.btn(B.red, B.white)}>ทำใหม่</button>)}
             </div>}
@@ -1380,7 +1730,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
       {progress.done.length > 0 && progress.done.length < COURSE.modules.length && <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.gold}30`, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 600, color: "#B45309" }}>{progress.done.length < 3 ? "เรียนมาได้ดีมาก ไปต่อได้เลย!" : progress.done.length < 6 ? "เลยครึ่งทางแล้ว อีกนิดเดียว!" : "เกือบถึงแล้ว ลุยต่อได้เลย!"}</div></div>}
-      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) return; setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy) ? "pointer" : "not-allowed", opacity: (ok || needBuy) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); return; } setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
@@ -2903,13 +3253,23 @@ export default function App() {
   const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
   const [page, setPage] = useState(() => {
     if (promoParam) return "claim";
-    return load("progress", { done: [] }).done.length > 0 ? "course" : "landing";
+    if (isSignedUp() || load("progress", { done: [] }).done.length > 0) return "course";
+    // front gate (before-course): เปิดเว็บครั้งแรก → ควิซเกริ่นนำ → ถ้าทำควิซแล้วแต่ยังไม่สมัคร → ด่านสมัคร
+    if (AUTH_GATE_ENABLED && getGateVariant() === "before-course") return load("teaser_done", false) ? "signupgate" : "teaserquiz";
+    return "landing";
   });
   const [initialClaimCode] = useState(promoParam || "");
   const [user, setUser] = useState(() => load("user", null));
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const [blogSlug, setBlogSlug] = useState(null);
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
+  // เข้าคอร์ส: ขึ้นกับตัวแปรด่าน (A/B) — before-course เด้งสมัครก่อน, soft = แอด LINE แบบข้ามได้, after-lesson-1 = เข้าเลย (ด่านไปโผล่หลังจบบท 1)
+  const enterCourse = useCallback(() => {
+    const v = getGateVariant();
+    if (AUTH_GATE_ENABLED && v === "before-course" && !isSignedUp()) { go(load("teaser_done", false) ? "signupgate" : "teaserquiz"); return; }
+    if ((!AUTH_GATE_ENABLED || v === "soft") && !load("line_added", false) && !load("line_skipped_at", null)) { go("lineprompt"); return; }
+    go("course");
+  }, [go]);
   const openBlog = useCallback(slug => { setBlogSlug(slug); setPage("blog-detail"); window.scrollTo(0, 0); }, []);
   const backFromBlog = useCallback(() => { setPage(load("progress", { done: [] }).done.length > 0 ? "course" : "landing"); window.scrollTo(0, 0); }, []);
 
@@ -2933,6 +3293,17 @@ export default function App() {
     }
   }, []);
 
+  // UTM + A/B variant + จบ flow ล็อกอิน (LINE LIFF redirect / Google OAuth return)
+  useEffect(() => {
+    captureUTM();
+    getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
+    if (load("line_login_pending", false)) {
+      finishLineSignup().then(r => { if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); setPage("lineprompt"); window.scrollTo(0, 0); } });
+    } else if (load("oauth_pending", false) || /[?#].*(code=|access_token=)/.test(window.location.href)) {
+      finalizeOAuthSignup("google").then(r => { if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); window.history.replaceState({}, "", window.location.pathname); setPage("lineprompt"); window.scrollTo(0, 0); } });
+    }
+  }, []);
+
   if (isAdmin) return (
     <>
       <Admin/>
@@ -2944,9 +3315,11 @@ export default function App() {
     <>
       {(() => {
         switch (page) {
-          case "landing": return <Landing go={go} openBlog={openBlog}/>;
+          case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-          case "lineprompt": return <LineAddPrompt go={go} user={user} variant="post-register"/>;
+          case "lineprompt": return <LineAddPrompt go={go} user={user} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
+          case "teaserquiz": return <TeaserQuiz go={go}/>;
+          case "signupgate": return <SignupGate go={go} setUser={u => { setUser(u); save("user", u); }} setProgress={p => { setProgress(p); save("progress", p); }}/>;
           case "payment": return <Payment go={go} user={user}/>;
           case "store": return <Store go={go}/>;
           case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog}/>;
@@ -2956,7 +3329,7 @@ export default function App() {
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : "form"} initialCode={initialClaimCode}/>;
-          default: return <Landing go={go} openBlog={openBlog}/>;
+          default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
         }
       })()}
       <Analytics />

@@ -9,9 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@line/liff": "^2.29.0",
+    "@supabase/supabase-js": "^2.108.2",
     "@vercel/analytics": "^2.0.1",
     "html-to-image": "^1.11.13",
     "jspdf": "^2.5.2",
+    "posthog-js": "^1.391.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
