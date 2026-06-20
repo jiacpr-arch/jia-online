@@ -498,7 +498,7 @@ function BlogDetail({ slug, goBack, openBlog }) {
 }
 
 // ==================== LANDING ====================
-function Landing({ go, openBlog }) {
+function Landing({ go, enterCourse, openBlog }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.red} 0%, ${B.dkRed} 100%)`, color: B.white, padding: "52px 24px 56px", textAlign: "center", position: "relative", overflow: "hidden" }}>
@@ -513,7 +513,7 @@ function Landing({ go, openBlog }) {
         <div style={{ display: "inline-flex", alignItems: "center", gap: 14, background: "rgba(255,255,255,.15)", borderRadius: 16, padding: "14px 28px", marginBottom: 28 }}>
           {FREE_LAUNCH ? (<><span style={{ fontSize: 44, fontWeight: 800 }}>ฟรี!</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ textDecoration: "line-through", opacity: .7 }}>ปกติ ฿100</div><div style={{ opacity: .85 }}>+ คูปองส่วนลด ฿100</div></div></>) : (<><span style={{ fontSize: 44, fontWeight: 800 }}>฿35</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ opacity: .85 }}>ต่อหัวข้อ</div><div style={{ opacity: .7 }}>Full Course ฿149</div></div></>)}
         </div>
-        <div><button onClick={() => go("course")} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{FREE_LAUNCH ? "เรียนฟรีเลย →" : "เรียนเลย →"}</button></div>
+        <div><button onClick={enterCourse} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{FREE_LAUNCH ? "เรียนฟรีเลย →" : "เรียนเลย →"}</button></div>
       </div>
     </div>
 
@@ -564,7 +564,7 @@ function Landing({ go, openBlog }) {
     </div>
     <div style={{ ...css.wrap, paddingBottom: 16 }}><MorrooAdBanner/></div>
     <div style={{ ...css.wrap, paddingBottom: 100 }}><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{[{ icon: "play", l: "6 วิดีโอ", s: "เรียนได้ทุกที่" },{ icon: "book", l: "Quiz ทุกบท", s: "ทดสอบความเข้าใจ" },{ icon: "cert", l: "ใบประกาศฯ", s: "มาตรฐาน 2025" },{ icon: "heart", l: "คูปอง ฿100", s: "ใช้ตอนเรียน on-site" }].map((f, i) => (<div key={i} style={{ background: B.white, borderRadius: 14, padding: 16, textAlign: "center" }}><I name={f.icon} size={22} color={B.red}/><div style={{ fontWeight: 600, fontSize: 13, marginTop: 6 }}>{f.l}</div><div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>{f.s}</div></div>))}</div></div>
-    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: B.white, padding: "14px 20px", boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 100 }}><div style={{ maxWidth: 480, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 11, color: B.dkGray }}>{FREE_LAUNCH ? "ช่วง Launch พิเศษ" : "เริ่มต้น"}</div><div style={{ fontSize: 22, fontWeight: 800, color: B.red }}>{FREE_LAUNCH ? "ฟรี!" : "฿35/หัวข้อ"}</div></div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { const txt = "เรียน CPR & AED ออนไลน์! ได้ใบ Certificate + คูปองส่วนลด"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn(B.white, B.red), padding: "10px 14px", border: `1px solid ${B.red}30`, fontSize: 13 }}>แชร์</button><button onClick={() => go("course")} style={css.btn(B.red, B.white)}>{FREE_LAUNCH ? "เรียนฟรี" : "เรียนเลย"}</button></div></div></div>
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: B.white, padding: "14px 20px", boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 100 }}><div style={{ maxWidth: 480, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 11, color: B.dkGray }}>{FREE_LAUNCH ? "ช่วง Launch พิเศษ" : "เริ่มต้น"}</div><div style={{ fontSize: 22, fontWeight: 800, color: B.red }}>{FREE_LAUNCH ? "ฟรี!" : "฿35/หัวข้อ"}</div></div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { const txt = "เรียน CPR & AED ออนไลน์! ได้ใบ Certificate + คูปองส่วนลด"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn(B.white, B.red), padding: "10px 14px", border: `1px solid ${B.red}30`, fontSize: 13 }}>แชร์</button><button onClick={enterCourse} style={css.btn(B.red, B.white)}>{FREE_LAUNCH ? "เรียนฟรี" : "เรียนเลย"}</button></div></div></div>
   </div>);
 }
 
@@ -757,13 +757,19 @@ function Store({ go }) {
 function LineAddPrompt({ go, user, variant = "post-register" }) {
   const linkCode = getLinkCode();
   const deepLink = lineLinkDeepLink(linkCode);
+  const preCourse = variant === "pre-course";
+  // gate ก่อนเรียน = ข้ามได้ (strong-soft) แต่จด line_skipped_at ไว้เพื่อไม่เด้งซ้ำ + ให้แบนเนอร์ในคอร์สตามต่อ
+  useEffect(() => { safeTrack("line_gate_view", { variant }); }, [variant]);
   const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); go("course"); };
   const onSkip = () => { safeTrack("line_oa_skipped", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
   const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); };
-  const title = variant === "post-register" ? "เกือบเสร็จแล้ว! เพิ่ม LINE เพื่อรับสิทธิ์เต็ม" : "อย่าลืมเพิ่ม LINE!";
+  const title = preCourse ? "เพิ่ม LINE ก่อนเริ่มเรียน 🎓"
+    : variant === "post-register" ? "เกือบเสร็จแล้ว! เพิ่ม LINE เพื่อรับสิทธิ์เต็ม"
+    : "อย่าลืมเพิ่ม LINE!";
   return (
     <div style={css.page}>
       <div style={css.header(B.red)}>
+        {preCourse && <button onClick={() => go("landing")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button>}
         <div style={{ fontSize: 16, fontWeight: 700 }}>เพิ่ม LINE @jiacpr</div>
       </div>
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
@@ -772,6 +778,7 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
             <I name="line" size={36} color="#06C755"/>
           </div>
           <h2 style={{ fontSize: 18, fontWeight: 800, margin: "0 0 8px" }}>{title}</h2>
+          {preCourse && <p style={{ fontSize: 13, color: "#06994A", fontWeight: 600, lineHeight: 1.6, margin: "0 0 12px" }}>แอด LINE @jiacpr เพื่อปลดล็อกคอร์สเรียนฟรี + เก็บสิทธิ์ไว้เรียนต่อได้ทุกอุปกรณ์ — ใช้เวลาไม่ถึง 10 วินาที</p>}
           <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 16px" }}>
             แอด LINE @jiacpr เพื่อ:<br/>
             <strong style={{ color: B.black }}>✓</strong> รับใบ Certificate แบบ PDF<br/>
@@ -2910,6 +2917,11 @@ export default function App() {
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const [blogSlug, setBlogSlug] = useState(null);
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
+  // ด่าน LINE ก่อนเรียน (strong-soft): เด้งหน้าแอด LINE ครั้งแรกที่กดเรียน — ถ้าแอดแล้วหรือเคยกดข้าม ก็เข้าคอร์สตรง
+  const enterCourse = useCallback(() => {
+    if (!load("line_added", false) && !load("line_skipped_at", null)) go("lineprompt");
+    else go("course");
+  }, [go]);
   const openBlog = useCallback(slug => { setBlogSlug(slug); setPage("blog-detail"); window.scrollTo(0, 0); }, []);
   const backFromBlog = useCallback(() => { setPage(load("progress", { done: [] }).done.length > 0 ? "course" : "landing"); window.scrollTo(0, 0); }, []);
 
@@ -2944,9 +2956,9 @@ export default function App() {
     <>
       {(() => {
         switch (page) {
-          case "landing": return <Landing go={go} openBlog={openBlog}/>;
+          case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-          case "lineprompt": return <LineAddPrompt go={go} user={user} variant="post-register"/>;
+          case "lineprompt": return <LineAddPrompt go={go} user={user} variant="pre-course"/>;
           case "payment": return <Payment go={go} user={user}/>;
           case "store": return <Store go={go}/>;
           case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog}/>;
