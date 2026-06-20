@@ -14,7 +14,8 @@ const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
 const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} };
 const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
-const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code)}`;
+// ข้อความ prefill ที่ลูกค้ากดส่งเข้า @jiacpr — โค้ด JIA-LINK ต้องอยู่หน้าสุดเสมอ (webhook ภายนอกจับคู่กับ customers.line_link_code → เขียน line_user_id กลับ)
+const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code + "\nสนใจคอร์ส CPR & AED 🙏 เรียนออนไลน์อยู่และได้รับส่วนลดแล้ว อยากนัดวันมาเรียนภาคปฏิบัติ ไม่ทราบว่าสะดวกวันไหนบ้างครับ/ค่ะ")}`;
 const markLineAdded = (user) => {
   save("line_added", true); save("line_added_at", new Date().toISOString());
   safeTrack("line_oa_added");
@@ -932,7 +933,7 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
             <I name="line" size={22} color={B.white}/> เพิ่มเพื่อน + ผูกบัญชีอัตโนมัติ
           </a>
           <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 12, lineHeight: 1.5 }}>
-            (กดปุ่ม → LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{linkCode}</strong> ขึ้นมา → กดส่ง = ผูกบัญชีให้รับโปรอัตโนมัติ)
+            (กดปุ่ม → LINE จะเด้งข้อความพร้อมโค้ด <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{linkCode}</strong> + ข้อความนัดเรียนภาคปฏิบัติ → กดส่ง = admin รับเรื่อง + ผูกบัญชีให้อัตโนมัติ)
           </div>
           <button onClick={onAdded} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>
             <I name="check" size={16} color={B.white}/> เพิ่มเพื่อนแล้ว → เข้าเรียนเลย
@@ -1036,108 +1037,59 @@ function TeaserQuiz({ go }) {
 
 // ==================== SIGNUP GATE (บังคับสมัคร) ====================
 // จอเดียว: เลือก LINE / Google / Email (OTP) + กรอกเบอร์ + ยินยอม PDPA → ปลดเนื้อหา
-function SignupGate({ go, setUser, setProgress }) {
+function SignupGate({ go, setUser }) {
+  const [name, setName] = useState(() => load("user", {})?.name || "");
   const [phone, setPhone] = useState(() => load("user", {})?.phone || "");
   const [pdpa, setPdpa] = useState(false);
-  const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
-  const [step, setStep] = useState("choose"); // choose | email | otp
-  const [busy, setBusy] = useState(null);      // null | 'line' | 'google' | 'email'
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   useEffect(() => { safeTrack("signup_gate_view", { variant: getGateVariant() }); phCapture("gate_shown", { variant: getGateVariant() }); }, []);
 
-  const phoneOk = phone.replace(/\D/g, "").length >= 9;
-  const baseOk = () => { if (!phoneOk) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return false; } if (!pdpa) { setErr("กรุณายินยอม PDPA ก่อนสมัคร"); return false; } setErr(""); return true; };
-  const savePending = () => save("signup_pending", { phone: phone.replace(/\D/g, ""), pdpa: true, gate_variant: getGateVariant() });
-
-  const handleLine = async () => {
-    if (!baseOk()) return;
-    setBusy("line"); savePending(); save("line_login_pending", true);
-    const liff = await loadLiff();
-    if (!liff) { setErr("ยังไม่ได้ตั้งค่า LINE Login — ลองเข้าด้วย Google หรืออีเมลก่อนได้เลย"); setBusy(null); save("line_login_pending", false); return; }
-    try {
-      if (!liff.isLoggedIn()) { liff.login({ botPrompt: "aggressive" }); return; } // redirect ออก → กลับมาเสร็จที่ App mount
-      const r = await finishLineSignup();
-      // @jiacpr อยู่คนละ provider → liff.getFriendship() เชื่อถือไม่ได้ → ไปหน้าแอด @jiacpr เสมอ (โชว์คูปองที่นั่น)
-      if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); go("lineprompt"); }
-      else { setErr("เข้าสู่ระบบ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
-    } catch (e) { setErr("เข้าสู่ระบบ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
+  const submit = () => {
+    if (!name.trim()) { setErr("กรุณากรอกชื่อ-นามสกุล"); return; }
+    if (phone.replace(/\D/g, "").length < 9) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return; }
+    if (!pdpa) { setErr("กรุณายินยอม PDPA ก่อนสมัคร"); return; }
+    setErr(""); setBusy(true);
+    const cleanPhone = phone.replace(/\D/g, "");
+    const userData = { name: name.trim(), phone: cleanPhone };
+    setUser(userData);
+    save("signed_up", true); save("enrolled", true);
+    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const linkCode = getLinkCode();
+    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, source: "online-course", line_link_code: linkCode, pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), gate_variant: getGateVariant(), landing_url: load("landing_url", null), ...getUTM() });
+    supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, status: "กำลังเรียน" });
+    safeTrack("signup_complete", { provider: "line_oa_only" });
+    phCapture("signup_complete", { provider: "line_oa_only", variant: getGateVariant() });
+    go("lineprompt");
   };
-  const handleGoogle = async () => {
-    if (!baseOk()) return;
-    setBusy("google"); savePending(); save("oauth_pending", true);
-    try { const supa = await getSupabase(); await supa.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin + window.location.pathname } }); }
-    catch (e) { setErr("เข้าสู่ระบบ Google ไม่สำเร็จ"); setBusy(null); save("oauth_pending", false); }
-  };
-  const sendOtp = async () => {
-    if (!baseOk()) return;
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setErr("กรุณากรอกอีเมลที่ถูกต้อง"); return; }
-    setBusy("email");
-    try { const supa = await getSupabase(); const { error } = await supa.auth.signInWithOtp({ email }); if (error) throw error; setStep("otp"); setErr(""); }
-    catch (e) { setErr("ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง"); }
-    setBusy(null);
-  };
-  const verifyOtp = async () => {
-    setBusy("email");
-    try {
-      const supa = await getSupabase();
-      const { error } = await supa.auth.verifyOtp({ email, token: otp.trim(), type: "email" });
-      if (error) { setErr("รหัสไม่ถูกต้องหรือหมดอายุ"); setBusy(null); return; }
-      savePending(); save("oauth_pending", true);
-      const r = await finalizeOAuthSignup("email");
-      if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); go("lineprompt"); }
-      else { setErr("ยืนยันไม่สำเร็จ ลองใหม่อีกครั้ง"); setBusy(null); }
-    } catch (e) { setErr("ยืนยันไม่สำเร็จ"); setBusy(null); }
-  };
-
-  const phoneField = (
-    <div style={{ marginBottom: 12, textAlign: "left" }}>
-      <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทรศัพท์ *</label>
-      <input type="tel" placeholder="เช่น 081-234-5678" value={phone} onChange={e => { setPhone(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
-    </div>
-  );
-  const pdpaField = (
-    <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", marginBottom: 16, textAlign: "left" }}>
-      <input type="checkbox" checked={pdpa} onChange={e => { setPdpa(e.target.checked); setErr(""); }} style={{ marginTop: 3, width: 18, height: 18 }}/>
-      <span style={{ fontSize: 11, color: B.dkGray, lineHeight: 1.5 }}>ข้าพเจ้ายินยอมให้ JIA TRAINER CENTER เก็บและใช้ข้อมูลส่วนบุคคล (ชื่อ, เบอร์โทร, อีเมล/LINE) เพื่อจัดการหลักสูตร ออกใบประกาศนียบัตร และแจ้งข้อมูลหลักสูตร</span>
-    </label>
-  );
 
   return (
     <div style={css.page}>
       <div style={css.header(B.red)}>
         <button onClick={() => go("course")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button>
-        <div style={{ fontSize: 16, fontWeight: 700 }}>สมัครเพื่อเรียนต่อ</div>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>สมัครฟรี</div>
       </div>
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
         <div style={{ ...css.card, textAlign: "center" }}>
-          <div style={{ width: 72, height: 72, borderRadius: "50%", background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><I name="star" size={36} color={B.gold}/></div>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#06C75518", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><I name="line" size={36} color="#06C755"/></div>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 6px" }}>อีกขั้นเดียว! 🎉</h2>
-          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>สมัครฟรีเพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong> — เรียนต่อข้ามเครื่องได้ด้วย</p>
-
-          {step !== "otp" && <>{phoneField}{pdpaField}</>}
-
-          {step === "choose" && <>
-            {LIFF_ID && <button onClick={handleLine} disabled={!!busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, marginBottom: 10, cursor: "pointer", opacity: busy ? .6 : 1 }}><I name="line" size={22} color={B.white}/> {busy === "line" ? "กำลังเข้าสู่ระบบ..." : "เข้าด้วย LINE (แนะนำ)"}</button>}
-            {GOOGLE_LOGIN_ENABLED && <button onClick={handleGoogle} disabled={!!busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: B.white, borderRadius: 12, padding: "13px 24px", color: B.black, border: `2px solid ${B.ltGray}`, fontWeight: 700, fontSize: 15, marginBottom: 10, cursor: "pointer", opacity: busy ? .6 : 1 }}><span style={{ fontSize: 18, fontWeight: 800, color: "#4285F4" }}>G</span> {busy === "google" ? "กำลังเปิด Google..." : "เข้าด้วย Google"}</button>}
-            {EMAIL_OTP_ENABLED && <button onClick={() => { if (baseOk()) setStep("email"); }} disabled={!!busy} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "8px 12px", cursor: "pointer", textDecoration: "underline" }}>ใช้อีเมลแทน (รับรหัส OTP)</button>}
-            {!LIFF_ID && <div style={{ fontSize: 11, color: B.gold, marginTop: 10 }}>* ปุ่ม LINE จะใช้งานได้เมื่อตั้งค่า LIFF เสร็จ</div>}
-          </>}
-
-          {step === "email" && <>
-            <input type="email" placeholder="อีเมลของคุณ" value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 12 }}/>
-            <button onClick={sendOtp} disabled={busy === "email"} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>{busy === "email" ? "กำลังส่ง..." : "ส่งรหัส OTP →"}</button>
-            <button onClick={() => { setStep("choose"); setErr(""); }} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: 6, cursor: "pointer", textDecoration: "underline" }}>← กลับ</button>
-          </>}
-
-          {step === "otp" && <>
-            <p style={{ fontSize: 12, color: B.dkGray, margin: "0 0 12px" }}>กรอกรหัส 6 หลักที่ส่งไปยัง<br/><strong style={{ color: B.black }}>{email}</strong></p>
-            <input type="text" inputMode="numeric" placeholder="รหัส 6 หลัก" value={otp} onChange={e => { setOtp(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 18, letterSpacing: 4, textAlign: "center", outline: "none", boxSizing: "border-box", marginBottom: 12 }}/>
-            <button onClick={verifyOtp} disabled={busy === "email"} style={{ ...css.btn(B.red, B.white, true), marginBottom: 8 }}>{busy === "email" ? "กำลังยืนยัน..." : "ยืนยัน & เรียนต่อ →"}</button>
-            <button onClick={() => { setStep("email"); setOtp(""); setErr(""); }} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: 6, cursor: "pointer", textDecoration: "underline" }}>← เปลี่ยนอีเมล</button>
-          </>}
-
-          {err && <div style={{ color: B.red, fontSize: 12, marginTop: 12 }}>{err}</div>}
+          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>กรอกข้อมูลเพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong></p>
+          <div style={{ marginBottom: 12, textAlign: "left" }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อ-นามสกุล *</label>
+            <input type="text" placeholder="เช่น สมชาย ใจดี" value={name} onChange={e => { setName(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+          </div>
+          <div style={{ marginBottom: 12, textAlign: "left" }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทรศัพท์ *</label>
+            <input type="tel" placeholder="เช่น 081-234-5678" value={phone} onChange={e => { setPhone(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+          </div>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", marginBottom: 16, textAlign: "left" }}>
+            <input type="checkbox" checked={pdpa} onChange={e => { setPdpa(e.target.checked); setErr(""); }} style={{ marginTop: 3, width: 18, height: 18 }}/>
+            <span style={{ fontSize: 11, color: B.dkGray, lineHeight: 1.5 }}>ข้าพเจ้ายินยอมให้ JIA TRAINER CENTER เก็บและใช้ข้อมูลส่วนบุคคล (ชื่อ, เบอร์โทร) เพื่อจัดการหลักสูตร ออกใบประกาศนียบัตร และแจ้งข้อมูลหลักสูตร</span>
+          </label>
+          {err && <div style={{ color: B.red, fontSize: 12, marginBottom: 12 }}>{err}</div>}
+          <button onClick={submit} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 }}>
+            <I name="line" size={22} color={B.white}/> {busy ? "กำลังสมัคร..." : "สมัคร & เพิ่ม LINE @jiacpr →"}
+          </button>
         </div>
       </div>
     </div>
@@ -1866,7 +1818,7 @@ function Certificate({ user, go }) {
           <I name="line" size={22} color={B.white}/> ผูก LINE รับใบเซอร์ + คูปอง
         </a>
         <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8, lineHeight: 1.5 }}>
-          (LINE จะเด้งข้อความ <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> ขึ้นมา → <strong>กดส่ง</strong> ในแชต @jiacpr = ผูกบัญชีอัตโนมัติ)
+          (LINE จะเด้งข้อความพร้อมโค้ด <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> + ข้อความนัดเรียนภาคปฏิบัติ → <strong>กดส่ง</strong> ในแชต @jiacpr = ผูกบัญชีอัตโนมัติ)
         </div>
         {linkWaiting && (
           <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#06A047" }}>⏳ กำลังรอการยืนยัน... กดส่งข้อความในแอป LINE แล้วรอสักครู่</div>
@@ -3293,15 +3245,10 @@ export default function App() {
     }
   }, []);
 
-  // UTM + A/B variant + จบ flow ล็อกอิน (LINE LIFF redirect / Google OAuth return)
+  // UTM + A/B variant
   useEffect(() => {
     captureUTM();
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
-    if (load("line_login_pending", false)) {
-      finishLineSignup().then(r => { if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); setPage("lineprompt"); window.scrollTo(0, 0); } });
-    } else if (load("oauth_pending", false) || /[?#].*(code=|access_token=)/.test(window.location.href)) {
-      finalizeOAuthSignup("google").then(r => { if (r) { setUser(r.user); if (r.progress) setProgress(r.progress); window.history.replaceState({}, "", window.location.pathname); setPage("lineprompt"); window.scrollTo(0, 0); } });
-    }
   }, []);
 
   if (isAdmin) return (
