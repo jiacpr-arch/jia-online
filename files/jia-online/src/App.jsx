@@ -3207,8 +3207,11 @@ export default function App() {
   // หน้าที่ "จำตำแหน่งไว้ในเครื่อง" แล้วเปิดกลับมาที่เดิมได้ (กันนักเรียนต้องเริ่มขั้นตอนแรกใหม่ทุกครั้ง)
   const RESUMABLE_PAGES = ["course", "store", "register", "certificate", "minicert", "booking", "claim", "blog"];
   // เคยลงทะเบียน/ซื้อ/ปลดล็อก/มีความคืบหน้าแล้ว = กลับเข้าคอร์สได้เลย ไม่ต้องผ่านด่านสมัครซ้ำ
+  // ใช้คีย์ดิบที่บันทึกจริง (purchased/promo_unlocked) ไม่ใช้ getPurchased() เพราะช่วง FREE_LAUNCH
+  // getPurchased() จะคืนทุกบทให้ "ทุกคน" รวมถึงคนเปิดครั้งแรก → จะเด้งข้ามควิซเกริ่นนำผิดพลาด
   const hasEnrolledBefore = () => isSignedUp() || load("progress", { done: [] }).done.length > 0
-    || load("enrolled", false) || load("promo_redeemed", false) || getPurchased().filter(x => x > 1).length > 0;
+    || load("enrolled", false) || load("promo_redeemed", false)
+    || (load("purchased", []) || []).some(x => x > 1) || (load("promo_unlocked", []) || []).length > 0;
   const [page, setPage] = useState(() => {
     if (promoParam) return "claim";
     if (stripeSuccess) return "course";
