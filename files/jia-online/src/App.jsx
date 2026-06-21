@@ -1599,6 +1599,8 @@ function Course({ go, progress, setProgress, user, openBlog }) {
   const unlocked = id => {
     if (!hasMod(id)) return false;
     if (id === 1) return true;                                     // บทที่ 1 เรียนฟรีเสมอ
+    const m = COURSE.modules.find(x => x.id === id);
+    if (m && !m.vid && progress.done.filter(x => x <= 6).length < 6) return false; // แบบทดสอบสุดท้าย: ต้องเรียน+ผ่านครบ 6 บทก่อน (บังคับแม้ช่วง FREE_LAUNCH)
     if (!(progress.done.includes(id - 1) || FREE_LAUNCH)) return false;
     if (gateOn && !signedUp) return false;                         // บท 2+ ต้องสมัครก่อน
     return true;
@@ -1706,7 +1708,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
       {doneCount > 0 && remaining > 0 && <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.gold}30`, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 600, color: "#B45309" }}>{cheer}</div><div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: 11, color: "#B45309", opacity: .8, marginTop: 4 }}><I name="cert" size={12} color={B.gold}/><span>อีก {remaining} บท จะจบและรับใบประกาศ</span></div></div>}
-      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); return; } setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
@@ -1733,7 +1735,6 @@ function Certificate({ user, go }) {
   // ===== Strong-soft LINE gate =====
   const lc = getLinkCode();
   const [lineLinked, setLineLinked] = useState(() => load("line_linked", false));
-  const [skipGate, setSkipGate] = useState(() => load("line_linked", false));
   const [linkWaiting, setLinkWaiting] = useState(false);
   const pollRef = useRef(null);
   // fallback สุดท้าย ถ้าสร้างไฟล์ไม่สำเร็จ — บอกผู้ใช้ screenshot เอง
@@ -1827,19 +1828,19 @@ function Certificate({ user, go }) {
         </div>
       </div>
     </div>
-    {/* ===== Strong-soft LINE gate: เลือก "ผูก LINE" หรือ "ข้าม" ก่อนถึงดาวน์โหลด ===== */}
+    {/* ===== LINE invite (โปรโมชัน ไม่บล็อกการดาวน์โหลด) ===== */}
     {lineLinked ? (
       <div style={{ background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 16, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>
         ✓ ผูก LINE @jiacpr เรียบร้อย — จะได้รับใบเซอร์ เตือนทบทวน และโปรทาง LINE
       </div>
-    ) : !skipGate ? (
+    ) : (
       <div style={{ background: "#06C75510", border: "2px solid #06C75540", borderRadius: 16, padding: 18, marginTop: 16, textAlign: "center" }}>
         <I name="line" size={32} color="#06C755"/>
-        <div style={{ fontSize: 16, fontWeight: 800, color: B.black, margin: "8px 0 4px" }}>ผูก LINE @jiacpr เพื่อรับใบเซอร์ + คูปอง</div>
-        <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12, lineHeight: 1.6 }}>แอดแล้วผูกบัญชี รับ: ใบประกาศทาง LINE · คูปองส่วนลด on-site ฿100 · เตือนทบทวน CPR ทุก 3 เดือน</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: B.black, margin: "8px 0 4px" }}>ผูก LINE @jiacpr รับคูปอง + เตือนทบทวน</div>
+        <div style={{ fontSize: 12, color: B.dkGray, marginBottom: 12, lineHeight: 1.6 }}>แอดแล้วผูกบัญชี รับเพิ่ม: คูปองส่วนลด on-site ฿100 · ใบประกาศทาง LINE · เตือนทบทวน CPR ทุก 3 เดือน</div>
         <a href={lineLinkDeepLink(lc)} onClick={startLineLink} target="_blank" rel="noopener noreferrer"
            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}>
-          <I name="line" size={22} color={B.white}/> ผูก LINE รับใบเซอร์ + คูปอง
+          <I name="line" size={22} color={B.white}/> ผูก LINE รับคูปอง + ใบเซอร์
         </a>
         <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8, lineHeight: 1.5 }}>
           (LINE จะเด้งข้อความพร้อมโค้ด <strong style={{ fontFamily: "monospace", color: B.red }}>JIA-LINK-{lc}</strong> + ข้อความนัดเรียนภาคปฏิบัติ → <strong>กดส่ง</strong> ในแชต @jiacpr = ผูกบัญชีอัตโนมัติ)
@@ -1847,15 +1848,11 @@ function Certificate({ user, go }) {
         {linkWaiting && (
           <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#06A047" }}>⏳ กำลังรอการยืนยัน... กดส่งข้อความในแอป LINE แล้วรอสักครู่</div>
         )}
-        <button onClick={() => { setSkipGate(true); safeTrack("line_oa_skipped", { variant: "certificate" }); }}
-          style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12, padding: "10px 12px", marginTop: 8, cursor: "pointer", textDecoration: "underline" }}>
-          ข้าม รับแค่ใบเซอร์ (ไม่รับคูปอง/การแจ้งเตือน)
-        </button>
       </div>
-    ) : null}
+    )}
 
-    {/* ดาวน์โหลด + คูปอง: ปลดล็อกเมื่อผูก LINE แล้ว หรือกดข้าม */}
-    {(lineLinked || skipGate) && (<>
+    {/* ดาวน์โหลด + คูปอง: แสดงเสมอ ไม่ต้องผูก/ข้าม LINE ก่อน */}
+    {(<>
       <button onClick={downloadImage} disabled={!!gen} style={{ ...css.btn(B.black, B.white, true), marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="save" size={18} color={B.white}/> {gen === "img" ? "กำลังสร้างรูป..." : "บันทึกเป็นรูปภาพ"}</button>
       <button onClick={downloadPDF} disabled={!!gen} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: gen ? .6 : 1, cursor: gen ? "default" : "pointer" }}><I name="cert" size={18} color={B.black}/> {gen === "pdf" ? "กำลังสร้าง PDF..." : "ดาวน์โหลด PDF"}</button>
       <div style={{ background: `${B.red}08`, borderRadius: 16, padding: 20, marginTop: 16, textAlign: "center" }}>
