@@ -1693,7 +1693,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       {/* Mini cert per module */}
       {progress.done.filter(id => id <= 6).length > 0 && progress.done.filter(id => id <= 6).length < 7 && <button onClick={() => go("minicert")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 8, border: `1px solid ${B.ltGray}`, fontSize: 13 }}>ดูใบ Mini Certificate →</button>}
       <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
-      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon","jia_last_page"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
     </div>
     {progress.done.length >= 4 && <NewsSection openBlog={openBlog} goAll={() => go("blog")} title="บทความ CPR เพิ่มเติม" subtitle={pct === 100 ? "ทักษะ CPR เสื่อมใน 3-6 เดือน — แวะอ่านทบทวนได้ตลอด" : "เก่งมาก! ใกล้จบแล้ว — มีบทความทบทวนให้อ่านเพิ่ม"} cprOnly={true} max={5}/>}
   </div>);
@@ -1844,7 +1844,7 @@ function Certificate({ user, go }) {
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ jiacpr.com/online"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
-    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon","jia_last_page"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
   </div></div>);
 }
 
@@ -3203,9 +3203,19 @@ export default function App() {
     /\/admin\/?$/.test(window.location.pathname)
   );
   const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
+  const stripeSuccess = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("stripe") === "success";
+  // หน้าที่ "จำตำแหน่งไว้ในเครื่อง" แล้วเปิดกลับมาที่เดิมได้ (กันนักเรียนต้องเริ่มขั้นตอนแรกใหม่ทุกครั้ง)
+  const RESUMABLE_PAGES = ["course", "store", "register", "certificate", "minicert", "booking", "claim", "blog"];
+  // เคยลงทะเบียน/ซื้อ/ปลดล็อก/มีความคืบหน้าแล้ว = กลับเข้าคอร์สได้เลย ไม่ต้องผ่านด่านสมัครซ้ำ
+  const hasEnrolledBefore = () => isSignedUp() || load("progress", { done: [] }).done.length > 0
+    || load("enrolled", false) || load("promo_redeemed", false) || getPurchased().filter(x => x > 1).length > 0;
   const [page, setPage] = useState(() => {
     if (promoParam) return "claim";
-    if (isSignedUp() || load("progress", { done: [] }).done.length > 0) return "course";
+    if (stripeSuccess) return "course";
+    // จำหน้าล่าสุดที่เปิดค้างไว้ — เปิดเว็บใหม่ก็เรียนต่อจากเดิมได้
+    const last = load("last_page", null);
+    if (last && RESUMABLE_PAGES.includes(last)) return last;
+    if (hasEnrolledBefore()) return "course";
     // front gate (before-course): เปิดเว็บครั้งแรก → ควิซเกริ่นนำ → ถ้าทำควิซแล้วแต่ยังไม่สมัคร → ด่านสมัคร
     if (AUTH_GATE_ENABLED && getGateVariant() === "before-course") return load("teaser_done", false) ? "signupgate" : "teaserquiz";
     return "landing";
@@ -3224,6 +3234,9 @@ export default function App() {
   }, [go]);
   const openBlog = useCallback(slug => { setBlogSlug(slug); setPage("blog-detail"); window.scrollTo(0, 0); }, []);
   const backFromBlog = useCallback(() => { setPage(load("progress", { done: [] }).done.length > 0 ? "course" : "landing"); window.scrollTo(0, 0); }, []);
+
+  // จำหน้าล่าสุดไว้ในเครื่อง (localStorage) เฉพาะหน้าที่กลับมาเปิดต่อได้ — จะได้ไม่ต้องเริ่มขั้นตอนแรกใหม่
+  useEffect(() => { if (RESUMABLE_PAGES.includes(page)) save("last_page", page); }, [page]);
 
   // Handle Stripe success redirect + clean ?promo from URL after consuming
   useEffect(() => {
