@@ -1604,6 +1604,18 @@ function Course({ go, progress, setProgress, user, openBlog }) {
   };
   const done = id => progress.done.includes(id);
 
+  // Progress (ใช้ร่วมกันทั้งหน้าบทเรียนและหน้ารายการ)
+  const total = COURSE.modules.length;
+  const doneCount = progress.done.length;
+  const pct = Math.round((doneCount / total) * 100);
+  const remaining = total - doneCount;            // เหลืออีกกี่บทจะจบ + ได้ใบประกาศ
+  const cheer = remaining === 0
+    ? "เรียนครบทุกบทแล้ว! ไปรับใบประกาศได้เลย 🎉"
+    : remaining === 1 ? "เหลืออีกบทเดียวเท่านั้น สู้ๆ ใกล้ได้ใบประกาศแล้ว!"
+    : doneCount === 0 ? "เริ่มบทแรกกันเลย ค่อยๆ เรียนไปทีละบท เป็นกำลังใจให้นะ 💪"
+    : remaining <= 3 ? "เลยครึ่งทางแล้ว อีกนิดเดียวจะจบและได้ใบประกาศ!"
+    : "เรียนมาได้ดีมาก ไปต่อได้เลย เป็นกำลังใจให้!";
+
   // Timer for video watching (70% of duration)
   useEffect(() => { if (active && !reviewMode && !done(active)) { const mod = COURSE.modules.find(m => m.id === active); if (mod && mod.dur) { const target = Math.floor(mod.dur * 0.9); setTimer(target); setCanWatch(false); timerRef.current = setInterval(() => { setTimer(prev => { if (prev <= 1) { clearInterval(timerRef.current); setCanWatch(true); return 0; } return prev - 1; }); }, 1000); } } return () => { if (timerRef.current) clearInterval(timerRef.current); }; }, [active, reviewMode, mustRewatch]);
 
@@ -1628,6 +1640,18 @@ function Course({ go, progress, setProgress, user, openBlog }) {
   if (active) {
     const mod = COURSE.modules.find(m => m.id === active); const isFinal = !mod.vid; const alreadyDone = done(mod.id);
     return (<div style={css.page}><div style={css.header(B.black)}><button onClick={resetLesson} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ flex: 1, fontSize: 14, fontWeight: 700, color: B.white }}>{mod.title}</div></div>
+      {/* Progress strip — เห็นความคืบหน้าระหว่างเรียน + ให้กำลังใจ */}
+      <div style={{ background: B.black, padding: "0 24px 14px" }}><div style={{ maxWidth: 480, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)" }}><div style={{ height: "100%", borderRadius: 3, background: B.green, width: `${pct}%`, transition: "width .5s" }}/></div>
+          <span style={{ fontSize: 12, fontWeight: 600, color: B.white }}>{pct}%</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "rgba(255,255,255,.6)", marginTop: 5 }}>
+          <span>{doneCount}/{total} บทเรียน</span>
+          {remaining > 0 && <><span style={{ opacity: .5 }}>·</span><I name="cert" size={13} color={B.gold}/><span>อีก {remaining} บท จะจบและรับใบประกาศ</span></>}
+        </div>
+      </div></div>
+      <div style={{ background: `${B.gold}10`, borderBottom: `1px solid ${B.gold}20`, padding: "10px 24px" }}><div style={{ maxWidth: 480, margin: "0 auto", fontSize: 13, fontWeight: 600, color: "#B45309", textAlign: "center" }}>{cheer}</div></div>
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
         {(!quiz && !isFinal) || reviewMode || mustRewatch ? (<>
           <div style={{ borderRadius: 16, overflow: "hidden", marginBottom: 16 }}><iframe width="100%" style={{ aspectRatio: "16/9", border: "none", display: "block" }} src={"https://www.youtube.com/embed/" + mod.vid + "?rel=0"} title={mod.title} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen/></div>
@@ -1659,7 +1683,6 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       </div></div>);
   }
 
-  const pct = Math.round((progress.done.length / COURSE.modules.length) * 100);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.black} 0%, #2a2a2a 100%)`, color: B.white, padding: "24px 24px 30px" }}><div style={{ maxWidth: 480, margin: "0 auto" }}><div style={{ fontSize: 11, letterSpacing: 2, opacity: .5, textTransform: "uppercase" }}>JIA TRAINER CENTER</div><h2 style={{ fontSize: 20, fontWeight: 700, margin: "4px 0 14px" }}>CPR & AED ออนไลน์</h2><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,.12)" }}><div style={{ height: "100%", borderRadius: 3, background: B.green, width: `${pct}%`, transition: "width .5s" }}/></div><span style={{ fontSize: 12, fontWeight: 600 }}>{pct}%</span></div><div style={{ fontSize: 11, opacity: .5, marginTop: 4 }}>{progress.done.length}/{COURSE.modules.length} บทเรียน</div></div></div>
     {!load("line_added", false) && (() => {
@@ -1681,7 +1704,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       );
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
-      {progress.done.length > 0 && progress.done.length < COURSE.modules.length && <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.gold}30`, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 600, color: "#B45309" }}>{progress.done.length < 3 ? "เรียนมาได้ดีมาก ไปต่อได้เลย!" : progress.done.length < 6 ? "เลยครึ่งทางแล้ว อีกนิดเดียว!" : "เกือบถึงแล้ว ลุยต่อได้เลย!"}</div></div>}
+      {doneCount > 0 && remaining > 0 && <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.gold}30`, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 600, color: "#B45309" }}>{cheer}</div><div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: 11, color: "#B45309", opacity: .8, marginTop: 4 }}><I name="cert" size={12} color={B.gold}/><span>อีก {remaining} บท จะจบและรับใบประกาศ</span></div></div>}
       {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); return; } setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => go("claim")} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
