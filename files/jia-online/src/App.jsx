@@ -22,7 +22,8 @@ const markLineAdded = (user) => {
   const u = user || load("user", null);
   if (u?.phone) {
     const tail = u.phone.replace(/\D/g, "").slice(-9);
-    supaRest("customers", "PATCH", { line_added: true, line_added_at: new Date().toISOString() }, `?tel=ilike.*${tail}`);
+    // ผูก line_link_code ไว้กับเรคคอร์ดลูกค้าก่อน เพื่อให้ line-webhook จับคู่ข้อความ "JIA-LINK-<code>" → เขียน line_user_id กลับได้
+    supaRest("customers", "PATCH", { line_added: true, line_added_at: new Date().toISOString(), line_link_code: getLinkCode() }, `?tel=ilike.*${tail}`);
   }
 };
 const SUPABASE_URL = "https://tpoiyykbgsgnrdwzgzvn.supabase.co";
@@ -1694,7 +1695,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       return (
         <div style={{ ...css.wrap, paddingTop: 16 }}>
           <a href={dl} target="_blank" rel="noopener noreferrer"
-             onClick={() => safeTrack("line_oa_clicked", { variant: "course-banner", has_link_code: true })}
+             onClick={() => { safeTrack("line_oa_clicked", { variant: "course-banner", has_link_code: true }); markLineAdded(user); }}
              style={{ display: "flex", alignItems: "center", gap: 12, background: "#06C75512", border: "1px solid #06C75540", borderRadius: 12, padding: "12px 14px", textDecoration: "none", color: B.black }}>
             <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: "#06C755", display: "flex", alignItems: "center", justifyContent: "center" }}><I name="line" size={22} color={B.white}/></div>
             <div style={{ flex: 1 }}>
@@ -3286,6 +3287,33 @@ export default function App() {
   useEffect(() => {
     captureUTM();
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
+  }, []);
+
+  // Auto-link LINE: ถ้าเปิดในแอป LINE (LIFF) และเป็นนักเรียนที่สมัครแล้วแต่ยังไม่ผูก line_user_id
+  // → ผูกเงียบๆ ผ่าน auth-line-link (ดึง line_user_id + กู้ progress กลับมา) โดยไม่ต้องให้ลูกค้าพิมพ์โค้ด
+  useEffect(() => {
+    const u = load("user", null);
+    if (!u?.phone || u?.line_user_id) return;
+    (async () => {
+      try {
+        const liff = await loadLiff();
+        if (!liff || typeof liff.isInClient !== "function" || !liff.isInClient()) return;
+        if (!liff.isLoggedIn()) return;
+        let idToken = null; try { idToken = liff.getIDToken(); } catch (e) {}
+        if (!idToken) return;
+        const res = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
+          id_token: idToken, phone: u.phone, pdpa: true, display_name: u.name || "",
+          utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
+          gate_variant: getGateVariant(),
+        }) });
+        const data = await res.json().catch(() => ({}));
+        if (data?.ok) {
+          const nu = { ...u, line_user_id: data.line_user_id, customer_id: data.customer_id || u.customer_id };
+          setUser(nu); save("user", nu); save("line_added", true);
+          if (data.progress) { setProgress(data.progress); save("progress", data.progress); }
+        }
+      } catch (e) {}
+    })();
   }, []);
 
   if (isAdmin) return (
