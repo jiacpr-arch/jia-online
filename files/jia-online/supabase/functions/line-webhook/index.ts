@@ -44,6 +44,39 @@ async function loadJiacprSecret(jiacprKey: string, fallbackKey: string): Promise
   return await loadSecretValue(fallbackKey);
 }
 
+// ออก channel access token ของ @jiacpr เองจาก channel id + secret (client_credentials, อายุ 30 วัน)
+// แล้ว cache ลง jiaroo_secrets เพื่อไม่ต้องออกใหม่ทุกครั้ง — ผู้ใช้ไม่ต้องเข้า Developers Console
+async function mintJiacprToken(): Promise<string> {
+  const channelId = await loadSecretValue("JIACPR_LINE_CHANNEL_ID");
+  const channelSecret = await loadJiacprSecret("JIACPR_LINE_CHANNEL_SECRET", "LINE_CHANNEL_SECRET");
+  if (!channelId || !channelSecret) return "";
+  try {
+    const r = await fetch("https://api.line.me/v2/oauth/accessToken", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: channelId, client_secret: channelSecret }),
+    });
+    if (!r.ok) return "";
+    const tok = (await r.json())?.access_token || "";
+    if (tok) {
+      await supa.from("jiaroo_secrets").upsert(
+        { tenant_slug: TENANT, key: "JIACPR_LINE_CHANNEL_ACCESS_TOKEN", value: tok },
+        { onConflict: "tenant_slug,key" },
+      );
+    }
+    return tok;
+  } catch (_e) { return ""; }
+}
+
+// token ของ @jiacpr: ใช้ค่าที่ cache ไว้ก่อน, ถ้าไม่มีค่อย mint ใหม่ (force=true เพื่อ re-mint ตอนเจอ 401)
+async function getJiacprToken(force = false): Promise<string> {
+  if (!force) {
+    const cached = await loadSecretValue("JIACPR_LINE_CHANNEL_ACCESS_TOKEN");
+    if (cached) return cached;
+  }
+  return await mintJiacprToken();
+}
+
 // ตรวจลายเซ็น LINE: base64( HMAC-SHA256(rawBody, channelSecret) ) === x-line-signature
 async function validSignature(secret: string, rawBody: string, signature: string): Promise<boolean> {
   try {
@@ -59,21 +92,34 @@ async function validSignature(secret: string, rawBody: string, signature: string
   }
 }
 
-async function lineGet(token: string, path: string): Promise<any> {
-  try {
-    const r = await fetch(`https://api.line.me${path}`, { headers: { Authorization: `Bearer ${token}` } });
-    return r.ok ? await r.json() : null;
-  } catch (_e) { return null; }
+// ดึงโปรไฟล์ — auto re-mint token ครั้งเดียวถ้าเจอ 401 (token หมดอายุ/เปลี่ยน)
+async function lineGetProfile(lineUserId: string): Promise<any> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await getJiacprToken(attempt === 1);
+    if (!token) return null;
+    try {
+      const r = await fetch(`https://api.line.me/v2/bot/profile/${lineUserId}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) return await r.json();
+      if (r.status !== 401) return null;
+    } catch (_e) { return null; }
+  }
+  return null;
 }
 
-async function lineReply(token: string, replyToken: string, text: string): Promise<void> {
-  try {
-    await fetch("https://api.line.me/v2/bot/message/reply", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ replyToken, messages: [{ type: "text", text }] }),
-    });
-  } catch (_e) { /* ไม่ block */ }
+// ตอบกลับ — auto re-mint token ครั้งเดียวถ้าเจอ 401
+async function lineReply(replyToken: string, text: string): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await getJiacprToken(attempt === 1);
+    if (!token) return;
+    try {
+      const r = await fetch("https://api.line.me/v2/bot/message/reply", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ replyToken, messages: [{ type: "text", text }] }),
+      });
+      if (r.ok || r.status !== 401) return;
+    } catch (_e) { return; }
+  }
 }
 
 // แยกโค้ด 6 ตัวจากข้อความที่ขึ้นต้น JIA-LINK-XXXXXX (อาจมีข้อความต่อท้าย)
@@ -120,9 +166,7 @@ Deno.serve(async (req: Request) => {
   try { body = JSON.parse(rawBody || "{}"); } catch { return json({ error: "bad json" }, 400); }
   const events: any[] = Array.isArray(body?.events) ? body.events : [];
 
-  const token = await loadJiacprSecret("JIACPR_LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_ACCESS_TOKEN");
-
-  // 2) จัดการแต่ละ event (ทำให้ครบก่อนตอบ 200 — payload เล็ก)
+  // 2) จัดการแต่ละ event (ทำให้ครบก่อนตอบ 200 — payload เล็ก) — token ออก/ดึงจาก cache ใน getJiacprToken เอง
   for (const ev of events) {
     const lineUserId: string | null = ev?.source?.userId || null;
     const type: string = ev?.type || "";
@@ -133,13 +177,13 @@ Deno.serve(async (req: Request) => {
         let matched: string | null = null;
         if (code && lineUserId) matched = await linkByCode(code, lineUserId);
         await logInbound({ line_user_id: lineUserId, event_type: "message", message_text: text.slice(0, 500), matched_customer_id: matched, raw_payload: ev });
-        if (matched && token && ev.replyToken) {
-          await lineReply(token, ev.replyToken, "ผูกบัญชีเรียบร้อยแล้วค่ะ ✅ จะส่งโปรโมชั่น คูปองต่ออายุ และแจ้งเตือนทบทวน CPR ให้ทาง LINE นี้นะคะ 💙");
+        if (matched && ev.replyToken) {
+          await lineReply(ev.replyToken, "ผูกบัญชีเรียบร้อยแล้วค่ะ ✅ จะส่งโปรโมชั่น คูปองต่ออายุ และแจ้งเตือนทบทวน CPR ให้ทาง LINE นี้นะคะ 💙");
         }
       } else if (type === "follow") {
         let displayName: string | null = null;
-        if (token && lineUserId) {
-          const profile = await lineGet(token, `/v2/bot/profile/${lineUserId}`);
+        if (lineUserId) {
+          const profile = await lineGetProfile(lineUserId);
           displayName = profile?.displayName || null;
         }
         await logInbound({ line_user_id: lineUserId, event_type: "follow", message_text: displayName, matched_customer_id: null, raw_payload: ev });
