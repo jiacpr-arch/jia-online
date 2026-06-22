@@ -7,8 +7,9 @@
 //   ฝั่งแอปเขียน customers.line_link_code = <code> ไว้ก่อน → webhook จับคู่ code → เขียน line_user_id กลับ
 //
 // Secrets ที่ใช้ (env ก่อน, fallback jiaroo_secrets tenant=jiaroo):
-//   LINE_CHANNEL_SECRET        (ตรวจลายเซ็น x-line-signature)
-//   LINE_CHANNEL_ACCESS_TOKEN  (ดึงโปรไฟล์ + ตอบกลับ)
+//   JIACPR_LINE_CHANNEL_SECRET → fallback LINE_CHANNEL_SECRET        (ตรวจลายเซ็น x-line-signature)
+//   JIACPR_LINE_CHANNEL_ACCESS_TOKEN → fallback LINE_CHANNEL_ACCESS_TOKEN  (ดึงโปรไฟล์ + ตอบกลับ)
+//   หมายเหตุ: @jiacpr เป็นคนละ channel กับ jiaroo (jiaroo-line-webhook) จึงต้องใช้คีย์ JIACPR_* แยก
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -33,6 +34,14 @@ async function loadSecretValue(key: string): Promise<string> {
   const { data } = await supa.from("jiaroo_secrets").select("value")
     .eq("tenant_slug", TENANT).eq("key", key).maybeSingle();
   return data?.value || "";
+}
+
+// @jiacpr Messaging API เป็นคนละ channel กับ jiaroo — ใช้คีย์เฉพาะของ @jiacpr ก่อน
+// (env JIACPR_* → jiaroo_secrets JIACPR_* → fallback คีย์ทั่วไป) เพื่อไม่ทับ secret ของ jiaroo-line-webhook
+async function loadJiacprSecret(jiacprKey: string, fallbackKey: string): Promise<string> {
+  const specific = await loadSecretValue(jiacprKey);
+  if (specific) return specific;
+  return await loadSecretValue(fallbackKey);
 }
 
 // ตรวจลายเซ็น LINE: base64( HMAC-SHA256(rawBody, channelSecret) ) === x-line-signature
@@ -100,7 +109,7 @@ Deno.serve(async (req: Request) => {
   const rawBody = await req.text();
 
   // 1) ตรวจลายเซ็น — กัน event ปลอม
-  const secret = await loadSecretValue("LINE_CHANNEL_SECRET");
+  const secret = await loadJiacprSecret("JIACPR_LINE_CHANNEL_SECRET", "LINE_CHANNEL_SECRET");
   const signature = req.headers.get("x-line-signature") || "";
   if (!secret) return json({ error: "server missing LINE_CHANNEL_SECRET" }, 500);
   if (!signature || !(await validSignature(secret, rawBody, signature))) {
@@ -111,7 +120,7 @@ Deno.serve(async (req: Request) => {
   try { body = JSON.parse(rawBody || "{}"); } catch { return json({ error: "bad json" }, 400); }
   const events: any[] = Array.isArray(body?.events) ? body.events : [];
 
-  const token = await loadSecretValue("LINE_CHANNEL_ACCESS_TOKEN");
+  const token = await loadJiacprSecret("JIACPR_LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_ACCESS_TOKEN");
 
   // 2) จัดการแต่ละ event (ทำให้ครบก่อนตอบ 200 — payload เล็ก)
   for (const ev of events) {
