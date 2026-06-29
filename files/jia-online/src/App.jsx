@@ -34,9 +34,9 @@ const AUTH_GATE_ENABLED = true;          // เปิดด่านบังค
 const LIFF_ID = "2010458255-JAxIKawy";     // LIFF ID จาก LINE Developers (PUBLIC) — channel "JIA CPR Online" / provider JiaTrainingcenter
 const GOOGLE_LOGIN_ENABLED = true;        // ต้องเปิด Google provider ใน Supabase Auth ก่อนใช้จริง
 const EMAIL_OTP_ENABLED = true;           // ต้องเปิด Email (OTP) provider ใน Supabase Auth
-const POSTHOG_KEY = "";                   // PUBLIC PostHog project key. ว่าง = ไม่ทำ A/B (ใช้ตัวแปรด่าน default)
-const POSTHOG_HOST = "https://us.i.posthog.com";
-const GATE_VARIANT_DEFAULT = "before-course"; // before-course (ควิซเกริ่นนำ→สมัคร→เข้าคอร์ส) | after-lesson-1 | soft
+const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY || "";  // PUBLIC PostHog project key (ตั้งผ่าน env ใน Vercel). ว่าง = ไม่ส่ง event เข้า PostHog
+const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com";
+const GATE_VARIANT_DEFAULT = "soft"; // soft (แอด LINE แบบข้ามได้ ลด drop) | before-course (ควิซเกริ่นนำ→สมัคร→เข้าคอร์ส) | after-lesson-1
 const FN_URL = (n) => `${SUPABASE_URL}/functions/v1/${n}`;
 
 // ========== PRICING ==========
@@ -3217,6 +3217,35 @@ function Admin() {
   );
 }
 
+// ==================== IN-APP BROWSER NOTICE ====================
+// ทราฟิกจากโฆษณา FB/IG เปิดใน webview ของแอป ทำให้ deep link แอด LINE มักค้าง
+// แนะนำให้เปิดในเบราว์เซอร์จริง (Chrome/Safari) เพื่อให้ flow แอด LINE ลื่นขึ้น
+function detectInApp() {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent || "";
+  if (/FBAN|FBAV|FB_IAB/.test(ua)) return "Facebook";
+  if (/Instagram/.test(ua)) return "Instagram";
+  return null;
+}
+function InAppNotice() {
+  const [src] = useState(detectInApp);
+  const [hide, setHide] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { if (src) { safeTrack("inapp_browser_detected", { source: src }); phCapture("inapp_browser_detected", { source: src }); } }, [src]);
+  if (!src || hide) return null;
+  const copy = async () => { try { await navigator.clipboard.writeText(window.location.href); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
+  return (
+    <div style={{ background: "#FEF3C7", borderBottom: "1px solid #FDE68A", color: "#92400E", padding: "10px 14px", display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, lineHeight: 1.4 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <b>เปิดในเบราว์เซอร์จริงเพื่อแอด LINE ได้ลื่นกว่า</b>
+        <div style={{ marginTop: 2 }}>คุณกำลังเปิดผ่านแอป {src} — กดเมนู ⋯ มุมขวาบนแล้วเลือก “เปิดในเบราว์เซอร์” (Chrome/Safari)</div>
+        <button onClick={copy} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8, border: "1px solid #D97706", background: "#fff", color: "#92400E", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{copied ? "คัดลอกลิงก์แล้ว" : "คัดลอกลิงก์"}</button>
+      </div>
+      <button onClick={() => setHide(true)} aria-label="ปิด" style={{ background: "none", border: "none", color: "#92400E", cursor: "pointer", fontSize: 18, lineHeight: 1, flexShrink: 0 }}>×</button>
+    </div>
+  );
+}
+
 // ==================== APP ====================
 export default function App() {
   // เข้าหน้า admin ได้ทั้ง path /admin (เช่น cpr.morroo.com/admin) และ ?admin=1 (เดิม)
@@ -3325,6 +3354,7 @@ export default function App() {
 
   return (
     <>
+      <InAppNotice />
       {(() => {
         switch (page) {
           case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
