@@ -18,7 +18,7 @@ const getLinkCode = () => { let code = load("line_link_code", null); if (!code) 
 const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code + "\nสนใจคอร์ส CPR & AED 🙏 เรียนออนไลน์อยู่และได้รับส่วนลดแล้ว อยากนัดวันมาเรียนภาคปฏิบัติ ไม่ทราบว่าสะดวกวันไหนบ้างครับ/ค่ะ")}`;
 const markLineAdded = (user) => {
   save("line_added", true); save("line_added_at", new Date().toISOString());
-  safeTrack("line_oa_added");
+  safeTrack("line_oa_added"); phCapture("line_oa_added", {});
   const u = user || load("user", null);
   if (u?.phone) {
     const tail = u.phone.replace(/\D/g, "").slice(-9);
@@ -894,12 +894,12 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
     ? (load("coupon", null) || (() => { const c = genCoupon(); save("coupon", c); try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {} return c; })())
     : null;
   // gate ก่อนเรียน = ข้ามได้ (strong-soft) แต่จด line_skipped_at ไว้เพื่อไม่เด้งซ้ำ + ให้แบนเนอร์ในคอร์สตามต่อ
-  useEffect(() => { safeTrack("line_gate_view", { variant }); }, [variant]);
-  const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); go("course"); };
-  const onSkip = () => { safeTrack("line_oa_skipped", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
-  const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); };
+  useEffect(() => { safeTrack("line_gate_view", { variant }); phCapture("line_gate_view", { variant }); }, [variant]);
+  const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); phCapture("line_oa_confirm_added", { variant }); go("course"); };
+  const onSkip = () => { safeTrack("line_oa_skipped", { variant }); phCapture("line_oa_skipped", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
+  const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); phCapture("line_oa_clicked", { variant, has_link_code: true }); };
   // เข้าเรียนเลย (post-register) — ไม่ขวางก่อนได้คุณค่า; จด line_skipped_at กันเด้งซ้ำ ปล่อยให้แบนเนอร์ในคอร์ส + หน้าใบประกาศตามต่อ
-  const onEnterCourse = () => { safeTrack("post_register_enter_course", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
+  const onEnterCourse = () => { safeTrack("post_register_enter_course", { variant }); phCapture("post_register_enter_course", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
 
   // ── post-register: หลังสมัครเสร็จ ดัน "เริ่มเรียนเลย" เป็นปุ่มหลัก, LINE เป็นตัวเลือกเบา ๆ (โปรโมตการแอดหนักไปไว้หน้าใบประกาศแทน) ──
   if (variant === "post-register") {
@@ -1734,7 +1734,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       return (
         <div style={{ ...css.wrap, paddingTop: 16 }}>
           <a href={dl} target="_blank" rel="noopener noreferrer"
-             onClick={() => { safeTrack("line_oa_clicked", { variant: "course-banner", has_link_code: true }); markLineAdded(user); }}
+             onClick={() => { safeTrack("line_oa_clicked", { variant: "course-banner", has_link_code: true }); phCapture("line_oa_clicked", { variant: "course-banner", has_link_code: true }); markLineAdded(user); }}
              style={{ display: "flex", alignItems: "center", gap: 12, background: "#06C75512", border: "1px solid #06C75540", borderRadius: 12, padding: "12px 14px", textDecoration: "none", color: B.black }}>
             <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: "#06C755", display: "flex", alignItems: "center", justifyContent: "center" }}><I name="line" size={22} color={B.white}/></div>
             <div style={{ flex: 1 }}>
@@ -1817,7 +1817,7 @@ function Certificate({ user, go }) {
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
   // เปิด LINE พร้อมโค้ด แล้ว poll หา line_user_id ที่ webhook เขียนกลับมา = ยืนยันการผูกจริง
   const startLineLink = () => {
-    safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true });
+    safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true }); phCapture("line_oa_clicked", { variant: "certificate", has_link_code: true });
     const u = user || load("user", null);
     const tail = u?.phone ? u.phone.replace(/\D/g, "").slice(-9) : null;
     // ผูกโค้ดนี้กับเรคคอร์ดลูกค้า เพื่อให้ webhook จับคู่ได้แน่นอน
@@ -1833,7 +1833,7 @@ function Certificate({ user, go }) {
           clearInterval(pollRef.current); pollRef.current = null;
           save("line_linked", true); save("line_added", true);
           setLineLinked(true); setLinkWaiting(false);
-          safeTrack("line_oa_linked", { variant: "certificate" });
+          safeTrack("line_oa_linked", { variant: "certificate" }); phCapture("line_oa_linked", { variant: "certificate" });
           return;
         }
       }
@@ -1899,7 +1899,7 @@ function Certificate({ user, go }) {
         <div style={{ fontSize: 15, fontWeight: 700, color: B.red, marginBottom: 4 }}>คูปองส่วนลด ฿100 สำหรับคอร์ส On-site!</div>
         <div style={{ fontSize: 22, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 }}>{coupon}</div>
         <button onClick={() => go("booking")} style={{ ...css.btn(B.red, B.white, true), display: "block", width: "100%", textAlign: "center", cursor: "pointer" }}>จองคอร์ส On-site ใช้คูปองส่วนลด →</button>
-        <a href={LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => safeTrack("line_oa_clicked", { variant: "certificate-inquire" })} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
+        <a href={LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => { safeTrack("line_oa_clicked", { variant: "certificate-inquire" }); phCapture("line_oa_clicked", { variant: "certificate-inquire" }); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
       </div>
     </>)}
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ jiacpr.com/online"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://jiacpr.com/online" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://jiacpr.com/online") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
