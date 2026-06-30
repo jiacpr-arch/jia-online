@@ -898,9 +898,48 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
   const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); go("course"); };
   const onSkip = () => { safeTrack("line_oa_skipped", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
   const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); };
-  const title = preCourse ? "เพิ่ม LINE ก่อนเริ่มเรียน 🎓"
-    : variant === "post-register" ? "เกือบเสร็จแล้ว! เพิ่ม LINE เพื่อรับสิทธิ์เต็ม"
-    : "อย่าลืมเพิ่ม LINE!";
+  // เข้าเรียนเลย (post-register) — ไม่ขวางก่อนได้คุณค่า; จด line_skipped_at กันเด้งซ้ำ ปล่อยให้แบนเนอร์ในคอร์ส + หน้าใบประกาศตามต่อ
+  const onEnterCourse = () => { safeTrack("post_register_enter_course", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
+
+  // ── post-register: หลังสมัครเสร็จ ดัน "เริ่มเรียนเลย" เป็นปุ่มหลัก, LINE เป็นตัวเลือกเบา ๆ (โปรโมตการแอดหนักไปไว้หน้าใบประกาศแทน) ──
+  if (variant === "post-register") {
+    return (
+      <div style={css.page}>
+        <div style={css.header(B.red)}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>สมัครสำเร็จ 🎉</div>
+        </div>
+        <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+          {coupon && <div style={{ ...css.card, textAlign: "center", marginBottom: 14, border: `2px solid ${B.gold}`, background: `${B.gold}10` }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: B.black }}>🎉 สมัครสำเร็จ! รับคูปองส่วนลด ฿100</div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", margin: "10px 0" }}>{coupon}</div>
+            <div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.6 }}>เก็บรหัสนี้ไว้ใช้เป็นส่วนลดคอร์สภาคปฏิบัติ (on-site) — แจ้งตอนจอง หรือกรอกตอนชำระเงิน</div>
+          </div>}
+          <div style={{ ...css.card, textAlign: "center" }}>
+            <div style={{ width: 64, height: 64, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+              <I name="check" size={34} color={B.green}/>
+            </div>
+            <h2 style={{ fontSize: 19, fontWeight: 800, margin: "0 0 8px" }}>พร้อมเริ่มเรียนแล้ว!</h2>
+            <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>เริ่มบทเรียนได้เลย — เรียนจบรับใบประกาศ + คูปองส่วนลดภาคปฏิบัติ</p>
+            <button onClick={onEnterCourse} style={{ ...css.btn(B.red, B.white, true), marginBottom: 14 }}>
+              เริ่มเรียนเลย →
+            </button>
+            {/* LINE แบบเบา: ตัวเลือกเสริม ไม่บังคับ — กดได้ถ้าสนใจ ไม่กดก็ไปต่อได้ */}
+            <a href={deepLink} onClick={() => { onClickLink(); markLineAdded(user); }} target="_blank" rel="noopener noreferrer"
+               style={{ display: "flex", alignItems: "center", gap: 12, background: "#06C75510", border: "1px solid #06C75540", borderRadius: 12, padding: "12px 14px", textDecoration: "none", color: B.black, textAlign: "left" }}>
+              <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: "#06C755", display: "flex", alignItems: "center", justifyContent: "center" }}><I name="line" size={22} color={B.white}/></div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>เพิ่ม LINE @jiacpr <span style={{ color: B.dkGray, fontWeight: 400 }}>(ไม่บังคับ)</span></div>
+                <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>รับใบเซอร์ PDF + เตือนทบทวน + โปรพิเศษ — เพิ่มภายหลังจากในคอร์สก็ได้</div>
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#06994A" }}>เพิ่ม →</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const title = preCourse ? "เพิ่ม LINE ก่อนเริ่มเรียน 🎓" : "อย่าลืมเพิ่ม LINE!";
   return (
     <div style={css.page}>
       <div style={css.header(B.red)}>
