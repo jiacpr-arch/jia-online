@@ -7,7 +7,7 @@ const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF"
 const SERIF = "'Trirong', 'Noto Sans Thai', Georgia, serif"; // ฟอนต์เซริฟไทยสำหรับใบประกาศ (หัวข้อ + ชื่อผู้เรียน)
 
 // ========== CONFIG ==========
-const FREE_LAUNCH = true; // ยังเปิดฟรีจนถึง ก.ค. 2569 — flip เป็น false เมื่อพร้อม cutover (จะเปิด Claim CTA + lock บทที่ 4-6 อัตโนมัติ)
+const FREE_LAUNCH = false; // cutover แล้ว (ก.ค. 2569) — บทที่ 1 ฟรี บทที่เหลือเก็บเงินตาม PRICING, Claim CTA เปิดใช้งาน
 const LAUNCH_END = "31 กรกฎาคม 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
