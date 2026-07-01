@@ -52,6 +52,11 @@ const PROMO_ENABLED = true;                 // เปิดระบบ lead-cap
 const PROMO_FREE_MODULES = [1, 2, 3];       // โค้ดปลดล็อก: CPR ผู้ใหญ่ + ทารก + Choking ผู้ใหญ่
 const PROMO_EXPIRY_DAYS = 7;                // โค้ดหมดอายุภายใน 7 วันหลัง claim
 const PROMO_CODE_PREFIX = "LEAD-";          // prefix แยกจาก JIA- (on-site coupon)
+const VOUCHER_ALL_MODULES = [1, 2, 3, 4, 5, 6, 7]; // voucher เต็มคอร์ส: ปลดล็อกทุกบท + แบบทดสอบสุดท้าย
+const VOUCHER_SOURCES = [
+  { value: "voucher_sale", label: "ขาย Voucher" },
+  { value: "pre_course",   label: "Pre-course (ก่อนเข้าคลาสจริง)" },
+];
 const LEAD_SOURCES = [
   { value: "facebook",  label: "Facebook (เพจ JIA หรือกลุ่ม)" },
   { value: "tiktok",    label: "TikTok" },
@@ -75,6 +80,8 @@ const supaRest = async (table, method = "GET", body = null, filters = "") => {
 };
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const genLeadCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = PROMO_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+const VOUCHER_CODE_PREFIX = "VCH-"; // voucher เต็มคอร์ส (ขาย/pre-course) — แยก prefix จาก LEAD- (lead-capture ฟรี 3 บท)
+const genVoucherCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = VOUCHER_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const normalizePhone = (s) => (s || "").replace(/\D/g, "");
 const normalizeEmail = (s) => (s || "").trim().toLowerCase();
 const daysUntil = (iso) => { if (!iso) return 0; const ms = new Date(iso).getTime() - Date.now(); return Math.max(0, Math.ceil(ms / 86400000)); };
@@ -1199,6 +1206,10 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
   const [redeemCode, setRedeemCode] = useState(initialCode || "");
   const [redeemErr, setRedeemErr] = useState("");
   const [copied, setCopied] = useState(false);
+  // ต้องรู้ว่าใครใช้โค้ด (ชื่อ+เบอร์) ก่อน redeem เสมอ — ผูก online_students ให้ค้นหา/ดูคะแนนย้อนหลังได้
+  // (ถ้าเคยกรอกไว้แล้ว เช่นจากฟอร์มขอโค้ดฟรี หรือเคยสมัครมาก่อน ใช้ค่าเดิมได้เลยไม่ต้องกรอกซ้ำ)
+  const [redeemName, setRedeemName] = useState(u0?.name || "");
+  const [redeemPhone, setRedeemPhone] = useState(u0?.phone || "");
 
   const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(e => ({ ...e, [k]: undefined })); };
 
@@ -1309,10 +1320,14 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
   const redeem = async () => {
     setRedeemErr("");
     const code = (redeemCode || "").trim().toUpperCase();
-    if (!/^LEAD-[A-Z0-9]{6}$/.test(code)) { setRedeemErr("รหัสไม่ถูกต้อง (รูปแบบ: LEAD-XXXXXX)"); return; }
+    if (!/^(LEAD|VCH)-[A-Z0-9]{6}$/.test(code)) { setRedeemErr("รหัสไม่ถูกต้อง (รูปแบบ: LEAD-XXXXXX หรือ VCH-XXXXXX)"); return; }
+    const name = redeemName.trim();
+    const phone = normalizePhone(redeemPhone);
+    if (!name) { setRedeemErr("กรุณากรอกชื่อ-นามสกุลก่อนใช้โค้ด"); return; }
+    if (phone.length < 9) { setRedeemErr("กรุณากรอกเบอร์โทรที่ถูกต้องก่อนใช้โค้ด"); return; }
     setValidating(true);
     try {
-      const res = await supaRest("lead_promo_codes", "GET", null, `?code=eq.${encodeURIComponent(code)}&select=code,expires_at,redeemed_at,name,unlock_modules&limit=1`);
+      const res = await supaRest("lead_promo_codes", "GET", null, `?code=eq.${encodeURIComponent(code)}&select=code,expires_at,redeemed_at,name,unlock_modules,company&limit=1`);
       if (!Array.isArray(res) || !res.length) { setRedeemErr("ไม่พบรหัสนี้ในระบบ"); setValidating(false); return; }
       const row = res[0];
       if (new Date(row.expires_at) < new Date()) {
@@ -1325,9 +1340,8 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
         setValidating(false); return;
       }
 
-      const u = load("user", null);
       const patchRes = await supaRest("lead_promo_codes", "PATCH",
-        { redeemed_at: new Date().toISOString(), redeemed_phone: u?.phone || null },
+        { redeemed_at: new Date().toISOString(), redeemed_phone: phone, name },
         `?code=eq.${encodeURIComponent(code)}&redeemed_at=is.null`
       );
       if (!Array.isArray(patchRes) || !patchRes.length) {
@@ -1336,14 +1350,29 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       }
 
       const unlock = row.unlock_modules && row.unlock_modules.length ? row.unlock_modules : PROMO_FREE_MODULES;
+      // "เต็มคอร์ส" จริง (voucher) เท่านั้นถึง grandfather ให้ enrolled=true — โค้ด lead-capture 3 บทฟรี
+      // ต้องยังถูกจำกัดแค่ unlock_modules ของมันเอง ไม่ใช่ได้ทุกบทไปฟรีๆ
+      const isFullUnlock = [2, 3, 4, 5, 6].every(id => unlock.includes(id));
       save("promo_unlocked", unlock);
       save("promo_code", code);
       save("promo_redeemed", true);
-      save("enrolled", true);
+      if (isFullUnlock) save("enrolled", true);
 
-      supaRest("lead_capture_events", "POST", { code, event_type: "redeemed", metadata: { modules: unlock } });
+      // ผูกกับ online_students เสมอ (ไม่ว่าจะเคยสมัครมาก่อนหรือไม่) เพื่อให้พนักงานค้นหาคะแนนย้อนหลังได้
+      const u = load("user", null);
+      if (!u) {
+        setUser({ name, phone });
+        save("signed_up", true);
+        const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+        supaRest("customers", "POST", { id: custId, name, tel: phone, source: "online-course", line_link_code: getLinkCode(), pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), gate_variant: getGateVariant(), landing_url: load("landing_url", null), ...getUTM() });
+        supaRest("online_students", "POST", { customer_id: custId, name, phone, status: "กำลังเรียน", company: row.company || null });
+      } else if (row.company) {
+        supaRest("online_students", "PATCH", { company: row.company }, `?phone=ilike.*${phone.slice(-9)}&name=eq.${encodeURIComponent(name)}`);
+      }
 
-      setClaimed({ code, modules: unlock, expires_at: row.expires_at, name: u?.name || row.name });
+      supaRest("lead_capture_events", "POST", { code, event_type: "redeemed", metadata: { modules: unlock, company: row.company || null } });
+
+      setClaimed({ code, modules: unlock, expires_at: row.expires_at, name });
       setStep("redeemed");
     } catch (ex) {
       console.error(ex);
@@ -1499,10 +1528,23 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
         <div style={css.card}>
           <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>กรอกรหัสส่วนลด</h3>
-          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX (6 ตัวอักษร)</p>
+          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX หรือ VCH-XXXXXX (6 ตัวอักษร)</p>
           <input type="text" value={redeemCode} onChange={e => { setRedeemCode(e.target.value.toUpperCase()); setRedeemErr(""); }} placeholder="LEAD-XXXXXX" autoCapitalize="characters"
             style={{ width: "100%", padding: "14px 16px", border: `2px solid ${redeemErr ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 18, outline: "none", boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 2, textAlign: "center", textTransform: "uppercase" }}/>
           {redeemErr && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{redeemErr}</div>}
+        </div>
+        <div style={{ ...css.card, marginTop: 12 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 10 }}>ข้อมูลผู้เรียน (สำหรับตรวจสอบคะแนนภายหลัง)</h3>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อ-นามสกุล *</label>
+            <input type="text" value={redeemName} onChange={e => { setRedeemName(e.target.value); setRedeemErr(""); }} placeholder="เช่น สมชาย ใจดี"
+              style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทรศัพท์ *</label>
+            <input type="tel" value={redeemPhone} onChange={e => { setRedeemPhone(e.target.value); setRedeemErr(""); }} placeholder="เช่น 081-234-5678"
+              style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+          </div>
         </div>
         <button onClick={redeem} disabled={validating || !redeemCode} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: (validating || !redeemCode) ? .5 : 1 }}>{validating ? "กำลังตรวจสอบ..." : "ปลดล็อกบทเรียน →"}</button>
         {!claimed && <button onClick={() => setStep("form")} style={{ ...css.btn(B.white, B.dkGray, true), border: `1px solid ${B.ltGray}`, marginTop: 10, fontSize: 13 }}>ยังไม่มีโค้ด? รับฟรีที่นี่ →</button>}
@@ -1665,7 +1707,11 @@ function Course({ go, progress, setProgress, user, openBlog }) {
   const submitQuiz = () => {
     const mod = COURSE.modules.find(m => m.id === active); let correct = 0; mod.quiz.forEach((q, i) => { if (ans[i] === q.a) correct++; }); const score = Math.round((correct / mod.quiz.length) * 100); const passed = score >= 80; setResult({ score, correct, total: mod.quiz.length, passed });
     if (passed && !progress.done.includes(active)) { const np = { ...progress, done: [...progress.done, active], scores: { ...progress.scores, [active]: score } }; setProgress(np); save("progress", np); syncProgressRemote(np);
-      if (!mod.vid && mod.id === COURSE.modules[COURSE.modules.length - 1].id) { 
+      // เก็บคะแนนรายบทลง online_students ตรงๆ (ไม่ผ่าน course_progress) เพื่อให้พนักงานดูคะแนนย่อยได้
+      // แม้ผู้เรียนจะลงทะเบียนแบบชื่อ+เบอร์โทรอย่างเดียว ไม่ได้ล็อกอินผ่าน LINE/Google/Email OTP จริง
+      const su = user || load("user", null);
+      if (su?.phone && su?.name) supaRest("online_students", "PATCH", { chapter_scores: np.scores }, `?phone=ilike.*${su.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(su.name)}`);
+      if (!mod.vid && mod.id === COURSE.modules[COURSE.modules.length - 1].id) {
         const u = user || load("user", null);
         const coupon = genCoupon(); save("coupon", coupon); 
         if (u) {
@@ -2174,12 +2220,14 @@ const TABS = [
   { key: "pipeline",        label: "Pipeline (jiaroo)", custom: true },
   { key: "dashboard",       label: "Dashboard",         custom: true },
   { key: "team",            label: "ทีมเซลล์",         custom: true },
-  { key: "online_students", label: "นักเรียนออนไลน์", cols: ["name","phone","email","status","final_score","coupon_code","registered_at"] },
+  { key: "online_students", label: "นักเรียนออนไลน์", cols: ["name","phone","email","company","status","final_score","coupon_code","registered_at"] },
   { key: "customers",       label: "ลูกค้าทั้งหมด",   cols: ["name","tel","email","source","created_at"] },
   { key: "bookings",        label: "การจอง On-site", cols: ["name","tel","course_name","start_date","time_slot","total_people","final_price","payment_status","created_at"] },
   { key: "sales_tracking",  label: "ติดตามขาย",      cols: ["name","phone","score","coupon_code","follow_status","completed_date"] },
   { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
-  { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","created_at","expires_at","redeemed_at","email_sent_status"] },
+  { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","company","unlock_modules","created_at","expires_at","redeemed_at","email_sent_status"] },
+  { key: "voucher_issue",   label: "ออก Voucher",      custom: true },
+  { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
 ];
 
 // ==================== JIAROO CRM ====================
@@ -3022,6 +3070,169 @@ function AdminLogin({ onAuth }) {
   );
 }
 
+// ==================== VOUCHER ISSUE (ออกโค้ดเต็มคอร์สให้ลูกค้าจ่ายเงินแล้ว/บริษัท) ====================
+function VoucherIssuePanel() {
+  const [form, setForm] = useState({ name: "", phone: "", company: "", source: "voucher_sale" });
+  const [issuing, setIssuing] = useState(false);
+  const [err, setErr] = useState("");
+  const [issued, setIssued] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(""); };
+
+  const issue = async () => {
+    setErr("");
+    if (!form.name.trim()) { setErr("กรุณากรอกชื่อลูกค้า"); return; }
+    const phone = normalizePhone(form.phone);
+    if (phone.length < 9) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return; }
+    setIssuing(true);
+    try {
+      const code = genVoucherCode();
+      const expires = new Date(); expires.setFullYear(expires.getFullYear() + 2); // voucher จ่ายเงินแล้ว ไม่ควรหมดอายุเร็วแบบโค้ด lead-capture
+      const payload = {
+        code, name: form.name.trim(), phone, email: "", source: form.source,
+        company: form.company.trim() || null,
+        unlock_modules: VOUCHER_ALL_MODULES,
+        expires_at: expires.toISOString(),
+      };
+      const res = await supaRest("lead_promo_codes", "POST", payload);
+      if (!Array.isArray(res) || !res.length) { setErr("ออกโค้ดไม่สำเร็จ (เบอร์นี้อาจมีโค้ดที่ยังไม่ใช้อยู่แล้ว ลองค้นในแท็บ \"โค้ดส่วนลด Lead\")"); setIssuing(false); return; }
+      setIssued({ code, ...form, phone });
+      setForm({ name: "", phone: "", company: form.company, source: form.source });
+    } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
+    setIssuing(false);
+  };
+
+  const copyCode = () => {
+    if (!issued) return;
+    navigator.clipboard?.writeText(issued.code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
+
+  return (
+    <div style={{ maxWidth: 480 }}>
+      <div style={{ background: B.white, borderRadius: 14, padding: 20, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>ออก Voucher ปลดล็อกเต็มคอร์ส</h3>
+        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>สำหรับลูกค้าที่จ่ายเงินมาแล้ว (ขาย voucher โดยตรง หรือบริษัทซื้อให้พนักงานเรียน pre-course) — โค้ดปลดล็อกทุกบท ไม่หมดอายุเร็ว</p>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ประเภท</label>
+          <select value={form.source} onChange={e => F("source", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}>
+            {VOUCHER_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อลูกค้า *</label>
+          <input type="text" value={form.name} onChange={e => F("name", e.target.value)} placeholder="เช่น สมชาย ใจดี" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทร *</label>
+          <input type="tel" value={form.phone} onChange={e => F("phone", e.target.value)} placeholder="เช่น 081-234-5678" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+        </div>
+        <div style={{ marginBottom: 4 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>บริษัท (ถ้ามี — ใช้กรองรายงานคะแนนทีหลัง)</label>
+          <input type="text" value={form.company} onChange={e => F("company", e.target.value)} placeholder="เช่น บริษัท เอบีซี จำกัด" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+        </div>
+        {err && <div style={{ color: B.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
+        <button onClick={issue} disabled={issuing} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: issuing ? .6 : 1 }}>{issuing ? "กำลังออกโค้ด..." : "ออกโค้ด →"}</button>
+      </div>
+
+      {issued && (
+        <div style={{ background: `${B.gold}12`, border: `2px solid ${B.gold}`, borderRadius: 14, padding: 20, textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>ออกโค้ดสำเร็จ — ส่งให้ {issued.name} ({issued.phone})</div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 3, fontFamily: "monospace", margin: "8px 0" }}>{issued.code}</div>
+          <button onClick={copyCode} style={{ ...css.btn(B.white, B.black, true), border: `1px solid ${B.ltGray}`, fontSize: 13, padding: "8px 20px" }}>{copied ? "คัดลอกแล้ว ✓" : "คัดลอกโค้ด"}</button>
+          <div style={{ fontSize: 11, color: B.dkGray, marginTop: 10 }}>ลูกค้านำโค้ดนี้ไปกรอกที่หน้า "มีโค้ดส่วนลด" ในแอป</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== COMPANY SCORE REPORT (สำหรับ HR ดูคะแนน pre-course) ====================
+function CompanyReport() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [company, setCompany] = useState("");
+  const [companies, setCompanies] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      const res = await supaRest("online_students", "GET", null, "?company=not.is.null&select=company&order=company.asc");
+      const uniq = [...new Set((Array.isArray(res) ? res : []).map(r => r.company).filter(Boolean))];
+      setCompanies(uniq);
+      if (uniq.length && !company) setCompany(uniq[0]);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!company) { setRows([]); return; }
+    (async () => {
+      setLoading(true);
+      const res = await supaRest("online_students", "GET", null, `?company=eq.${encodeURIComponent(company)}&select=name,phone,status,final_score,chapter_scores,registered_at,completed_at&order=registered_at.desc`);
+      setRows(Array.isArray(res) ? res : []);
+      setLoading(false);
+    })();
+  }, [company]);
+
+  const chapterCols = COURSE.modules.filter(m => m.vid); // บทที่ 1-6 (ไม่รวมแบบทดสอบสุดท้าย)
+
+  const exportCSV = () => {
+    if (!rows.length) return;
+    const header = ["name", "phone", "status", ...chapterCols.map(m => m.short), "final_score", "registered_at", "completed_at"].join(",");
+    const esc = (v) => { if (v == null) return ""; const s = String(v).replace(/"/g, '""'); return /[",\n]/.test(s) ? `"${s}"` : s; };
+    const body = rows.map(r => [r.name, r.phone, r.status, ...chapterCols.map(m => (r.chapter_scores || {})[m.id] ?? ""), r.final_score ?? "", r.registered_at, r.completed_at].map(esc).join(",")).join("\n");
+    const csv = "﻿" + header + "\n" + body;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `jia_company_${company}_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+        <select value={company} onChange={e => setCompany(e.target.value)} style={{ padding: "10px 14px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 14 }}>
+          {!companies.length && <option value="">— ยังไม่มีบริษัทในระบบ —</option>}
+          {companies.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button onClick={exportCSV} disabled={!rows.length} style={{ ...css.btn(B.white, B.black, true), border: `1px solid ${B.ltGray}`, fontSize: 13, padding: "8px 16px", opacity: rows.length ? 1 : .5 }}>Export CSV</button>
+      </div>
+
+      {loading ? <div style={{ padding: 20, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div> : (
+        <div style={{ overflowX: "auto", background: B.white, borderRadius: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: B.gray, textAlign: "left" }}>
+                <th style={{ padding: "10px 12px" }}>ชื่อ</th>
+                <th style={{ padding: "10px 12px" }}>เบอร์โทร</th>
+                {chapterCols.map(m => <th key={m.id} style={{ padding: "10px 12px", textAlign: "center" }}>{m.short}</th>)}
+                <th style={{ padding: "10px 12px", textAlign: "center" }}>สอบสุดท้าย</th>
+                <th style={{ padding: "10px 12px" }}>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} style={{ borderTop: `1px solid ${B.ltGray}` }}>
+                  <td style={{ padding: "10px 12px", fontWeight: 600 }}>{r.name}</td>
+                  <td style={{ padding: "10px 12px" }}>{r.phone}</td>
+                  {chapterCols.map(m => {
+                    const s = (r.chapter_scores || {})[m.id];
+                    return <td key={m.id} style={{ padding: "10px 12px", textAlign: "center", color: s == null ? B.ltGray : s >= 80 ? B.green : B.red }}>{s == null ? "—" : `${s}%`}</td>;
+                  })}
+                  <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700 }}>{r.final_score != null ? `${r.final_score}%` : "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{r.status}</td>
+                </tr>
+              ))}
+              {!rows.length && <tr><td colSpan={4 + chapterCols.length} style={{ padding: 20, textAlign: "center", color: B.dkGray }}>ยังไม่มีนักเรียนของบริษัทนี้</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Admin() {
   const [authed, setAuthed] = useState(() => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1");
   const [tab, setTab] = useState("pipeline");
@@ -3174,10 +3385,12 @@ function Admin() {
           ))}
         </div>
 
-        {/* Custom tabs (Pipeline / Dashboard / Team) */}
+        {/* Custom tabs (Pipeline / Dashboard / Team / Voucher / Company report) */}
         {tab === "pipeline" && <Pipeline/>}
         {tab === "dashboard" && <Dashboard/>}
         {tab === "team" && <TeamManager/>}
+        {tab === "voucher_issue" && <VoucherIssuePanel/>}
+        {tab === "company_report" && <CompanyReport/>}
 
         {/* Search & filter (for table tabs only) */}
         {!isCustomTab && (
