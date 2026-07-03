@@ -291,8 +291,9 @@ const getPurchased = () => {
   const promoUnlocked = load("promo_unlocked", []);
   if (stored && stored.length) return promoUnlocked.length ? [...new Set([...stored, ...promoUnlocked])] : stored;
   if (load("grandfathered", false)) return [1,2,3,4,5,6,7];
-  // grandfather: user ที่เคย enrolled ในช่วง FREE_LAUNCH ให้คงสิทธิ์เรียนฟรีทุกบท
-  if (FREE_LAUNCH || load("enrolled", false)) { save("grandfathered", true); return [1,2,3,4,5,6,7]; }
+  // grandfather: เฉพาะ user ที่เข้าใช้งานจริงในช่วง FREE_LAUNCH เท่านั้น จึงคงสิทธิ์เรียนฟรีทุกบท
+  // (ห้ามผูกกับ "enrolled" ซึ่งถูกตั้ง true ทุกครั้งที่สมัคร — จะทำให้ผู้สมัครใหม่หลัง cutover ได้ครบคอร์สฟรี)
+  if (FREE_LAUNCH) { save("grandfathered", true); return [1,2,3,4,5,6,7]; }
   const base = [PRICING.freeModule];
   return promoUnlocked.length ? [...new Set([...base, ...promoUnlocked])] : base;
 };
@@ -764,10 +765,15 @@ function Store({ go }) {
         });
         if (uploadRes.ok) {
           const data = { url: `${SUPABASE_URL}/storage/v1/object/public/slips/${fileName}` };
-          supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, slip_url: data.url, payment_status: "แจ้งชำระแล้ว" });
-          const newPurchased = [...new Set([...purchased, ...selected])];
-          savePurchased(newPurchased);
-          setSlipDone(true);
+          // ต้องบันทึกรายการแจ้งชำระให้สำเร็จก่อน จึงปลดล็อก — กันเคสจ่ายแล้วแต่ไม่มี record ให้แอดมินตรวจ
+          const rec = await supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, slip_url: data.url, payment_status: "แจ้งชำระแล้ว" });
+          if (Array.isArray(rec) && rec.length) {
+            const newPurchased = [...new Set([...purchased, ...selected])];
+            savePurchased(newPurchased);
+            setSlipDone(true);
+          } else {
+            alert("บันทึกการแจ้งชำระไม่สำเร็จ กรุณาส่งสลิปทาง LINE แทน");
+          }
         } else { alert("อัพโหลดไม่สำเร็จ กรุณาส่งสลิปทาง LINE แทน"); }
       } catch(err) { alert("เกิดข้อผิดพลาด กรุณาส่งสลิปทาง LINE"); }
       setUploading(false);
@@ -1701,7 +1707,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
     : remaining <= 3 ? "เลยครึ่งทางแล้ว อีกนิดเดียวจะจบและได้ใบประกาศ!"
     : "เรียนมาได้ดีมาก ไปต่อได้เลย เป็นกำลังใจให้!";
 
-  // Timer for video watching (70% of duration)
+  // Timer for video watching (90% of duration)
   useEffect(() => { if (active && !reviewMode && !done(active)) { const mod = COURSE.modules.find(m => m.id === active); if (mod && mod.dur) { const target = Math.floor(mod.dur * 0.9); setTimer(target); setCanWatch(false); timerRef.current = setInterval(() => { setTimer(prev => { if (prev <= 1) { clearInterval(timerRef.current); setCanWatch(true); return 0; } return prev - 1; }); }, 1000); } } return () => { if (timerRef.current) clearInterval(timerRef.current); }; }, [active, reviewMode, mustRewatch]);
 
   const submitQuiz = () => {
@@ -2213,7 +2219,9 @@ function Booking({ go }) {
 }
 
 // ==================== ADMIN ====================
-const ADMIN_PASSWORD = "JiaAdmin2026";
+// รหัสแอดมินอ่านจาก env (ตั้ง VITE_ADMIN_PASSWORD ใน Vercel) — ห้าม hardcode ในซอร์ส
+// หมายเหตุ: การตรวจฝั่ง client เป็นแค่ด่านชั้นบางๆ ความปลอดภัยจริงต้องพึ่ง RLS/ฝั่ง server
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "";
 const ADMIN_SESSION_KEY = "jia_admin_auth";
 
 const TABS = [
@@ -3034,6 +3042,10 @@ function AdminLogin({ onAuth }) {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const submit = () => {
+    if (!ADMIN_PASSWORD) {
+      setErr("ระบบยังไม่ตั้งค่ารหัสแอดมิน (VITE_ADMIN_PASSWORD)");
+      return;
+    }
     if (pw === ADMIN_PASSWORD) {
       sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
       onAuth();
@@ -3554,7 +3566,9 @@ export default function App() {
         const current = getPurchased();
         const merged = [...new Set([...current, ...newMods])];
         savePurchased(merged);
-        supaRest("online_purchases", "PATCH", { payment_status: "ชำระแล้ว" }, `?phone=eq.${encodeURIComponent(load("user",{})?.phone||"")}&payment_status=eq.รอชำระ`);
+        // อัปเดตสถานะเฉพาะเมื่อมีเบอร์จริง — กัน filter phone ว่างไป match ทุกแถวที่ไม่มีเบอร์
+        const payPhone = normalizePhone(load("user", {})?.phone || "");
+        if (payPhone) supaRest("online_purchases", "PATCH", { payment_status: "ชำระแล้ว" }, `?phone=eq.${encodeURIComponent(payPhone)}&payment_status=eq.รอชำระ`);
       }
       window.history.replaceState({}, "", window.location.pathname);
       setPage("course");

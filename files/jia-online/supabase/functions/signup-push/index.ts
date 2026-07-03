@@ -47,9 +47,17 @@ export async function runSignupPush(opts: { line_user_id: string; name?: string;
   if (!line_user_id) return { ok: false, error: "missing line_user_id" };
 
   // ออกคูปอง ฿100 (เหมือน submitQuiz ฝั่ง frontend) แล้วบันทึกให้ redeem ได้
-  const coupon = genCoupon();
+  // retry เมื่อชนรหัสซ้ำ (code unique) — ห้ามคืนคูปองที่ insert ไม่สำเร็จ ไม่งั้นลูกค้าได้โค้ด redeem ไม่ได้
+  let coupon = genCoupon();
   if (!opts.dry_run) {
-    await supa.from("promo_codes").insert({ code: coupon, type: "online", discount: 100, staff_name: "system" });
+    let saved = false;
+    for (let attempt = 0; attempt < 5 && !saved; attempt++) {
+      const { error } = await supa.from("promo_codes")
+        .insert({ code: coupon, type: "online", discount: 100, staff_name: "system" });
+      if (!error) { saved = true; break; }
+      coupon = genCoupon();
+    }
+    if (!saved) return { ok: false, error: "could not issue coupon" };
   }
 
   const text =

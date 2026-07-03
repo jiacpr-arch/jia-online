@@ -72,7 +72,6 @@ Deno.serve(async (req: Request) => {
   if (!lineUserId) return json({ error: "no sub in token" }, 401);
 
   const cleanPhone = (phone || "").toString().replace(/\D/g, "");
-  const tail = cleanPhone.slice(-9);
   const nowIso = new Date().toISOString();
 
   // 2) upsert customers — กันซ้ำ: ถ้ามีแถว legacy match เบอร์อยู่แล้ว ให้ UPDATE ไม่สร้างใหม่
@@ -98,15 +97,13 @@ Deno.serve(async (req: Request) => {
   };
 
   let customerId: string | null = null;
-  // หาแถวเดิม: ตาม line_user_id ก่อน, ไม่งั้นตามเบอร์
+  // หาแถวเดิม: จับคู่เฉพาะด้วยตัวตน LINE ที่ verify แล้ว (line_user_id / oauth_sub) เท่านั้น
+  // ห้ามจับคู่ด้วยเบอร์โทรที่ client ส่งมา — มิฉะนั้นผู้ใช้จะยึดบัญชีคนอื่นได้ด้วยการกรอกเบอร์ปลายทาง
   let existing: any = null;
   {
-    const { data: byLine } = await supa.from("customers").select("id").eq("line_user_id", lineUserId).maybeSingle();
-    existing = byLine;
-    if (!existing && tail) {
-      const { data: byTel } = await supa.from("customers").select("id").ilike("tel", `%${tail}`).limit(1);
-      existing = Array.isArray(byTel) && byTel[0] ? byTel[0] : null;
-    }
+    const { data: byLine } = await supa.from("customers")
+      .select("id").or(`line_user_id.eq.${lineUserId},oauth_sub.eq.${lineUserId}`).limit(1);
+    existing = Array.isArray(byLine) && byLine[0] ? byLine[0] : null;
   }
   if (existing?.id) {
     customerId = existing.id;

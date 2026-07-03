@@ -17,7 +17,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const TENANT = "jiaroo";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const CRON_KEY = Deno.env.get("CRON_KEY") || "JiaCron2026";
+const CRON_KEY = Deno.env.get("CRON_KEY") || ""; // ตั้งผ่าน env เท่านั้น — ห้าม hardcode
 const supa = createClient(SUPABASE_URL, SERVICE_KEY);
 
 const DAY = 86400000;
@@ -132,6 +132,8 @@ async function sendPending(token: string, limit = 80) {
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
+  // fail closed: ถ้ายังไม่ตั้ง CRON_KEY ให้ปฏิเสธทุก request (กันยิงส่ง LINE มั่วเมื่อ config หลุด)
+  if (!CRON_KEY) return new Response("server missing CRON_KEY", { status: 503 });
   const key = url.searchParams.get("key") || req.headers.get("x-cron-key") || "";
   if (key !== CRON_KEY) return new Response("unauthorized", { status: 401 });
   const action = url.searchParams.get("action") || "run";

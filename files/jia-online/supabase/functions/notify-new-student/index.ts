@@ -60,8 +60,10 @@ async function pushMany(token: string, ids: string[], text: string) {
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
 
-  // กัน endpoint ถูกยิงมั่ว (ตั้ง NOTIFY_WEBHOOK_SECRET แล้วใส่ header x-webhook-secret ใน webhook)
-  if (WEBHOOK_SECRET) {
+  // กัน endpoint ถูกยิงมั่ว — fail closed: ต้องตั้ง NOTIFY_WEBHOOK_SECRET เสมอ
+  // (trigger notify_new_student_fn จะแนบ header x-webhook-secret จาก jiaroo_secrets ให้เอง)
+  if (!WEBHOOK_SECRET) return new Response("server missing NOTIFY_WEBHOOK_SECRET", { status: 503 });
+  {
     const got = req.headers.get("x-webhook-secret") || url.searchParams.get("secret") || "";
     if (got !== WEBHOOK_SECRET) return new Response("unauthorized", { status: 401 });
   }
