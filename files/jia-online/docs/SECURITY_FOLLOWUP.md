@@ -7,7 +7,15 @@ migration ที่ auto-apply
 
 ---
 
-## ⚠️ ต้องทำทันที (manual)
+## สถานะล่าสุด (2026-07-03) — apply ตรงบน remote แล้ว
+- ✅ ปิด `public.users.password_hash` จาก anon/authenticated (column-level) — migration `20260703000001`
+- ✅ `lead_promo_codes` hardening (index + redeem lock) — migration `20260703000000`
+- ✅ trigger `notify_new_student_fn` แนบ header + revoke EXECUTE ของ SECURITY DEFINER RPC — migration `20260703000002`
+- ⏳ ยังต้องทำ: ตั้ง env/secret 3 ตัว, redeploy edge functions, PII/admin auth, paywall server-side, slips bucket, leaked-password protection, search_path
+
+---
+
+## ✅ ทำแล้ว: `public.users.password_hash` (คงไว้เป็นบันทึก)
 
 ### 1. `public.users.password_hash` เปิดให้ anon อ่านได้ (14 แถวมี hash จริง)
 RLS policy `anon_read` บนตาราง `users` เป็น `USING (true)` และ anon key ฝังอยู่ใน
