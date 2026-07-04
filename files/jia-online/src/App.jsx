@@ -1320,14 +1320,15 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
   const redeem = async () => {
     setRedeemErr("");
     const code = (redeemCode || "").trim().toUpperCase();
-    if (!/^(LEAD|VCH)-[A-Z0-9]{6}$/.test(code)) { setRedeemErr("รหัสไม่ถูกต้อง (รูปแบบ: LEAD-XXXXXX หรือ VCH-XXXXXX)"); return; }
+    // นอกจาก LEAD-/VCH- รายคนแล้ว ยังมีโค้ดกลาง (multi_use) ที่แอดมินตั้งชื่อเองได้ เช่น JIA-STUDENT
+    if (!/^[A-Z0-9][A-Z0-9-]{3,19}$/.test(code)) { setRedeemErr("รหัสไม่ถูกต้อง (เช่น LEAD-XXXXXX, VCH-XXXXXX หรือโค้ดจากเจ้าหน้าที่)"); return; }
     const name = redeemName.trim();
     const phone = normalizePhone(redeemPhone);
     if (!name) { setRedeemErr("กรุณากรอกชื่อ-นามสกุลก่อนใช้โค้ด"); return; }
     if (phone.length < 9) { setRedeemErr("กรุณากรอกเบอร์โทรที่ถูกต้องก่อนใช้โค้ด"); return; }
     setValidating(true);
     try {
-      const res = await supaRest("lead_promo_codes", "GET", null, `?code=eq.${encodeURIComponent(code)}&select=code,expires_at,redeemed_at,name,unlock_modules,company&limit=1`);
+      const res = await supaRest("lead_promo_codes", "GET", null, `?code=eq.${encodeURIComponent(code)}&select=code,expires_at,redeemed_at,name,unlock_modules,company,multi_use&limit=1`);
       if (!Array.isArray(res) || !res.length) { setRedeemErr("ไม่พบรหัสนี้ในระบบ"); setValidating(false); return; }
       const row = res[0];
       if (new Date(row.expires_at) < new Date()) {
@@ -1335,18 +1336,22 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
         supaRest("lead_capture_events", "POST", { code, event_type: "expired_attempt" });
         setValidating(false); return;
       }
-      if (row.redeemed_at) {
-        setRedeemErr(`รหัสนี้ถูกใช้ไปแล้วเมื่อ ${new Date(row.redeemed_at).toLocaleDateString("th-TH")}`);
-        setValidating(false); return;
-      }
+      // โค้ดกลาง (multi_use) ใช้ซ้ำได้ไม่จำกัดคน — ห้าม mark redeemed_at (จะไปปิดโค้ดของทุกคน)
+      // ติดตามว่าใครใช้บ้างผ่าน lead_capture_events + online_students แทน
+      if (!row.multi_use) {
+        if (row.redeemed_at) {
+          setRedeemErr(`รหัสนี้ถูกใช้ไปแล้วเมื่อ ${new Date(row.redeemed_at).toLocaleDateString("th-TH")}`);
+          setValidating(false); return;
+        }
 
-      const patchRes = await supaRest("lead_promo_codes", "PATCH",
-        { redeemed_at: new Date().toISOString(), redeemed_phone: phone, name },
-        `?code=eq.${encodeURIComponent(code)}&redeemed_at=is.null`
-      );
-      if (!Array.isArray(patchRes) || !patchRes.length) {
-        setRedeemErr("รหัสถูกใช้พร้อมกันจากเครื่องอื่น กรุณาขอรหัสใหม่");
-        setValidating(false); return;
+        const patchRes = await supaRest("lead_promo_codes", "PATCH",
+          { redeemed_at: new Date().toISOString(), redeemed_phone: phone, name },
+          `?code=eq.${encodeURIComponent(code)}&redeemed_at=is.null`
+        );
+        if (!Array.isArray(patchRes) || !patchRes.length) {
+          setRedeemErr("รหัสถูกใช้พร้อมกันจากเครื่องอื่น กรุณาขอรหัสใหม่");
+          setValidating(false); return;
+        }
       }
 
       const unlock = row.unlock_modules && row.unlock_modules.length ? row.unlock_modules : PROMO_FREE_MODULES;
@@ -1370,7 +1375,8 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
         supaRest("online_students", "PATCH", { company: row.company }, `?phone=ilike.*${phone.slice(-9)}&name=eq.${encodeURIComponent(name)}`);
       }
 
-      supaRest("lead_capture_events", "POST", { code, event_type: "redeemed", metadata: { modules: unlock, company: row.company || null } });
+      // โค้ดกลางไม่ mark redeemed_at บนแถวโค้ด — เก็บชื่อ+เบอร์ของผู้ใช้แต่ละคนไว้ใน event แทน
+      supaRest("lead_capture_events", "POST", { code, event_type: "redeemed", metadata: { modules: unlock, company: row.company || null, ...(row.multi_use ? { multi_use: true, name, phone } : {}) } });
 
       setClaimed({ code, modules: unlock, expires_at: row.expires_at, name });
       setStep("redeemed");
@@ -1528,7 +1534,7 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
         <div style={css.card}>
           <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>กรอกรหัสส่วนลด</h3>
-          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX หรือ VCH-XXXXXX (6 ตัวอักษร)</p>
+          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX, VCH-XXXXXX หรือโค้ดที่ได้รับจากเจ้าหน้าที่ (เช่น JIA-STUDENT)</p>
           <input type="text" value={redeemCode} onChange={e => { setRedeemCode(e.target.value.toUpperCase()); setRedeemErr(""); }} placeholder="LEAD-XXXXXX" autoCapitalize="characters"
             style={{ width: "100%", padding: "14px 16px", border: `2px solid ${redeemErr ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 18, outline: "none", boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 2, textAlign: "center", textTransform: "uppercase" }}/>
           {redeemErr && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{redeemErr}</div>}
@@ -2225,7 +2231,7 @@ const TABS = [
   { key: "bookings",        label: "การจอง On-site", cols: ["name","tel","course_name","start_date","time_slot","total_people","final_price","payment_status","created_at"] },
   { key: "sales_tracking",  label: "ติดตามขาย",      cols: ["name","phone","score","coupon_code","follow_status","completed_date"] },
   { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
-  { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","company","unlock_modules","created_at","expires_at","redeemed_at","email_sent_status"] },
+  { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","company","unlock_modules","multi_use","created_at","expires_at","redeemed_at","email_sent_status"] },
   { key: "voucher_issue",   label: "ออก Voucher",      custom: true },
   { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
 ];
@@ -3148,6 +3154,89 @@ function VoucherIssuePanel() {
   );
 }
 
+// ==================== STANDING CODE (โค้ดกลางใช้ซ้ำได้ ไม่หมดอายุ — นักเรียน pre-course) ====================
+function StandingCodePanel() {
+  const [codes, setCodes] = useState([]);
+  const [counts, setCounts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ code: "", company: "" });
+  const [creating, setCreating] = useState(false);
+  const [err, setErr] = useState("");
+  const [copiedCode, setCopiedCode] = useState("");
+
+  const refresh = async () => {
+    setLoading(true);
+    const rows = await supaRest("lead_promo_codes", "GET", null, "?multi_use=eq.true&select=code,unlock_modules,company,created_at&order=created_at.desc");
+    const list = Array.isArray(rows) ? rows : [];
+    setCodes(list);
+    if (list.length) {
+      const inList = list.map(r => encodeURIComponent(r.code)).join(",");
+      const ev = await supaRest("lead_capture_events", "GET", null, `?event_type=eq.redeemed&code=in.(${inList})&select=code`);
+      const c = {};
+      (Array.isArray(ev) ? ev : []).forEach(e => { c[e.code] = (c[e.code] || 0) + 1; });
+      setCounts(c);
+    }
+    setLoading(false);
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const create = async () => {
+    setErr("");
+    const code = form.code.trim().toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9-]{3,19}$/.test(code)) { setErr("ตั้งชื่อโค้ด 4-20 ตัว ใช้ A-Z, 0-9 และขีดกลาง เช่น JIA-STUDENT"); return; }
+    setCreating(true);
+    try {
+      const res = await supaRest("lead_promo_codes", "POST", {
+        code, email: "", phone: `standing:${code}`, name: "โค้ดกลางนักเรียน Pre-course",
+        source: "pre_course", company: form.company.trim() || null,
+        unlock_modules: VOUCHER_ALL_MODULES,
+        expires_at: "2099-12-31T23:59:59Z", multi_use: true,
+      });
+      if (!Array.isArray(res) || !res.length) { setErr("สร้างไม่สำเร็จ (ชื่อโค้ดนี้อาจมีอยู่แล้ว)"); setCreating(false); return; }
+      setForm({ code: "", company: "" });
+      refresh();
+    } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
+    setCreating(false);
+  };
+
+  const copy = (code) => {
+    navigator.clipboard?.writeText(code).then(() => { setCopiedCode(code); setTimeout(() => setCopiedCode(""), 2000); });
+  };
+
+  return (
+    <div style={{ maxWidth: 480, marginTop: 20 }}>
+      <div style={{ background: B.white, borderRadius: 14, padding: 20 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>โค้ดกลาง (ใช้ซ้ำได้ ไม่หมดอายุ)</h3>
+        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>โค้ดเดียวแจกนักเรียนได้ทุกคน ทุกวัน — สำหรับให้นักเรียนที่จองคลาสจริงเรียนออนไลน์มาก่อน (ปลดล็อกทุกบท) แต่ละคนยังต้องกรอกชื่อ+เบอร์ตอนใช้โค้ด จึงตามดูคะแนนรายคนได้ตามปกติ</p>
+
+        {loading ? <div style={{ fontSize: 13, color: B.dkGray }}>กำลังโหลด...</div> : codes.length === 0 ? (
+          <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 12 }}>ยังไม่มีโค้ดกลางในระบบ</div>
+        ) : codes.map(r => (
+          <div key={r.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${B.gray}` }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", letterSpacing: 1 }}>{r.code}</div>
+              <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>
+                ใช้ไปแล้ว <strong>{counts[r.code] || 0}</strong> คน{r.company ? ` • ${r.company}` : ""} • สร้าง {new Date(r.created_at).toLocaleDateString("th-TH")}
+              </div>
+            </div>
+            <button onClick={() => copy(r.code)} style={{ ...css.btn(B.white, B.black), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "6px 14px" }}>{copiedCode === r.code ? "คัดลอกแล้ว ✓" : "คัดลอก"}</button>
+          </div>
+        ))}
+
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${B.gray}` }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>สร้างโค้ดกลางใหม่</label>
+          <input type="text" value={form.code} onChange={e => { setForm(p => ({ ...p, code: e.target.value.toUpperCase() })); setErr(""); }} placeholder="เช่น JIA-STUDENT" autoCapitalize="characters"
+            style={{ width: "100%", padding: "12px 14px", border: `2px solid ${err ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}/>
+          <input type="text" value={form.company} onChange={e => setForm(p => ({ ...p, company: e.target.value }))} placeholder="บริษัท (ถ้ามี — ใช้กรองรายงานคะแนน)"
+            style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          {err && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{err}</div>}
+          <button onClick={create} disabled={creating || !form.code.trim()} style={{ ...css.btn(B.red, B.white, true), marginTop: 12, opacity: (creating || !form.code.trim()) ? .6 : 1 }}>{creating ? "กำลังสร้าง..." : "สร้างโค้ดกลาง →"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==================== COMPANY SCORE REPORT (สำหรับ HR ดูคะแนน pre-course) ====================
 function CompanyReport() {
   const [rows, setRows] = useState([]);
@@ -3389,7 +3478,7 @@ function Admin() {
         {tab === "pipeline" && <Pipeline/>}
         {tab === "dashboard" && <Dashboard/>}
         {tab === "team" && <TeamManager/>}
-        {tab === "voucher_issue" && <VoucherIssuePanel/>}
+        {tab === "voucher_issue" && <><VoucherIssuePanel/><StandingCodePanel/></>}
         {tab === "company_report" && <CompanyReport/>}
 
         {/* Search & filter (for table tabs only) */}
