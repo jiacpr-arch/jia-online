@@ -1944,7 +1944,7 @@ function Certificate({ user, go }) {
             <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 600, color: "#0E1E3C" }}>JIA TRAINER CENTER</div>
             <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
           </div>
-          <div style={{ position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 11, color: B.dkGray }}>088-558-8078 | jiacpr.com | LINE: @jiacpr</div>
+          <div style={{ position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 11, color: B.dkGray }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
         </div>
       </div>
     </div>
