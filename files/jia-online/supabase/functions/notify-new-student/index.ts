@@ -90,7 +90,7 @@ Deno.serve(async (req: Request) => {
   const text =
     `🆕 นักเรียนใหม่ CPR ออนไลน์\n\n` +
     `ชื่อ: ${name}\nเบอร์: ${phone}\nอีเมล: ${email}\n\n` +
-    `รวมนักเรียนทั้งหมด ${total} คน\nดูได้ที่ jiacpr.com/online?admin=1`;
+    `รวมนักเรียนทั้งหมด ${total} คน\nดูได้ที่ cpr.morroo.com/admin`;
 
   const recipients = await getTeamRecipients();
 
