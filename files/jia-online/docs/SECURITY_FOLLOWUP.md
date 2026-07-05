@@ -43,14 +43,26 @@ grant select (id, username, name, role, registered_at, last_login) on public.use
 เท่ากับ PII ของลูกค้าทุกคน (ชื่อ เบอร์ อีเมล บริษัท สลิปโอนเงิน) อ่าน/แก้ได้โดยใครก็ตาม
 ที่มี anon key
 
-**ทางแก้ที่ถูกต้อง:** ให้ admin ใช้สิทธิ์จริง แทน anon
-- ทำ edge function ฝั่ง server ที่ตรวจ auth ของแอดมินแล้วใช้ `service_role` อ่าน/เขียน
-  (frontend admin เรียกผ่าน function นี้แทน `supaRest` ตรงๆ), หรือ
-- ใช้ Supabase Auth + role `admin` แล้วตั้ง RLS ให้ตาราง PII อ่านได้เฉพาะ role นั้น
+**✅ ทำแล้วบางส่วน (PR #42):** หน้า admin เปลี่ยนไปเรียกผ่าน edge function `admin-api`
+ที่ตรวจรหัสแอดมินฝั่ง server (`x-admin-key === ADMIN_API_KEY`) แล้วใช้ `service_role`
+เข้าถึงข้อมูล — เลิกใช้ anon key อ่าน/เขียน PII จาก client แล้ว
+- รหัสแอดมินไม่อยู่ในบันเดิลอีกต่อไป (เดิม `VITE_ADMIN_PASSWORD`) → ย้ายไปเป็น
+  `ADMIN_API_KEY` ที่ตั้งบน function `admin-api` เท่านั้น
+- **Deploy:** deploy `admin-api` ด้วย `verify_jwt = false` + ตั้ง `ADMIN_API_KEY`
+  **ก่อน** deploy frontend ใหม่ (ไม่งั้นหน้า admin ล็อกอินไม่ได้)
 
-เมื่อ admin ไม่ใช้ anon แล้ว จึงจะ **ปิด policy `anon_read`/`anon_update` แบบ `USING (true)`
-บน `customers`, `online_students`, `online_purchases`, `promo_codes`, `settings`, `staff`,
-`pdpa_log`** ได้โดยไม่ทำให้ทั้งแอปพัง (ตอนนี้ปิดไม่ได้เพราะ flow ปกติพึ่ง anon อ่านเอง)
+**ขั้นต่อไป — apply หลังยืนยันว่า admin-api ใช้งานได้จริง** (ยังไม่ได้ทำ เพราะต้องเช็คว่า
+ไม่มีแอปอื่นบน DB รวมอ่านตารางเหล่านี้ผ่าน anon):
+```sql
+-- ตารางที่หน้า admin อ่านเท่านั้น (แอปฝั่งผู้เรียนไม่ได้ SELECT) → ปิด anon SELECT ได้
+-- public flow ยังต้อง INSERT/UPDATE ได้ จึงปิดเฉพาะ SELECT
+drop policy if exists anon_read on public.online_students;
+drop policy if exists anon_read on public.online_purchases;
+-- bookings / sales_tracking: ตรวจก่อนว่าไม่มี consumer อื่น แล้วค่อยทำแบบเดียวกัน
+-- customers / lead_promo_codes: ยังปิด SELECT ทั้งหมดไม่ได้ (public อ่าน record ตัวเองด้วย)
+--   ต้องทำ policy แบบผูกกับ auth_user_id / กรองด้วย code แทน
+```
+> เหลือ: `customers`, `settings`, `staff`, `pdpa_log`, `promo_codes` — ตรวจ consumer แล้วปิด/รัดทีละตัว
 
 ---
 
@@ -90,9 +102,13 @@ grant select (id, username, name, role, registered_at, last_login) on public.use
 
 | ตัวแปร | ตั้งที่ | ผลถ้าไม่ตั้ง |
 |---|---|---|
-| `VITE_ADMIN_PASSWORD` | Vercel (build env) | เข้าหน้า admin ไม่ได้ |
+| `ADMIN_API_KEY` | Supabase function `admin-api` (= รหัสแอดมินใหม่) | เข้าหน้า admin ไม่ได้ (401/503) |
 | `CRON_KEY` | Supabase function `customer-followup-drip` | function ตอบ 503 (drip ไม่ทำงาน) |
 | `NOTIFY_WEBHOOK_SECRET` | Supabase function `notify-new-student` | function ตอบ 503 (ไม่แจ้งเตือนนักเรียนใหม่) |
+
+> หมายเหตุ: เดิมแผนจะใช้ `VITE_ADMIN_PASSWORD` (Vercel) แต่หลังทำ `admin-api` แล้ว
+> รหัสแอดมินถูกตรวจฝั่ง server ล้วน — ตั้งแค่ `ADMIN_API_KEY` ที่ function พอ ไม่ต้องมี env ฝั่ง build
+> **ต้อง deploy `admin-api` (verify_jwt=false) + ตั้ง `ADMIN_API_KEY` ก่อน deploy frontend ใหม่**
 
 **notify-new-student**: ตอนนี้ function ต้องมี secret (fail closed) แต่ DB trigger
 `notify_new_student_fn` ยัง **ไม่ได้แนบ header `x-webhook-secret`** ต้องอัปเดต trigger ให้

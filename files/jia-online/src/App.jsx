@@ -78,6 +78,34 @@ const supaRest = async (table, method = "GET", body = null, filters = "") => {
   if (body && method !== "GET" && method !== "DELETE") opts.body = JSON.stringify(body);
   try { const res = await fetch(url, opts); return res.ok ? (await res.text().then(t => t ? JSON.parse(t) : [])) : []; } catch(e) { console.error("Supabase:", e); return []; }
 };
+
+// ===== Admin data access ผ่าน server-side admin-api (ใช้ service_role หลังด่านรหัสแอดมิน) =====
+// รหัสแอดมินถูกส่งเป็น x-admin-key ให้ edge function ตรวจฝั่ง server แล้วจึงเข้าถึงข้อมูล
+// (เลิกใช้ anon key อ่าน/เขียนตาราง PII จากฝั่ง client — ตัด client-trust)
+let _adminKey = null;
+try { _adminKey = sessionStorage.getItem("jia_admin_key") || null; } catch (e) {}
+const setAdminKey = (k) => { _adminKey = k || null; try { if (k) sessionStorage.setItem("jia_admin_key", k); else sessionStorage.removeItem("jia_admin_key"); } catch (e) {} };
+const adminRest = async (table, method = "GET", body = null, filters = "") => {
+  try {
+    const res = await fetch(FN_URL("admin-api"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "x-admin-key": _adminKey || "" },
+      body: JSON.stringify({ table, method, filters, body }),
+    });
+    if (!res.ok) return [];
+    const t = await res.text(); return t ? JSON.parse(t) : [];
+  } catch (e) { console.error("adminApi:", e); return []; }
+};
+const adminPing = async (key) => {
+  try {
+    const res = await fetch(FN_URL("admin-api"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "x-admin-key": key || "" },
+      body: JSON.stringify({ table: "__ping" }),
+    });
+    return res.ok;
+  } catch (e) { return false; }
+};
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const genLeadCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = PROMO_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const VOUCHER_CODE_PREFIX = "VCH-"; // voucher เต็มคอร์ส (ขาย/pre-course) — แยก prefix จาก LEAD- (lead-capture ฟรี 3 บท)
@@ -2219,9 +2247,7 @@ function Booking({ go }) {
 }
 
 // ==================== ADMIN ====================
-// รหัสแอดมินอ่านจาก env (ตั้ง VITE_ADMIN_PASSWORD ใน Vercel) — ห้าม hardcode ในซอร์ส
-// หมายเหตุ: การตรวจฝั่ง client เป็นแค่ด่านชั้นบางๆ ความปลอดภัยจริงต้องพึ่ง RLS/ฝั่ง server
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "";
+// รหัสแอดมินถูกตรวจฝั่ง server (edge function admin-api ตั้ง ADMIN_API_KEY) — ไม่มีความลับในบันเดิลแล้ว
 const ADMIN_SESSION_KEY = "jia_admin_auth";
 
 const TABS = [
@@ -2274,8 +2300,8 @@ function Pipeline() {
   const reload = useCallback(async () => {
     setLoading(true);
     const [l, t] = await Promise.all([
-      supaRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=updated_at.desc&limit=2000`),
-      supaRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&active=eq.true&order=name.asc`),
+      adminRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=updated_at.desc&limit=2000`),
+      adminRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&active=eq.true&order=name.asc`),
     ]);
     setLeads(Array.isArray(l) ? l : []);
     setTeam(Array.isArray(t) ? t : []);
@@ -2332,8 +2358,8 @@ function Pipeline() {
     if (lead.stage === newStage) return;
     const prev = lead.stage;
     setLeads(rs => rs.map(r => r.id === lead.id ? { ...r, stage: newStage } : r));
-    await supaRest("jiaroo_leads", "PATCH", { stage: newStage }, `?id=eq.${lead.id}`);
-    await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: prev, to: newStage }, created_by: me?.name || "admin" });
+    await adminRest("jiaroo_leads", "PATCH", { stage: newStage }, `?id=eq.${lead.id}`);
+    await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: prev, to: newStage }, created_by: me?.name || "admin" });
   };
 
   // Optimistic claim — only succeeds if lead is still unassigned
@@ -2341,10 +2367,10 @@ function Pipeline() {
     e.stopPropagation();
     if (!meId) { showToast("เลือก \"ฉันคือ\" ก่อน", "warn"); return; }
     if (lead.assignee_id) { showToast("มีคนรับไปแล้ว", "warn"); return; }
-    const result = await supaRest("jiaroo_leads", "PATCH", { assignee_id: meId }, `?id=eq.${lead.id}&assignee_id=is.null`);
+    const result = await adminRest("jiaroo_leads", "PATCH", { assignee_id: meId }, `?id=eq.${lead.id}&assignee_id=is.null`);
     if (Array.isArray(result) && result.length > 0) {
       setLeads(rs => rs.map(r => r.id === lead.id ? { ...r, assignee_id: meId } : r));
-      await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "claim", data: { by: meId, name: me?.name }, created_by: me?.name || "admin" });
+      await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "claim", data: { by: meId, name: me?.name }, created_by: me?.name || "admin" });
       showToast(`✓ รับ ${lead.name || lead.display_name || "lead"} แล้ว`, "ok");
     } else {
       showToast("ช้าไป! คนอื่นรับไปก่อนแล้ว", "warn");
@@ -2511,19 +2537,19 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
   const [noteSaving, setNoteSaving] = useState(false);
 
   const reloadEvents = useCallback(() => {
-    supaRest("jiaroo_lead_events", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.desc&limit=100`).then(r => setEvents(Array.isArray(r) ? r : []));
+    adminRest("jiaroo_lead_events", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.desc&limit=100`).then(r => setEvents(Array.isArray(r) ? r : []));
   }, [lead.id]);
 
   useEffect(() => {
     reloadEvents();
-    supaRest("jiaroo_messages", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.asc&limit=500`).then(r => setMessages(Array.isArray(r) ? r : []));
+    adminRest("jiaroo_messages", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.asc&limit=500`).then(r => setMessages(Array.isArray(r) ? r : []));
   }, [lead.id, reloadEvents]);
 
   const addNote = async () => {
     const txt = noteText.trim();
     if (!txt) return;
     setNoteSaving(true);
-    await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "note", data: { text: txt }, created_by: "admin" });
+    await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "note", data: { text: txt }, created_by: "admin" });
     setNoteText("");
     setNoteSaving(false);
     reloadEvents();
@@ -2539,12 +2565,12 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
       assignee_id: form.assignee_id || null,
       stage: form.stage,
     };
-    await supaRest("jiaroo_leads", "PATCH", patch, `?id=eq.${lead.id}`);
+    await adminRest("jiaroo_leads", "PATCH", patch, `?id=eq.${lead.id}`);
     if (form.stage !== lead.stage) {
-      await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: lead.stage, to: form.stage }, created_by: "admin" });
+      await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: lead.stage, to: form.stage }, created_by: "admin" });
     }
     if (form.assignee_id !== (lead.assignee_id || "")) {
-      await supaRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "assign", data: { from: lead.assignee_id, to: form.assignee_id || null }, created_by: "admin" });
+      await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "assign", data: { from: lead.assignee_id, to: form.assignee_id || null }, created_by: "admin" });
     }
     setSaving(false);
     onChange();
@@ -2553,14 +2579,14 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
 
   const del = async () => {
     if (!confirm("ลบ lead นี้?")) return;
-    await supaRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
+    await adminRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
     onChange();
     onClose();
   };
 
   const convertToTeam = async () => {
     if (!confirm(`แปลง "${lead.display_name || lead.name}" เป็นสมาชิกทีมเซลล์?\n\nLead นี้จะถูกลบ และเมื่อคนนี้ทักเข้ามาอีก ระบบจะไม่สร้าง lead ใหม่`)) return;
-    await supaRest("jiaroo_team", "POST", {
+    await adminRest("jiaroo_team", "POST", {
       tenant_slug: JIAROO_TENANT,
       name: lead.display_name || lead.name || "(ไม่มีชื่อ)",
       picture_url: lead.picture_url || null,
@@ -2570,7 +2596,7 @@ function LeadDetail({ lead, team, onClose, onChange, onStage }) {
       role: "sales",
       active: true,
     });
-    await supaRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
+    await adminRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
     onChange();
     onClose();
   };
@@ -2723,7 +2749,7 @@ function LeadNew({ team, onClose, onCreated }) {
   const submit = async () => {
     if (!form.name && !form.phone) { alert("กรอกชื่อหรือเบอร์อย่างน้อย 1"); return; }
     setSaving(true);
-    const res = await supaRest("jiaroo_leads", "POST", {
+    const res = await adminRest("jiaroo_leads", "POST", {
       tenant_slug: JIAROO_TENANT,
       name: form.name || null,
       phone: form.phone || null,
@@ -2734,7 +2760,7 @@ function LeadNew({ team, onClose, onCreated }) {
       stage: "new",
     });
     const id = Array.isArray(res) && res[0]?.id;
-    if (id) await supaRest("jiaroo_lead_events", "POST", { lead_id: id, type: "created", data: { source: form.source }, created_by: "admin" });
+    if (id) await adminRest("jiaroo_lead_events", "POST", { lead_id: id, type: "created", data: { source: form.source }, created_by: "admin" });
     setSaving(false);
     onCreated();
   };
@@ -2790,9 +2816,9 @@ function Dashboard() {
     setLoading(true);
     const sinceISO = new Date(Date.now() - range * 86400000).toISOString();
     const [l, t, e] = await Promise.all([
-      supaRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&limit=5000`),
-      supaRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=name.asc`),
-      supaRest("jiaroo_lead_events", "GET", null, `?created_at=gte.${sinceISO}&order=created_at.desc&limit=200`),
+      adminRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&limit=5000`),
+      adminRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=name.asc`),
+      adminRest("jiaroo_lead_events", "GET", null, `?created_at=gte.${sinceISO}&order=created_at.desc&limit=200`),
     ]);
     setLeads(Array.isArray(l) ? l : []);
     setTeam(Array.isArray(t) ? t : []);
@@ -2945,14 +2971,14 @@ function TeamManager() {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const r = await supaRest("jiaroo_team", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=active.desc,name.asc`);
+    const r = await adminRest("jiaroo_team", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=active.desc,name.asc`);
     setTeam(Array.isArray(r) ? r : []);
     setLoading(false);
   }, []);
   useEffect(() => { reload(); }, [reload]);
 
   const toggleActive = async (m) => {
-    await supaRest("jiaroo_team", "PATCH", { active: !m.active }, `?id=eq.${m.id}`);
+    await adminRest("jiaroo_team", "PATCH", { active: !m.active }, `?id=eq.${m.id}`);
     reload();
   };
 
@@ -3004,9 +3030,9 @@ function TeamForm({ member, onClose, onSaved }) {
     if (!form.name) { alert("กรอกชื่อ"); return; }
     setSaving(true);
     if (member) {
-      await supaRest("jiaroo_team", "PATCH", { name: form.name, email: form.email || null, phone: form.phone || null, role: form.role }, `?id=eq.${member.id}`);
+      await adminRest("jiaroo_team", "PATCH", { name: form.name, email: form.email || null, phone: form.phone || null, role: form.role }, `?id=eq.${member.id}`);
     } else {
-      await supaRest("jiaroo_team", "POST", { tenant_slug: JIAROO_TENANT, name: form.name, email: form.email || null, phone: form.phone || null, role: form.role, active: true });
+      await adminRest("jiaroo_team", "POST", { tenant_slug: JIAROO_TENANT, name: form.name, email: form.email || null, phone: form.phone || null, role: form.role, active: true });
     }
     setSaving(false);
     onSaved();
@@ -3041,16 +3067,18 @@ function TeamForm({ member, onClose, onSaved }) {
 function AdminLogin({ onAuth }) {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
-  const submit = () => {
-    if (!ADMIN_PASSWORD) {
-      setErr("ระบบยังไม่ตั้งค่ารหัสแอดมิน (VITE_ADMIN_PASSWORD)");
-      return;
-    }
-    if (pw === ADMIN_PASSWORD) {
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!pw) { setErr("กรุณากรอกรหัสผ่าน"); return; }
+    setErr(""); setBusy(true);
+    const ok = await adminPing(pw); // ตรวจรหัสฝั่ง server
+    setBusy(false);
+    if (ok) {
+      setAdminKey(pw);
       sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
       onAuth();
     } else {
-      setErr("รหัสผ่านไม่ถูกต้อง");
+      setErr("รหัสผ่านไม่ถูกต้อง หรือระบบยังไม่ได้ตั้งค่า ADMIN_API_KEY");
     }
   };
   return (
@@ -3073,7 +3101,7 @@ function AdminLogin({ onAuth }) {
           style={{ width: "100%", padding: "14px 16px", border: `1px solid ${B.ltGray}`, borderRadius: 10, fontSize: 15, marginBottom: 10, boxSizing: "border-box" }}
         />
         {err && <div style={{ color: B.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
-        <button onClick={submit} style={{ ...css.btn(B.red, B.white, true) }}>เข้าระบบ →</button>
+        <button onClick={submit} disabled={busy} style={{ ...css.btn(B.red, B.white, true), opacity: busy ? 0.6 : 1 }}>{busy ? "กำลังตรวจสอบ…" : "เข้าระบบ →"}</button>
         <div style={{ textAlign: "center", marginTop: 16 }}>
           <a href="/" style={{ fontSize: 12, color: B.dkGray }}>← กลับหน้าหลัก</a>
         </div>
@@ -3107,7 +3135,7 @@ function VoucherIssuePanel() {
         unlock_modules: VOUCHER_ALL_MODULES,
         expires_at: expires.toISOString(),
       };
-      const res = await supaRest("lead_promo_codes", "POST", payload);
+      const res = await adminRest("lead_promo_codes", "POST", payload);
       if (!Array.isArray(res) || !res.length) { setErr("ออกโค้ดไม่สำเร็จ (เบอร์นี้อาจมีโค้ดที่ยังไม่ใช้อยู่แล้ว ลองค้นในแท็บ \"โค้ดส่วนลด Lead\")"); setIssuing(false); return; }
       setIssued({ code, ...form, phone });
       setForm({ name: "", phone: "", company: form.company, source: form.source });
@@ -3169,7 +3197,7 @@ function CompanyReport() {
 
   useEffect(() => {
     (async () => {
-      const res = await supaRest("online_students", "GET", null, "?company=not.is.null&select=company&order=company.asc");
+      const res = await adminRest("online_students", "GET", null, "?company=not.is.null&select=company&order=company.asc");
       const uniq = [...new Set((Array.isArray(res) ? res : []).map(r => r.company).filter(Boolean))];
       setCompanies(uniq);
       if (uniq.length && !company) setCompany(uniq[0]);
@@ -3180,7 +3208,7 @@ function CompanyReport() {
     if (!company) { setRows([]); return; }
     (async () => {
       setLoading(true);
-      const res = await supaRest("online_students", "GET", null, `?company=eq.${encodeURIComponent(company)}&select=name,phone,status,final_score,chapter_scores,registered_at,completed_at&order=registered_at.desc`);
+      const res = await adminRest("online_students", "GET", null, `?company=eq.${encodeURIComponent(company)}&select=name,phone,status,final_score,chapter_scores,registered_at,completed_at&order=registered_at.desc`);
       setRows(Array.isArray(res) ? res : []);
       setLoading(false);
     })();
@@ -3267,16 +3295,16 @@ function Admin() {
       : key === "bookings" || key === "customers" || key === "lead_promo_codes" ? "created_at"
       : key === "sales_tracking" ? "completed_date"
       : "id";
-    const data = await supaRest(key, "GET", null, `?order=${orderCol}.desc.nullslast&limit=1000`);
+    const data = await adminRest(key, "GET", null, `?order=${orderCol}.desc.nullslast&limit=1000`);
     setRows(Array.isArray(data) ? data : []);
     setLoading(false);
   }, []);
 
   const fetchStats = useCallback(async () => {
     const [students, customers, bookings] = await Promise.all([
-      supaRest("online_students", "GET", null, "?select=status,registered_at&limit=10000"),
-      supaRest("customers", "GET", null, "?select=id,line_user_id&limit=10000"),
-      supaRest("bookings", "GET", null, "?select=id&limit=10000"),
+      adminRest("online_students", "GET", null, "?select=status,registered_at&limit=10000"),
+      adminRest("customers", "GET", null, "?select=id,line_user_id&limit=10000"),
+      adminRest("bookings", "GET", null, "?select=id&limit=10000"),
     ]);
     const s = Array.isArray(students) ? students : [];
     const cust = Array.isArray(customers) ? customers : [];
