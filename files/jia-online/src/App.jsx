@@ -3206,12 +3206,12 @@ function StandingCodePanel() {
 
   const refresh = async () => {
     setLoading(true);
-    const rows = await supaRest("lead_promo_codes", "GET", null, "?multi_use=eq.true&select=code,unlock_modules,company,created_at&order=created_at.desc");
+    const rows = await adminRest("lead_promo_codes", "GET", null, "?multi_use=eq.true&select=code,unlock_modules,company,created_at&order=created_at.desc");
     const list = Array.isArray(rows) ? rows : [];
     setCodes(list);
     if (list.length) {
       const inList = list.map(r => encodeURIComponent(r.code)).join(",");
-      const ev = await supaRest("lead_capture_events", "GET", null, `?event_type=eq.redeemed&code=in.(${inList})&select=code`);
+      const ev = await adminRest("lead_capture_events", "GET", null, `?event_type=eq.redeemed&code=in.(${inList})&select=code`);
       const c = {};
       (Array.isArray(ev) ? ev : []).forEach(e => { c[e.code] = (c[e.code] || 0) + 1; });
       setCounts(c);
@@ -3226,7 +3226,7 @@ function StandingCodePanel() {
     if (!/^[A-Z0-9][A-Z0-9-]{3,19}$/.test(code)) { setErr("ตั้งชื่อโค้ด 4-20 ตัว ใช้ A-Z, 0-9 และขีดกลาง เช่น JIA-STUDENT"); return; }
     setCreating(true);
     try {
-      const res = await supaRest("lead_promo_codes", "POST", {
+      const res = await adminRest("lead_promo_codes", "POST", {
         code, email: "", phone: `standing:${code}`, name: "โค้ดกลางนักเรียน Pre-course",
         source: "pre_course", company: form.company.trim() || null,
         unlock_modules: VOUCHER_ALL_MODULES,

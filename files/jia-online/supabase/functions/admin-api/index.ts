@@ -19,7 +19,7 @@ const ADMIN_KEY = Deno.env.get("ADMIN_API_KEY") || "";
 // ตารางที่ admin เข้าถึงได้เท่านั้น — ห้ามใส่ users / jiaroo_secrets / *_secrets
 const ALLOW = new Set<string>([
   "online_students", "online_purchases", "customers", "bookings",
-  "sales_tracking", "lead_promo_codes", "promo_codes",
+  "sales_tracking", "lead_promo_codes", "lead_capture_events", "promo_codes",
   "jiaroo_leads", "jiaroo_lead_events", "jiaroo_messages", "jiaroo_team",
 ]);
 const METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
