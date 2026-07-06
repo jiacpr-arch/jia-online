@@ -11,7 +11,25 @@ const FREE_LAUNCH = false; // cutover แล้ว (ก.ค. 2569) — บทท
 const LAUNCH_END = "31 กรกฎาคม 2569";
 const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
 const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
-const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} };
+// ========== META PIXEL (Facebook Ads) ==========
+// แมป event ภายใน → Meta standard event เพื่อใช้เป็นเป้า optimize โฆษณาได้ตรงๆ
+// (base pixel code + PageView อยู่ใน index.html — dataset "morroo" 966371002896288)
+const FB_EVENT_MAP = {
+  signup_complete: "CompleteRegistration",   // สมัครสำเร็จ = คอนเวอร์ชันหลัก
+  register_complete: "CompleteRegistration", // ลงทะเบียนรับใบประกาศฯ
+  line_oa_added: "Lead",                     // แอด LINE OA แล้ว
+  line_oa_confirm_added: "Lead",             // กดยืนยัน "เพิ่มเพื่อนแล้ว"
+  teaser_quiz_complete: "ViewContent",       // ทำควิซเกริ่นนำจบ (สนใจจริง)
+};
+const fbTrack = (name, props) => {
+  try {
+    if (typeof window === "undefined" || !window.fbq) return;
+    const std = FB_EVENT_MAP[name];
+    if (std) window.fbq("track", std, props || {});
+    else window.fbq("trackCustom", name, props || {}); // เก็บ event ที่เหลือไว้ทำ Custom Audience
+  } catch (e) {}
+};
+const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} try { fbTrack(name, props); } catch(e) {} };
 const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
 // ข้อความ prefill ที่ลูกค้ากดส่งเข้า @jiacpr — โค้ด JIA-LINK ต้องอยู่หน้าสุดเสมอ (webhook ภายนอกจับคู่กับ customers.line_link_code → เขียน line_user_id กลับ)
