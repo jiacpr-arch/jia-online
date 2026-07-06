@@ -681,6 +681,9 @@ function Landing({ go, enterCourse, openBlog }) {
           {FREE_LAUNCH ? (<><span style={{ fontSize: 44, fontWeight: 800 }}>ฟรี!</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ textDecoration: "line-through", opacity: .7 }}>ปกติ ฿100</div><div style={{ opacity: .85 }}>+ คูปองส่วนลด ฿100</div></div></>) : (<><span style={{ fontSize: 44, fontWeight: 800 }}>฿35</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ opacity: .85 }}>ต่อหัวข้อ</div><div style={{ opacity: .7 }}>Full Course ฿149</div></div></>)}
         </div>
         <div><button onClick={enterCourse} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{FREE_LAUNCH ? "เรียนฟรีเลย →" : "เรียนเลย →"}</button></div>
+        {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && <div style={{ marginTop: 14 }}>
+          <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ background: "rgba(255,255,255,.16)", border: "1px solid rgba(255,255,255,.5)", borderRadius: 10, color: B.white, fontSize: 13, fontWeight: 700, padding: "9px 18px", cursor: "pointer" }}>🎟️ มีโค้ดแล้ว? ใส่โค้ดเข้าเรียนเลย →</button>
+        </div>}
       </div>
     </div>
 
