@@ -682,7 +682,8 @@ function Landing({ go, enterCourse, openBlog }) {
         </div>
         <div><button onClick={enterCourse} style={{ ...css.btn(B.white, B.red), padding: "16px 52px", fontSize: 16 }}>{FREE_LAUNCH ? "เรียนฟรีเลย →" : "เรียนเลย →"}</button></div>
         {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && <div style={{ marginTop: 14 }}>
-          <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ background: "rgba(255,255,255,.16)", border: "1px solid rgba(255,255,255,.5)", borderRadius: 10, color: B.white, fontSize: 13, fontWeight: 700, padding: "9px 18px", cursor: "pointer" }}>🎟️ มีโค้ดแล้ว? ใส่โค้ดเข้าเรียนเลย →</button>
+          <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", maxWidth: 360, background: B.gold, border: "none", borderRadius: 14, color: B.black, fontSize: 16, fontWeight: 800, padding: "15px 24px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,.28)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>🎟️ มีโค้ดแล้ว? กดใส่โค้ดเลย →</button>
+          <div style={{ fontSize: 12, opacity: .9, marginTop: 8, fontWeight: 600 }}>ได้รับโค้ดจากเจ้าหน้าที่? ใส่ที่นี่เพื่อเรียนฟรี</div>
         </div>}
       </div>
     </div>
