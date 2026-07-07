@@ -71,6 +71,7 @@ const PROMO_FREE_MODULES = [1, 2, 3];       // โค้ดปลดล็อก
 const PROMO_EXPIRY_DAYS = 7;                // โค้ดหมดอายุภายใน 7 วันหลัง claim
 const PROMO_CODE_PREFIX = "LEAD-";          // prefix แยกจาก JIA- (on-site coupon)
 const VOUCHER_ALL_MODULES = [1, 2, 3, 4, 5, 6, 7]; // voucher เต็มคอร์ส: ปลดล็อกทุกบท + แบบทดสอบสุดท้าย
+const STANDING_NEVER_EXPIRES = "2099-12-31T23:59:59Z"; // sentinel: โค้ดกลางที่ตั้งให้ไม่หมดอายุ
 const VOUCHER_SOURCES = [
   { value: "voucher_sale", label: "ขาย Voucher" },
   { value: "pre_course",   label: "Pre-course (ก่อนเข้าคลาสจริง)" },
@@ -3219,19 +3220,19 @@ function VoucherIssuePanel() {
   );
 }
 
-// ==================== STANDING CODE (โค้ดกลางใช้ซ้ำได้ ไม่หมดอายุ — นักเรียน pre-course) ====================
+// ==================== STANDING CODE (โค้ดกลางใช้ซ้ำได้ ตั้งวันหมดอายุได้ — นักเรียน pre-course) ====================
 function StandingCodePanel() {
   const [codes, setCodes] = useState([]);
   const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ code: "", company: "" });
+  const [form, setForm] = useState({ code: "", company: "", expires: "" });
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState("");
   const [copiedCode, setCopiedCode] = useState("");
 
   const refresh = async () => {
     setLoading(true);
-    const rows = await adminRest("lead_promo_codes", "GET", null, "?multi_use=eq.true&select=code,unlock_modules,company,created_at&order=created_at.desc");
+    const rows = await adminRest("lead_promo_codes", "GET", null, "?multi_use=eq.true&select=code,unlock_modules,company,created_at,expires_at&order=created_at.desc");
     const list = Array.isArray(rows) ? rows : [];
     setCodes(list);
     if (list.length) {
@@ -3249,16 +3250,24 @@ function StandingCodePanel() {
     setErr("");
     const code = form.code.trim().toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9-]{3,19}$/.test(code)) { setErr("ตั้งชื่อโค้ด 4-20 ตัว ใช้ A-Z, 0-9 และขีดกลาง เช่น JIA-STUDENT"); return; }
+    // เว้นว่าง = ไม่หมดอายุ (ใช้ค่า sentinel ปี 2099) — ถ้ากรอกวันที่ ให้หมดอายุปลายวันนั้น (23:59:59)
+    let expiresAt = STANDING_NEVER_EXPIRES;
+    if (form.expires) {
+      const d = new Date(`${form.expires}T23:59:59`);
+      if (isNaN(d.getTime())) { setErr("วันหมดอายุไม่ถูกต้อง"); return; }
+      if (d.getTime() < Date.now()) { setErr("วันหมดอายุต้องเป็นวันในอนาคต"); return; }
+      expiresAt = d.toISOString();
+    }
     setCreating(true);
     try {
       const res = await adminRest("lead_promo_codes", "POST", {
         code, email: "", phone: `standing:${code}`, name: "โค้ดกลางนักเรียน Pre-course",
         source: "pre_course", company: form.company.trim() || null,
         unlock_modules: VOUCHER_ALL_MODULES,
-        expires_at: "2099-12-31T23:59:59Z", multi_use: true,
+        expires_at: expiresAt, multi_use: true,
       });
       if (!Array.isArray(res) || !res.length) { setErr("สร้างไม่สำเร็จ (ชื่อโค้ดนี้อาจมีอยู่แล้ว)"); setCreating(false); return; }
-      setForm({ code: "", company: "" });
+      setForm({ code: "", company: "", expires: "" });
       refresh();
     } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
     setCreating(false);
@@ -3271,28 +3280,39 @@ function StandingCodePanel() {
   return (
     <div style={{ maxWidth: 480, marginTop: 20 }}>
       <div style={{ background: B.white, borderRadius: 14, padding: 20 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>โค้ดกลาง (ใช้ซ้ำได้ ไม่หมดอายุ)</h3>
-        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>โค้ดเดียวแจกนักเรียนได้ทุกคน ทุกวัน — สำหรับให้นักเรียนที่จองคลาสจริงเรียนออนไลน์มาก่อน (ปลดล็อกทุกบท) แต่ละคนยังต้องกรอกชื่อ+เบอร์ตอนใช้โค้ด จึงตามดูคะแนนรายคนได้ตามปกติ</p>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>โค้ดกลาง (ใช้ซ้ำได้)</h3>
+        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>โค้ดเดียวแจกนักเรียนได้ทุกคน ทุกวัน — สำหรับให้นักเรียนที่จองคลาสจริงเรียนออนไลน์มาก่อน (ปลดล็อกทุกบท) แต่ละคนยังต้องกรอกชื่อ+เบอร์ตอนใช้โค้ด จึงตามดูคะแนนรายคนได้ตามปกติ ตั้งวันหมดอายุได้ (เว้นว่าง = ไม่หมดอายุ)</p>
 
         {loading ? <div style={{ fontSize: 13, color: B.dkGray }}>กำลังโหลด...</div> : codes.length === 0 ? (
           <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 12 }}>ยังไม่มีโค้ดกลางในระบบ</div>
-        ) : codes.map(r => (
-          <div key={r.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${B.gray}` }}>
+        ) : codes.map(r => {
+          const never = !r.expires_at || new Date(r.expires_at).getFullYear() >= 2099;
+          const expired = !never && new Date(r.expires_at) < new Date();
+          return (
+          <div key={r.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${B.gray}`, opacity: expired ? .55 : 1 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", letterSpacing: 1 }}>{r.code}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", letterSpacing: 1 }}>
+                {r.code}
+                {expired && <span style={{ fontSize: 10, fontWeight: 700, color: B.red, marginLeft: 8, verticalAlign: "middle" }}>หมดอายุแล้ว</span>}
+              </div>
               <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>
                 ใช้ไปแล้ว <strong>{counts[r.code] || 0}</strong> คน{r.company ? ` • ${r.company}` : ""} • สร้าง {new Date(r.created_at).toLocaleDateString("th-TH")}
+                {" • "}{never ? "ไม่หมดอายุ" : `หมดอายุ ${new Date(r.expires_at).toLocaleDateString("th-TH")}`}
               </div>
             </div>
             <button onClick={() => copy(r.code)} style={{ ...css.btn(B.white, B.black), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "6px 14px" }}>{copiedCode === r.code ? "คัดลอกแล้ว ✓" : "คัดลอก"}</button>
           </div>
-        ))}
+          );
+        })}
 
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${B.gray}` }}>
           <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>สร้างโค้ดกลางใหม่</label>
           <input type="text" value={form.code} onChange={e => { setForm(p => ({ ...p, code: e.target.value.toUpperCase() })); setErr(""); }} placeholder="เช่น JIA-STUDENT" autoCapitalize="characters"
             style={{ width: "100%", padding: "12px 14px", border: `2px solid ${err ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}/>
           <input type="text" value={form.company} onChange={e => setForm(p => ({ ...p, company: e.target.value }))} placeholder="บริษัท (ถ้ามี — ใช้กรองรายงานคะแนน)"
+            style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", marginBottom: 10 }}/>
+          <label style={{ fontSize: 12, color: B.dkGray, display: "block", marginBottom: 6 }}>วันหมดอายุ (เว้นว่าง = ไม่หมดอายุ)</label>
+          <input type="date" value={form.expires} onChange={e => { setForm(p => ({ ...p, expires: e.target.value })); setErr(""); }}
             style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
           {err && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{err}</div>}
           <button onClick={create} disabled={creating || !form.code.trim()} style={{ ...css.btn(B.red, B.white, true), marginTop: 12, opacity: (creating || !form.code.trim()) ? .6 : 1 }}>{creating ? "กำลังสร้าง..." : "สร้างโค้ดกลาง →"}</button>
