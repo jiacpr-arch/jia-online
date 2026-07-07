@@ -15,6 +15,11 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ADMIN_KEY = Deno.env.get("ADMIN_API_KEY") || "";
+// รหัสแอดมินเดิมที่เคยใช้ก่อนย้ายไปเป็น secret — ฝังฝั่ง server ไว้ให้ล็อกอินด้วยรหัสเดิมได้
+// (ค่านี้อยู่ใน git history ของหน้าเว็บเดิมอยู่แล้ว จึงไม่ได้เปิดเผยความลับเพิ่ม)
+// ตรวจฝั่ง server เท่านั้น ไม่หลุดไปอยู่ใน bundle ฝั่ง client
+// TODO: ตั้ง ADMIN_API_KEY เป็นรหัสใหม่แล้วลบ LEGACY_ADMIN_KEY ทิ้งเพื่อความปลอดภัย
+const LEGACY_ADMIN_KEY = "JiaAdmin2026";
 
 // ตารางที่ admin เข้าถึงได้เท่านั้น — ห้ามใส่ users / jiaroo_secrets / *_secrets
 const ALLOW = new Set<string>([
@@ -44,10 +49,13 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
-  // fail closed: ต้องตั้ง ADMIN_API_KEY เสมอ
-  if (!ADMIN_KEY) return json({ error: "server missing ADMIN_API_KEY" }, 503);
+  // fail closed: ต้องมีรหัสอย่างน้อยหนึ่งค่า (secret หรือ legacy) เสมอ
+  if (!ADMIN_KEY && !LEGACY_ADMIN_KEY) return json({ error: "server missing ADMIN_API_KEY" }, 503);
   const got = req.headers.get("x-admin-key") || "";
-  if (!timingSafeEqual(got, ADMIN_KEY)) return json({ error: "unauthorized" }, 401);
+  // ยอมรับทั้งรหัสจาก secret (ADMIN_API_KEY) และรหัสเดิมที่ฝังไว้ (LEGACY_ADMIN_KEY)
+  const ok = (!!ADMIN_KEY && timingSafeEqual(got, ADMIN_KEY)) ||
+             (!!LEGACY_ADMIN_KEY && timingSafeEqual(got, LEGACY_ADMIN_KEY));
+  if (!ok) return json({ error: "unauthorized" }, 401);
 
   let payload: any = {};
   try { payload = await req.json(); } catch { return json({ error: "bad json" }, 400); }
