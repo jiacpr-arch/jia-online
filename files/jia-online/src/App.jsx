@@ -798,7 +798,10 @@ function Store({ go, setUser }) {
   const [uploading, setUploading] = useState(false);
   const [slipDone, setSlipDone] = useState(false);
   const purchased = getPurchased();
-  const user = load("user", null);
+  // snapshot ครั้งเดียวตอน mount (ไม่ใช้ค่าที่คำนวณใหม่ทุก render) — การ์ดกรอกชื่อ-เบอร์
+  // ด้านล่างผูกกับตัวนี้ ไม่ใช่ buyerReady ที่เปลี่ยนตามการพิมพ์ กัน input หายจาก DOM
+  // กลางคันตอนผู้ใช้ยังพิมพ์ไม่เสร็จ (เคยทำให้ปุ่ม Stripe ดูเหมือนกดไม่ได้บนมือถือ)
+  const [user] = useState(() => load("user", null));
   const buyable = COURSE.modules.filter(m => m.id <= 6 && !purchased.includes(m.id));
   // เข้าหน้านี้ได้ตรงจาก Landing โดยไม่ผ่านสมัคร (go("store") ที่ปุ่ม "เลือกซื้อหัวข้อ")
   // จึงอาจยังไม่มี user เลย — ต้องเก็บชื่อ+เบอร์ก่อนเข้าสู่ขั้นตอนจ่ายเงินจริง (server
@@ -903,7 +906,7 @@ function Store({ go, setUser }) {
         </div>
         {isFull && <div style={{ fontSize: 12, color: B.green, marginTop: 6 }}>ครบ 6 หัวข้อ! ได้ Final Exam + Full Certificate + คูปอง ฿100 ฟรี</div>}
       </div>
-      {!buyerReady && <div style={{ ...css.card, marginBottom: 14 }}>
+      {!user && <div style={{ ...css.card, marginBottom: 14 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>กรอกข้อมูลก่อนชำระเงิน</div>
         <div style={{ marginBottom: 12, textAlign: "left" }}>
           <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อ-นามสกุล *</label>
