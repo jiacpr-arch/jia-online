@@ -31,6 +31,8 @@ const fbTrack = (name, props) => {
 };
 const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} try { fbTrack(name, props); } catch(e) {} };
 const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+// token สุ่มต่อท้ายชื่อไฟล์สลิป — bucket เป็น public, ชื่อไฟล์เดิม (ชื่อ+timestamp) เดาได้ง่าย
+const randToken = () => Math.random().toString(36).slice(2, 10);
 const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
 // ล้างสถานะผู้เรียนทั้งหมด (เปลี่ยนคนเรียนบนเครื่องเดิม) — ลบทุกคีย์ jia_* ยกเว้นเซสชันแอดมิน
 // กันเคสคนใหม่สืบทอด signed_up/purchased/promo ของคนเก่า แล้วข้ามหน้าสมัคร/รับโค้ดไม่ได้
@@ -808,6 +810,9 @@ function Store({ go }) {
   const payWithStripe = async () => {
     setStripePaying(true);
     try {
+      // ราคา/รายการที่ส่งไปนี้เป็นแค่ค่าที่ใช้แสดงผล — stripe-checkout คำนวณราคาจริงใหม่
+      // ฝั่ง server จาก metadata.modules เอง (ไม่เชื่อ amount/items จาก client แล้ว) และ
+      // เป็นคนสร้างระเบียน "รอชำระ" ให้เองด้วย (client ไม่ต้อง insert online_purchases เอง)
       const moduleNames = selected.map(id => COURSE.modules.find(x => x.id === id)?.short).filter(Boolean);
       const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-checkout`, {
         method: "POST",
@@ -816,17 +821,13 @@ function Store({ go }) {
           type: "online_purchase",
           items: [{ name: `JIA Online: ${moduleNames.join(", ")}`, amount: total }],
           metadata: { phone: user?.phone || "", modules: selected.join(","), name: user?.name || "" },
-          successUrl: window.location.origin + window.location.pathname + "?stripe=success&modules=" + selected.join(","),
+          successUrl: window.location.origin + window.location.pathname + "?stripe=success",
           cancelUrl: window.location.origin + window.location.pathname + "?stripe=cancel",
         }),
       });
       const data = await res.json();
-      if (data.url) {
-        // ต้อง await ให้ระเบียน "รอชำระ" ถูกสร้างก่อน redirect — ไม่งั้น navigation จะตัด request ทิ้ง
-        // ทำให้แอดมินไม่มีระเบียนตอนลูกค้าจ่ายเงินที่ Stripe และ success-handler หาแถวมา match ไม่เจอ
-        await supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, payment_status: "รอชำระ" });
-        window.location.href = data.url;
-      } else { alert("เกิดข้อผิดพลาด: " + (data.error || "ไม่สามารถสร้างลิงก์ชำระเงินได้")); }
+      if (data.url) window.location.href = data.url;
+      else alert("เกิดข้อผิดพลาด: " + (data.error || "ไม่สามารถสร้างลิงก์ชำระเงินได้"));
     } catch(err) { alert("เกิดข้อผิดพลาด กรุณาลองใหม่"); console.error(err); }
     setStripePaying(false);
   };
@@ -837,7 +838,7 @@ function Store({ go }) {
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const fileName = (user?.name || "student") + "_course_" + Date.now() + ".jpg";
+        const fileName = (user?.name || "student") + "_course_" + Date.now() + "_" + randToken() + ".jpg";
         const byteChars = atob(reader.result.split(",").pop());
         const byteArr = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -1690,7 +1691,7 @@ function Payment({ go, user }) {
     reader.onload = async () => {
       try {
         const u = user || load("user", null);
-        const fileName = (u?.name || "student") + "_online_" + Date.now() + ".jpg";
+        const fileName = (u?.name || "student") + "_online_" + Date.now() + "_" + randToken() + ".jpg";
         const byteChars = atob(reader.result.split(",").pop());
         const byteArr = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -2158,7 +2159,7 @@ function Booking({ go }) {
       const reader = new FileReader();
       reader.onload = async () => {
         // Upload to Supabase Storage
-        const fileName = (form.name || "student") + "_slip_" + Date.now() + ".jpg";
+        const fileName = (form.name || "student") + "_slip_" + Date.now() + "_" + randToken() + ".jpg";
         const byteChars = atob(reader.result.split(",").pop());
         const byteArr = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -3705,6 +3706,24 @@ function InAppNotice() {
   );
 }
 
+// ==================== STRIPE VERIFY ====================
+// หน้ารอ/แจ้งผลระหว่างตรวจสอบว่า Stripe จ่ายเงินจริงหรือยัง (ดู useEffect stripeVerify ใน App)
+function StripeVerify({ status, go }) {
+  if (status === "failed") return (
+    <div style={css.page}><div style={{ ...css.wrap, paddingTop: 60, textAlign: "center" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>ยังไม่พบการชำระเงิน</h2>
+      <p style={{ fontSize: 14, color: B.dkGray }}>ถ้าคุณชำระเงินไปแล้วแต่ยังไม่ปลดล็อก กรุณาติดต่อเจ้าหน้าที่ผ่านไลน์ @jiacpr</p>
+      <button onClick={() => go("store")} style={{ ...css.btn(B.red, B.white), marginTop: 20, padding: "14px 40px", fontSize: 16 }}>กลับไปหน้าร้าน</button>
+    </div></div>
+  );
+  return (
+    <div style={css.page}><div style={{ ...css.wrap, paddingTop: 60, textAlign: "center" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>กำลังตรวจสอบการชำระเงิน...</h2>
+      <p style={{ fontSize: 14, color: B.dkGray }}>กรุณารอสักครู่</p>
+    </div></div>
+  );
+}
+
 // ==================== APP ====================
 export default function App() {
   // เข้าหน้า admin ได้ทั้ง path /admin (เช่น cpr.morroo.com/admin) และ ?admin=1 (เดิม)
@@ -3713,7 +3732,10 @@ export default function App() {
     /\/admin\/?$/.test(window.location.pathname)
   );
   const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
-  const stripeSuccess = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("stripe") === "success";
+  // ต้องมี session_id (Stripe แทนค่าให้ตอน redirect กลับ) ถึงจะเข้าสู่หน้าตรวจสอบการจ่ายเงิน
+  // ได้ — กัน exploit เดิมที่พิมพ์ ?stripe=success&modules=... เองแล้วปลดล็อกฟรีทันที
+  const stripeSessionId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("session_id") : null;
+  const stripeSuccess = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("stripe") === "success" && !!stripeSessionId;
   // หน้าที่ "จำตำแหน่งไว้ในเครื่อง" แล้วเปิดกลับมาที่เดิมได้ (กันนักเรียนต้องเริ่มขั้นตอนแรกใหม่ทุกครั้ง)
   const RESUMABLE_PAGES = ["course", "store", "register", "certificate", "minicert", "booking", "claim", "blog"];
   // เคยลงทะเบียน/ซื้อ/ปลดล็อก/มีความคืบหน้าแล้ว = กลับเข้าคอร์สได้เลย ไม่ต้องผ่านด่านสมัครซ้ำ
@@ -3724,7 +3746,7 @@ export default function App() {
     || (load("purchased", []) || []).some(x => x > 1) || (load("promo_unlocked", []) || []).length > 0;
   const [page, setPage] = useState(() => {
     if (promoParam) return "claim";
-    if (stripeSuccess) return "course";
+    if (stripeSuccess) return "stripe-verify";
     // จำหน้าล่าสุดที่เปิดค้างไว้ — เปิดเว็บใหม่ก็เรียนต่อจากเดิมได้
     const last = load("last_page", null);
     if (last && RESUMABLE_PAGES.includes(last)) return last;
@@ -3751,22 +3773,34 @@ export default function App() {
   // จำหน้าล่าสุดไว้ในเครื่อง (localStorage) เฉพาะหน้าที่กลับมาเปิดต่อได้ — จะได้ไม่ต้องเริ่มขั้นตอนแรกใหม่
   useEffect(() => { if (RESUMABLE_PAGES.includes(page)) save("last_page", page); }, [page]);
 
-  // Handle Stripe success redirect + clean ?promo from URL after consuming
+  // Handle Stripe success redirect: ตรวจสถานะจริงกับ server ด้วย session_id ผ่าน RPC
+  // get_purchase_by_session แทนการเชื่อ ?modules=... จาก URL ตรงๆ เหมือนเดิม (ซึ่งใครก็
+  // พิมพ์ URL เองแล้วปลดล็อกฟรีได้) — webhook อาจมาถึงช้ากว่า redirect เล็กน้อย จึง poll
+  // สั้นๆ ก่อนค่อยฟันธงว่าล้มเหลว
+  const [stripeVerify, setStripeVerify] = useState(null); // null | "ok" | "pending" | "failed"
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("stripe") === "success") {
-      const mods = params.get("modules");
-      if (mods) {
-        const newMods = mods.split(",").map(Number).filter(Boolean);
-        const current = getPurchased();
-        const merged = [...new Set([...current, ...newMods])];
-        savePurchased(merged);
-        // อัปเดตสถานะเฉพาะเมื่อมีเบอร์จริง — กัน filter phone ว่างไป match ทุกแถวที่ไม่มีเบอร์
-        const payPhone = normalizePhone(load("user", {})?.phone || "");
-        if (payPhone) supaRest("online_purchases", "PATCH", { payment_status: "ชำระแล้ว" }, `?phone=eq.${encodeURIComponent(payPhone)}&payment_status=eq.รอชำระ`);
-      }
+      const sessionId = params.get("session_id");
       window.history.replaceState({}, "", window.location.pathname);
-      setPage("course");
+      if (!sessionId) { setStripeVerify("failed"); return; }
+      let cancelled = false;
+      (async () => {
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const res = await supaRpc("get_purchase_by_session", { p_session_id: sessionId });
+          const row = Array.isArray(res) && res.length ? res[0] : null;
+          if (row?.payment_status === "ชำระแล้ว") {
+            const newMods = (row.modules || "").split(",").map(Number).filter(Boolean);
+            const merged = [...new Set([...getPurchased(), ...newMods])];
+            savePurchased(merged);
+            if (!cancelled) { setStripeVerify("ok"); setPage("course"); }
+            return;
+          }
+          await new Promise(r => setTimeout(r, 1500));
+        }
+        if (!cancelled) setStripeVerify("failed");
+      })();
+      return () => { cancelled = true; };
     }
     if (params.get("promo")) {
       window.history.replaceState({}, "", window.location.pathname);
@@ -3818,6 +3852,7 @@ export default function App() {
       <InAppNotice />
       {(() => {
         switch (page) {
+          case "stripe-verify": return <StripeVerify status={stripeVerify} go={go}/>;
           case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
           case "lineprompt": return <LineAddPrompt go={go} user={user} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
