@@ -792,7 +792,7 @@ function Landing({ go, enterCourse, openBlog }) {
 }
 
 // ==================== STORE (เลือกซื้อหัวข้อ) ====================
-function Store({ go }) {
+function Store({ go, setUser }) {
   const [selected, setSelected] = useState([]);
   const [step, setStep] = useState("select"); // select → payment → done
   const [uploading, setUploading] = useState(false);
@@ -800,6 +800,18 @@ function Store({ go }) {
   const purchased = getPurchased();
   const user = load("user", null);
   const buyable = COURSE.modules.filter(m => m.id <= 6 && !purchased.includes(m.id));
+  // เข้าหน้านี้ได้ตรงจาก Landing โดยไม่ผ่านสมัคร (go("store") ที่ปุ่ม "เลือกซื้อหัวข้อ")
+  // จึงอาจยังไม่มี user เลย — ต้องเก็บชื่อ+เบอร์ก่อนเข้าสู่ขั้นตอนจ่ายเงินจริง (server
+  // ปฏิเสธคำขอที่ไม่มีเบอร์แล้ว กันแถว online_purchases ที่ไม่มีเบอร์ผูกไว้)
+  const [buyerName, setBuyerName] = useState(user?.name || "");
+  const [buyerPhone, setBuyerPhone] = useState(user?.phone || "");
+  const buyerReady = buyerName.trim() && normalizePhone(buyerPhone).length >= 9;
+  const ensureBuyer = () => {
+    if (!buyerReady) { alert("กรุณากรอกชื่อ-นามสกุลและเบอร์โทรที่ถูกต้องก่อนชำระเงิน"); return null; }
+    const u = { name: buyerName.trim(), phone: normalizePhone(buyerPhone) };
+    setUser(u);
+    return u;
+  };
 
   const toggle = (id) => setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const selectAll = () => setSelected(buyable.map(m => m.id));
@@ -808,6 +820,8 @@ function Store({ go }) {
 
   const [stripePaying, setStripePaying] = useState(false);
   const payWithStripe = async () => {
+    const buyer = ensureBuyer();
+    if (!buyer) return;
     setStripePaying(true);
     try {
       // ราคา/รายการที่ส่งไปนี้เป็นแค่ค่าที่ใช้แสดงผล — stripe-checkout คำนวณราคาจริงใหม่
@@ -820,7 +834,7 @@ function Store({ go }) {
         body: JSON.stringify({
           type: "online_purchase",
           items: [{ name: `JIA Online: ${moduleNames.join(", ")}`, amount: total }],
-          metadata: { phone: user?.phone || "", modules: selected.join(","), name: user?.name || "" },
+          metadata: { phone: buyer.phone, modules: selected.join(","), name: buyer.name },
           successUrl: window.location.origin + window.location.pathname + "?stripe=success",
           cancelUrl: window.location.origin + window.location.pathname + "?stripe=cancel",
         }),
@@ -834,11 +848,13 @@ function Store({ go }) {
 
   const handleSlip = (e) => {
     const file = e.target.files[0]; if (!file) return;
+    const buyer = ensureBuyer();
+    if (!buyer) { e.target.value = ""; return; }
     setUploading(true);
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const fileName = (user?.name || "student") + "_course_" + Date.now() + "_" + randToken() + ".jpg";
+        const fileName = buyer.name + "_course_" + Date.now() + "_" + randToken() + ".jpg";
         const byteChars = atob(reader.result.split(",").pop());
         const byteArr = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -851,7 +867,7 @@ function Store({ go }) {
         if (uploadRes.ok) {
           const data = { url: `${SUPABASE_URL}/storage/v1/object/public/slips/${fileName}` };
           // ต้องบันทึกรายการแจ้งชำระให้สำเร็จก่อน จึงปลดล็อก — กันเคสจ่ายแล้วแต่ไม่มี record ให้แอดมินตรวจ
-          const rec = await supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, slip_url: data.url, payment_status: "แจ้งชำระแล้ว" });
+          const rec = await supaRest("online_purchases", "POST", { phone: buyer.phone, modules: selected.join(","), amount: total, slip_url: data.url, payment_status: "แจ้งชำระแล้ว" });
           if (Array.isArray(rec) && rec.length) {
             const newPurchased = [...new Set([...purchased, ...selected])];
             savePurchased(newPurchased);
@@ -887,9 +903,20 @@ function Store({ go }) {
         </div>
         {isFull && <div style={{ fontSize: 12, color: B.green, marginTop: 6 }}>ครบ 6 หัวข้อ! ได้ Final Exam + Full Certificate + คูปอง ฿100 ฟรี</div>}
       </div>
+      {!buyerReady && <div style={{ ...css.card, marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>กรอกข้อมูลก่อนชำระเงิน</div>
+        <div style={{ marginBottom: 12, textAlign: "left" }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อ-นามสกุล *</label>
+          <input type="text" placeholder="เช่น สมชาย ใจดี" value={buyerName} onChange={e => setBuyerName(e.target.value)} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+        </div>
+        <div style={{ textAlign: "left" }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทรศัพท์ *</label>
+          <input type="tel" placeholder="เช่น 081-234-5678" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
+        </div>
+      </div>}
       <div style={{ ...css.card, textAlign: "center", marginBottom: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>ชำระออนไลน์ (บัตรเครดิต / PromptPay)</div>
-        <button onClick={payWithStripe} disabled={stripePaying} style={{ ...css.btn("#635BFF", B.white), padding: "14px 32px", fontSize: 15, width: "100%", opacity: stripePaying ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+        <button onClick={payWithStripe} disabled={stripePaying || !buyerReady} style={{ ...css.btn("#635BFF", B.white), padding: "14px 32px", fontSize: 15, width: "100%", opacity: (stripePaying || !buyerReady) ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/></svg>
           {stripePaying ? "กำลังเปิดหน้าชำระเงิน..." : "ชำระผ่าน Stripe"}
         </button>
@@ -907,9 +934,9 @@ function Store({ go }) {
       </div>
       <div style={{ ...css.card, textAlign: "center" }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>อัพโหลดสลิป</div>
-        <label style={{ ...css.btn(B.red, B.white), display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", opacity: uploading ? 0.6 : 1 }}>
+        <label style={{ ...css.btn(B.red, B.white), display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", opacity: (uploading || !buyerReady) ? 0.6 : 1 }}>
           <I name="save" size={18} color={B.white}/> {uploading ? "กำลังอัพโหลด..." : "เลือกรูปสลิป"}
-          <input type="file" accept="image/*" capture="environment" onChange={handleSlip} disabled={uploading} style={{ display: "none" }}/>
+          <input type="file" accept="image/*" capture="environment" onChange={handleSlip} disabled={uploading || !buyerReady} style={{ display: "none" }}/>
         </label>
       </div>
       <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 14, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> หรือส่งสลิปทาง LINE @jiacpr</a>
@@ -3859,7 +3886,7 @@ export default function App() {
           case "teaserquiz": return <TeaserQuiz go={go}/>;
           case "signupgate": return <SignupGate go={go} setUser={u => { setUser(u); save("user", u); }} setProgress={p => { setProgress(p); save("progress", p); }}/>;
           case "payment": return <Payment go={go} user={user}/>;
-          case "store": return <Store go={go}/>;
+          case "store": return <Store go={go} setUser={u => { setUser(u); save("user", u); }}/>;
           case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog}/>;
           case "certificate": return <Certificate user={user} go={go}/>;
           case "minicert": return <MiniCert user={user} go={go}/>;
