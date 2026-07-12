@@ -31,7 +31,22 @@ const fbTrack = (name, props) => {
 };
 const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} try { fbTrack(name, props); } catch(e) {} };
 const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+// token สุ่มต่อท้ายชื่อไฟล์สลิป — bucket เป็น public, ชื่อไฟล์เดิม (ชื่อ+timestamp) เดาได้ง่าย
+const randToken = () => Math.random().toString(36).slice(2, 10);
 const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
+// ล้างสถานะผู้เรียนทั้งหมด (เปลี่ยนคนเรียนบนเครื่องเดิม) — ลบทุกคีย์ jia_* ยกเว้นเซสชันแอดมิน
+// กันเคสคนใหม่สืบทอด signed_up/purchased/promo ของคนเก่า แล้วข้ามหน้าสมัคร/รับโค้ดไม่ได้
+const ADMIN_LS_KEYS = new Set(["jia_admin_auth", "jia_admin_key"]);
+const resetLearner = () => {
+  try {
+    const rm = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("jia_") && !ADMIN_LS_KEYS.has(k)) rm.push(k);
+    }
+    rm.forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+};
 // ข้อความ prefill ที่ลูกค้ากดส่งเข้า @jiacpr — โค้ด JIA-LINK ต้องอยู่หน้าสุดเสมอ (webhook ภายนอกจับคู่กับ customers.line_link_code → เขียน line_user_id กลับ)
 const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code + "\nสนใจคอร์ส CPR & AED 🙏 เรียนออนไลน์อยู่และได้รับส่วนลดแล้ว อยากนัดวันมาเรียนภาคปฏิบัติ ไม่ทราบว่าสะดวกวันไหนบ้างครับ/ค่ะ")}`;
 const markLineAdded = (user) => {
@@ -96,6 +111,21 @@ const supaRest = async (table, method = "GET", body = null, filters = "") => {
   const opts = { method, headers: h };
   if (body && method !== "GET" && method !== "DELETE") opts.body = JSON.stringify(body);
   try { const res = await fetch(url, opts); return res.ok ? (await res.text().then(t => t ? JSON.parse(t) : [])) : []; } catch(e) { console.error("Supabase:", e); return []; }
+};
+
+// เรียก SECURITY DEFINER RPC (ใช้กับ lead_promo_codes ที่ปิด anon SELECT/INSERT/UPDATE ตรงแล้ว)
+// ฟังก์ชันคืน TABLE → PostgREST ส่งกลับเป็น array; error → คืน null
+const supaRpc = async (fn, args = {}) => {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) return null;
+    const t = await res.text();
+    return t ? JSON.parse(t) : null;
+  } catch (e) { console.error("Supabase RPC:", e); return null; }
 };
 
 // ===== Admin data access ผ่าน server-side admin-api (ใช้ service_role หลังด่านรหัสแอดมิน) =====
@@ -348,8 +378,11 @@ const savePurchased = (ids) => { save("purchased", ids); };
 const isModuleAccessible = (id, purchased) => purchased.includes(id) || (id === 7 && purchased.filter(x => x <= 6).length === 6);
 const calcPrice = (count) => {
   if (count >= 6) return PRICING.full;
-  if (count >= 3) return Math.floor(count / 3) * PRICING.bundle3 + (count % 3) * PRICING.single;
-  return count * PRICING.single;
+  const tiered = count >= 3
+    ? Math.floor(count / 3) * PRICING.bundle3 + (count % 3) * PRICING.single
+    : count * PRICING.single;
+  // อย่าให้เลือกบางหัวข้อแพงกว่าคอร์สเต็ม (เช่น 5 หัวข้อ = 170 > 149)
+  return Math.min(tiered, PRICING.full);
 };
 
 // ========== COURSE DATA ==========
@@ -777,6 +810,9 @@ function Store({ go }) {
   const payWithStripe = async () => {
     setStripePaying(true);
     try {
+      // ราคา/รายการที่ส่งไปนี้เป็นแค่ค่าที่ใช้แสดงผล — stripe-checkout คำนวณราคาจริงใหม่
+      // ฝั่ง server จาก metadata.modules เอง (ไม่เชื่อ amount/items จาก client แล้ว) และ
+      // เป็นคนสร้างระเบียน "รอชำระ" ให้เองด้วย (client ไม่ต้อง insert online_purchases เอง)
       const moduleNames = selected.map(id => COURSE.modules.find(x => x.id === id)?.short).filter(Boolean);
       const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-checkout`, {
         method: "POST",
@@ -785,15 +821,13 @@ function Store({ go }) {
           type: "online_purchase",
           items: [{ name: `JIA Online: ${moduleNames.join(", ")}`, amount: total }],
           metadata: { phone: user?.phone || "", modules: selected.join(","), name: user?.name || "" },
-          successUrl: window.location.origin + window.location.pathname + "?stripe=success&modules=" + selected.join(","),
+          successUrl: window.location.origin + window.location.pathname + "?stripe=success",
           cancelUrl: window.location.origin + window.location.pathname + "?stripe=cancel",
         }),
       });
       const data = await res.json();
-      if (data.url) {
-        supaRest("online_purchases", "POST", { phone: user?.phone || "", modules: selected.join(","), amount: total, payment_status: "รอชำระ" });
-        window.location.href = data.url;
-      } else { alert("เกิดข้อผิดพลาด: " + (data.error || "ไม่สามารถสร้างลิงก์ชำระเงินได้")); }
+      if (data.url) window.location.href = data.url;
+      else alert("เกิดข้อผิดพลาด: " + (data.error || "ไม่สามารถสร้างลิงก์ชำระเงินได้"));
     } catch(err) { alert("เกิดข้อผิดพลาด กรุณาลองใหม่"); console.error(err); }
     setStripePaying(false);
   };
@@ -804,7 +838,7 @@ function Store({ go }) {
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const fileName = (user?.name || "student") + "_course_" + Date.now() + ".jpg";
+        const fileName = (user?.name || "student") + "_course_" + Date.now() + "_" + randToken() + ".jpg";
         const byteChars = atob(reader.result.split(",").pop());
         const byteArr = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -1277,11 +1311,8 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
     const email = normalizeEmail(form.email);
     const phone = normalizePhone(form.phone);
     if (!email && !phone) return null;
-    const filters = [];
-    if (email) filters.push(`email.eq.${encodeURIComponent(email)}`);
-    if (phone) filters.push(`phone.eq.${encodeURIComponent(phone)}`);
-    const q = filters.length === 1 ? `?${filters[0]}` : `?or=(${filters.join(",")})`;
-    const res = await supaRest("lead_promo_codes", "GET", null, `${q}&select=code,expires_at,redeemed_at,name,unlock_modules&order=created_at.desc&limit=1`);
+    // อ่านผ่าน RPC (ปิด anon SELECT ตรงบนตารางแล้ว) — คืนเฉพาะแถวที่ email/phone ตรงเป๊ะ
+    const res = await supaRpc("find_lead_promo_by_contact", { p_email: email || "", p_phone: phone || "" });
     if (!Array.isArray(res) || !res.length) return null;
     const r = res[0];
     return { ...r, expired: new Date(r.expires_at) < new Date() };
@@ -1324,19 +1355,19 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
         id: custId, name: form.name.trim(), tel: phone, email, source: "lead-promo-" + form.source,
       });
 
-      const payload = {
-        code, email, phone, name: form.name.trim(),
-        line_id: form.lineId.trim() || null,
-        source: form.source,
-        source_other: form.source === "other" ? form.sourceOther.trim() : null,
-        unlock_modules: PROMO_FREE_MODULES,
-        created_at: now.toISOString(),
-        expires_at: expires.toISOString(),
-        idempotency_key: genIdempotencyKey(email, phone),
-        customer_id: custId,
-        email_sent_status: "pending",
-      };
-      const created = await supaRest("lead_promo_codes", "POST", payload);
+      // สร้างโค้ดผ่าน RPC — server บังคับ unlock_modules = {1,2,3} เอง (client ตั้งเองไม่ได้แล้ว)
+      const created = await supaRpc("claim_lead_code", {
+        p_code: code,
+        p_email: email,
+        p_phone: phone,
+        p_name: form.name.trim(),
+        p_line_id: form.lineId.trim() || null,
+        p_source: form.source,
+        p_source_other: form.source === "other" ? form.sourceOther.trim() : null,
+        p_expires_at: expires.toISOString(),
+        p_idempotency_key: genIdempotencyKey(email, phone),
+        p_customer_id: custId,
+      });
 
       if (!Array.isArray(created) || !created.length) {
         // race condition — re-fetch
@@ -1388,32 +1419,26 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
     if (phone.length < 9) { setRedeemErr("กรุณากรอกเบอร์โทรที่ถูกต้องก่อนใช้โค้ด"); return; }
     setValidating(true);
     try {
-      const res = await supaRest("lead_promo_codes", "GET", null, `?code=eq.${encodeURIComponent(code)}&select=code,expires_at,redeemed_at,name,unlock_modules,company,multi_use&limit=1`);
-      if (!Array.isArray(res) || !res.length) { setRedeemErr("ไม่พบรหัสนี้ในระบบ"); setValidating(false); return; }
-      const row = res[0];
-      if (new Date(row.expires_at) < new Date()) {
+      // redeem ผ่าน RPC เดียว: server เช็ค expiry + atomic redeem + จัดการโค้ดกลาง (multi_use) ให้
+      // (ปิด anon SELECT/UPDATE ตรงบนตารางแล้ว — กัน dump PII และ redeem โค้ดหมดอายุ/ทับกัน)
+      const rpc = await supaRpc("redeem_lead_code", { p_code: code, p_name: name, p_phone: phone });
+      if (!Array.isArray(rpc) || !rpc.length) { setRedeemErr("เกิดข้อผิดพลาด: กรุณาลองใหม่"); setValidating(false); return; }
+      const row = rpc[0];
+      if (row.status === "not_found") { setRedeemErr("ไม่พบรหัสนี้ในระบบ"); setValidating(false); return; }
+      if (row.status === "expired") {
         setRedeemErr(`รหัสนี้หมดอายุแล้ว (หมดอายุ ${new Date(row.expires_at).toLocaleDateString("th-TH")})`);
         supaRest("lead_capture_events", "POST", { code, event_type: "expired_attempt" });
         setValidating(false); return;
       }
-      // โค้ดกลาง (multi_use) ใช้ซ้ำได้ไม่จำกัดคน — ห้าม mark redeemed_at (จะไปปิดโค้ดของทุกคน)
-      // ติดตามว่าใครใช้บ้างผ่าน lead_capture_events + online_students แทน
-      if (!row.multi_use) {
-        if (row.redeemed_at) {
-          setRedeemErr(`รหัสนี้ถูกใช้ไปแล้วเมื่อ ${new Date(row.redeemed_at).toLocaleDateString("th-TH")}`);
-          setValidating(false); return;
-        }
-
-        const patchRes = await supaRest("lead_promo_codes", "PATCH",
-          { redeemed_at: new Date().toISOString(), redeemed_phone: phone, name },
-          `?code=eq.${encodeURIComponent(code)}&redeemed_at=is.null`
-        );
-        if (!Array.isArray(patchRes) || !patchRes.length) {
-          setRedeemErr("รหัสถูกใช้พร้อมกันจากเครื่องอื่น กรุณาขอรหัสใหม่");
-          setValidating(false); return;
-        }
+      if (row.status === "already") {
+        setRedeemErr(`รหัสนี้ถูกใช้ไปแล้วเมื่อ ${new Date(row.redeemed_at).toLocaleDateString("th-TH")}`);
+        setValidating(false); return;
       }
-
+      if (row.status === "race") {
+        setRedeemErr("รหัสถูกใช้พร้อมกันจากเครื่องอื่น กรุณาขอรหัสใหม่");
+        setValidating(false); return;
+      }
+      // status === "ok"
       const unlock = row.unlock_modules && row.unlock_modules.length ? row.unlock_modules : PROMO_FREE_MODULES;
       // "เต็มคอร์ส" จริง (voucher) เท่านั้นถึง grandfather ให้ enrolled=true — โค้ด lead-capture 3 บทฟรี
       // ต้องยังถูกจำกัดแค่ unlock_modules ของมันเอง ไม่ใช่ได้ทุกบทไปฟรีๆ
@@ -1666,7 +1691,7 @@ function Payment({ go, user }) {
     reader.onload = async () => {
       try {
         const u = user || load("user", null);
-        const fileName = (u?.name || "student") + "_online_" + Date.now() + ".jpg";
+        const fileName = (u?.name || "student") + "_online_" + Date.now() + "_" + randToken() + ".jpg";
         const byteChars = atob(reader.result.split(",").pop());
         const byteArr = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -1779,12 +1804,15 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       if (su?.phone && su?.name) supaRest("online_students", "PATCH", { chapter_scores: np.scores }, `?phone=ilike.*${su.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(su.name)}`);
       if (!mod.vid && mod.id === COURSE.modules[COURSE.modules.length - 1].id) {
         const u = user || load("user", null);
-        const coupon = genCoupon(); save("coupon", coupon); 
+        // ใช้คูปองเดิมที่เคยออกให้ (ตอนสมัคร) เป็นหลัก — อย่าสร้างทับ ไม่งั้นโค้ดที่ผู้เรียนจดไว้จะใช้ไม่ได้
+        const existingCoupon = load("coupon", null);
+        const coupon = existingCoupon || genCoupon(); save("coupon", coupon);
         if (u) {
           const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
           supaRest("online_students", "PATCH", { status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: score, coupon_code: coupon, renew_date: renew.toISOString().split("T")[0] }, `?phone=ilike.*${u.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(u.name)}`);
           supaRest("sales_tracking", "POST", { name: u.name, phone: u.phone.replace(/\D/g,""), completed_date: new Date().toISOString(), score, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
-          if (coupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
+          // POST เข้า promo_codes เฉพาะเมื่อเป็นโค้ดที่เพิ่งสร้าง (โค้ดเดิมถูกบันทึกไปแล้วตอนสมัคร) กันแถวซ้ำ
+          if (coupon && !existingCoupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
         }
       }
     }
@@ -1871,7 +1899,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       {/* Mini cert per module */}
       {progress.done.filter(id => id <= 6).length > 0 && progress.done.filter(id => id <= 6).length < 7 && <button onClick={() => go("minicert")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 8, border: `1px solid ${B.ltGray}`, fontSize: 13 }}>ดูใบ Mini Certificate →</button>}
       <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
-      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon","jia_last_page"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { resetLearner(); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
     </div>
     {progress.done.length >= 4 && <NewsSection openBlog={openBlog} goAll={() => go("blog")} title="บทความ CPR เพิ่มเติม" subtitle={pct === 100 ? "ทักษะ CPR เสื่อมใน 3-6 เดือน — แวะอ่านทบทวนได้ตลอด" : "เก่งมาก! ใกล้จบแล้ว — มีบทความทบทวนให้อ่านเพิ่ม"} cprOnly={true} max={5}/>}
   </div>);
@@ -1880,7 +1908,13 @@ function Course({ go, progress, setProgress, user, openBlog }) {
 // ==================== CERTIFICATE ====================
 function Certificate({ user, go }) {
   const d = new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
-  const coupon = load("coupon", null) || (() => { const c = genCoupon(); save("coupon", c); return c; })();
+  // ปกติควรมีคูปองจากตอนสมัคร/จบคอร์สอยู่แล้ว — ถ้าต้อง fallback สร้างใหม่ ต้อง POST เข้า promo_codes ด้วย
+  // ไม่งั้นใบเซอร์จะโชว์โค้ดที่พนักงาน validate ไม่ได้ (ไม่มีในฐานข้อมูล)
+  const coupon = load("coupon", null) || (() => {
+    const c = genCoupon(); save("coupon", c);
+    try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {}
+    return c;
+  })();
   const certRef = useRef(null);
   const [gen, setGen] = useState(null); // null | "img" | "pdf"
   const fileBase = `JIA_Certificate_${sanitizeFileName(user?.name)}`;
@@ -2017,7 +2051,7 @@ function Certificate({ user, go }) {
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
-    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { ["jia_user","jia_enrolled","jia_progress","jia_coupon","jia_last_page"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { resetLearner(); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
   </div></div>);
 }
 
@@ -2125,7 +2159,7 @@ function Booking({ go }) {
       const reader = new FileReader();
       reader.onload = async () => {
         // Upload to Supabase Storage
-        const fileName = (form.name || "student") + "_slip_" + Date.now() + ".jpg";
+        const fileName = (form.name || "student") + "_slip_" + Date.now() + "_" + randToken() + ".jpg";
         const byteChars = atob(reader.result.split(",").pop());
         const byteArr = new Uint8Array(byteChars.length);
         for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -3672,6 +3706,24 @@ function InAppNotice() {
   );
 }
 
+// ==================== STRIPE VERIFY ====================
+// หน้ารอ/แจ้งผลระหว่างตรวจสอบว่า Stripe จ่ายเงินจริงหรือยัง (ดู useEffect stripeVerify ใน App)
+function StripeVerify({ status, go }) {
+  if (status === "failed") return (
+    <div style={css.page}><div style={{ ...css.wrap, paddingTop: 60, textAlign: "center" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>ยังไม่พบการชำระเงิน</h2>
+      <p style={{ fontSize: 14, color: B.dkGray }}>ถ้าคุณชำระเงินไปแล้วแต่ยังไม่ปลดล็อก กรุณาติดต่อเจ้าหน้าที่ผ่านไลน์ @jiacpr</p>
+      <button onClick={() => go("store")} style={{ ...css.btn(B.red, B.white), marginTop: 20, padding: "14px 40px", fontSize: 16 }}>กลับไปหน้าร้าน</button>
+    </div></div>
+  );
+  return (
+    <div style={css.page}><div style={{ ...css.wrap, paddingTop: 60, textAlign: "center" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>กำลังตรวจสอบการชำระเงิน...</h2>
+      <p style={{ fontSize: 14, color: B.dkGray }}>กรุณารอสักครู่</p>
+    </div></div>
+  );
+}
+
 // ==================== APP ====================
 export default function App() {
   // เข้าหน้า admin ได้ทั้ง path /admin (เช่น cpr.morroo.com/admin) และ ?admin=1 (เดิม)
@@ -3680,7 +3732,10 @@ export default function App() {
     /\/admin\/?$/.test(window.location.pathname)
   );
   const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
-  const stripeSuccess = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("stripe") === "success";
+  // ต้องมี session_id (Stripe แทนค่าให้ตอน redirect กลับ) ถึงจะเข้าสู่หน้าตรวจสอบการจ่ายเงิน
+  // ได้ — กัน exploit เดิมที่พิมพ์ ?stripe=success&modules=... เองแล้วปลดล็อกฟรีทันที
+  const stripeSessionId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("session_id") : null;
+  const stripeSuccess = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("stripe") === "success" && !!stripeSessionId;
   // หน้าที่ "จำตำแหน่งไว้ในเครื่อง" แล้วเปิดกลับมาที่เดิมได้ (กันนักเรียนต้องเริ่มขั้นตอนแรกใหม่ทุกครั้ง)
   const RESUMABLE_PAGES = ["course", "store", "register", "certificate", "minicert", "booking", "claim", "blog"];
   // เคยลงทะเบียน/ซื้อ/ปลดล็อก/มีความคืบหน้าแล้ว = กลับเข้าคอร์สได้เลย ไม่ต้องผ่านด่านสมัครซ้ำ
@@ -3691,7 +3746,7 @@ export default function App() {
     || (load("purchased", []) || []).some(x => x > 1) || (load("promo_unlocked", []) || []).length > 0;
   const [page, setPage] = useState(() => {
     if (promoParam) return "claim";
-    if (stripeSuccess) return "course";
+    if (stripeSuccess) return "stripe-verify";
     // จำหน้าล่าสุดที่เปิดค้างไว้ — เปิดเว็บใหม่ก็เรียนต่อจากเดิมได้
     const last = load("last_page", null);
     if (last && RESUMABLE_PAGES.includes(last)) return last;
@@ -3718,22 +3773,34 @@ export default function App() {
   // จำหน้าล่าสุดไว้ในเครื่อง (localStorage) เฉพาะหน้าที่กลับมาเปิดต่อได้ — จะได้ไม่ต้องเริ่มขั้นตอนแรกใหม่
   useEffect(() => { if (RESUMABLE_PAGES.includes(page)) save("last_page", page); }, [page]);
 
-  // Handle Stripe success redirect + clean ?promo from URL after consuming
+  // Handle Stripe success redirect: ตรวจสถานะจริงกับ server ด้วย session_id ผ่าน RPC
+  // get_purchase_by_session แทนการเชื่อ ?modules=... จาก URL ตรงๆ เหมือนเดิม (ซึ่งใครก็
+  // พิมพ์ URL เองแล้วปลดล็อกฟรีได้) — webhook อาจมาถึงช้ากว่า redirect เล็กน้อย จึง poll
+  // สั้นๆ ก่อนค่อยฟันธงว่าล้มเหลว
+  const [stripeVerify, setStripeVerify] = useState(null); // null | "ok" | "pending" | "failed"
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("stripe") === "success") {
-      const mods = params.get("modules");
-      if (mods) {
-        const newMods = mods.split(",").map(Number).filter(Boolean);
-        const current = getPurchased();
-        const merged = [...new Set([...current, ...newMods])];
-        savePurchased(merged);
-        // อัปเดตสถานะเฉพาะเมื่อมีเบอร์จริง — กัน filter phone ว่างไป match ทุกแถวที่ไม่มีเบอร์
-        const payPhone = normalizePhone(load("user", {})?.phone || "");
-        if (payPhone) supaRest("online_purchases", "PATCH", { payment_status: "ชำระแล้ว" }, `?phone=eq.${encodeURIComponent(payPhone)}&payment_status=eq.รอชำระ`);
-      }
+      const sessionId = params.get("session_id");
       window.history.replaceState({}, "", window.location.pathname);
-      setPage("course");
+      if (!sessionId) { setStripeVerify("failed"); return; }
+      let cancelled = false;
+      (async () => {
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const res = await supaRpc("get_purchase_by_session", { p_session_id: sessionId });
+          const row = Array.isArray(res) && res.length ? res[0] : null;
+          if (row?.payment_status === "ชำระแล้ว") {
+            const newMods = (row.modules || "").split(",").map(Number).filter(Boolean);
+            const merged = [...new Set([...getPurchased(), ...newMods])];
+            savePurchased(merged);
+            if (!cancelled) { setStripeVerify("ok"); setPage("course"); }
+            return;
+          }
+          await new Promise(r => setTimeout(r, 1500));
+        }
+        if (!cancelled) setStripeVerify("failed");
+      })();
+      return () => { cancelled = true; };
     }
     if (params.get("promo")) {
       window.history.replaceState({}, "", window.location.pathname);
@@ -3785,6 +3852,7 @@ export default function App() {
       <InAppNotice />
       {(() => {
         switch (page) {
+          case "stripe-verify": return <StripeVerify status={stripeVerify} go={go}/>;
           case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
           case "lineprompt": return <LineAddPrompt go={go} user={user} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
