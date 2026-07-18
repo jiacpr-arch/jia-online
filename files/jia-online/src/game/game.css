@@ -294,8 +294,7 @@
   width: 100%; display: block;
   filter: drop-shadow(0 10px 24px rgba(0, 0, 0, .45));
 }
-/* ภาพตัวละครจริงเป็น pixel art — ขยายแบบคมกริบ ไม่เบลอ */
-.cbs-sprite-img { user-select: none; image-rendering: pixelated; }
+.cbs-sprite-img { user-select: none; }
 
 /* HUD */
 .cbs-hud {
