@@ -23,7 +23,8 @@ function probeImage(url) {
  *      + ถ้ามี {pose}_talk.webp จะสลับ 2 เฟรมตอน talking
  *   2. ไม่มีรูป → SVG placeholder จาก registry (ปากขยับด้วย data-mouth groups)
  */
-export default function CharacterSprite({ charId, pose = 'idle', talking = false }) {
+// imgV: เวอร์ชันของชุดรูป override — เปลี่ยนเมื่อโหลดรูปจากแอดมินเสร็จ ให้ probe URL ใหม่
+export default function CharacterSprite({ charId, pose = 'idle', talking = false, imgV = 0 }) {
   const char = getCharacter(charId);
   const probeKey = `${charId}/${pose}`;
   // เก็บผล probe คู่กับ key — key ไม่ตรง = ยัง probing (แทนการ reset ด้วย setState ใน effect)
@@ -44,7 +45,7 @@ export default function CharacterSprite({ charId, pose = 'idle', talking = false
       });
     });
     return () => { alive = false; };
-  }, [charId, pose, char]);
+  }, [charId, pose, char, imgV]);
 
   const imgState = probe.key === probeKey ? probe.result : null; // null=probing | {base,talk} | false
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { scenarios, LEVEL_META } from './scenarios';
-import { getCharacter, COACH_ID } from './characters';
+import { getCharacter, COACH_ID, registerCustomImages } from './characters';
 import CharacterSprite from './CharacterSprite';
 import EcgStrip from './EcgStrip';
 import {
@@ -46,7 +46,9 @@ const readCleared = () => {
   catch { return new Set(); }
 };
 
-export default function GamePage({ onExit, onTrack }) {
+// fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
+// (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
+export default function GamePage({ onExit, onTrack, fetchCustomImages }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -59,6 +61,23 @@ export default function GamePage({ onExit, onTrack }) {
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   const track = useCallback((name, props) => { try { onTrack && onTrack(name, props); } catch (e) {} }, [onTrack]);
+
+  // โหลดรูปตัวละคร override จากแอดมิน (best-effort — พังก็ใช้รูป default)
+  const [imgV, setImgV] = useState(0);
+  useEffect(() => {
+    if (!fetchCustomImages) return undefined;
+    let alive = true;
+    Promise.resolve(fetchCustomImages()).then((rows) => {
+      if (!alive || !Array.isArray(rows) || !rows.length) return;
+      const map = {};
+      rows.forEach((r) => { if (r?.char_id && r?.pose && r?.url) map[`${r.char_id}/${r.pose}`] = r.url; });
+      registerCustomImages(map);
+      setImgV((v) => v + 1);
+    }).catch(() => {});
+    return () => { alive = false; };
+    // fetchCustomImages เป็น arrow ใหม่ทุก render ของ App — โหลดครั้งเดียวตอน mount พอ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- engine state: mutable ใน ref (logic) + snapshot state (render) ----
   const S = useRef(createInitialState(DEFAULT_DIFFICULTY));
@@ -695,7 +714,7 @@ export default function GamePage({ onExit, onTrack }) {
 
           {speaker && (
             <div className={`cbs-sprite ${reducedMotion ? '' : 'cbs-pop'}`} key={`sp-${speaker.popN}`}>
-              <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} />
+              <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
             </div>
           )}
 

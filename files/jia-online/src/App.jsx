@@ -2381,6 +2381,7 @@ const TABS = [
   { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","company","unlock_modules","multi_use","created_at","expires_at","redeemed_at","email_sent_status"] },
   { key: "voucher_issue",   label: "ออก Voucher",      custom: true },
   { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
+  { key: "game_chars",      label: "รูปตัวละครเกม",   custom: true },
 ];
 
 // ==================== JIAROO CRM ====================
@@ -3494,6 +3495,134 @@ function CompanyReport() {
   );
 }
 
+// ==================== ADMIN: รูปตัวละครเกม CPR HERO ====================
+// อัปโหลดรูป override ให้ตัวละครในเกม (แทน pixel art มาตรฐาน) โดยไม่ต้อง deploy ใหม่:
+// ไฟล์ขึ้น Supabase storage ผ่าน admin-api (service role) + จด URL ในตาราง game_character_images
+// ฝั่งเกมโหลดตารางนี้ตอนเปิดเกมแล้วใช้รูปแทนอัตโนมัติ — ลบรายการ = กลับไปใช้รูปมาตรฐาน
+const GAME_CHARS = [
+  { id: "aunt_kaew", name: "ป้าแก้ว" },
+  { id: "helper_oat", name: "พี่โอ๊ต" },
+  { id: "guard_dam", name: "ลุงดำ รปภ." },
+  { id: "dispatcher_prom", name: "หมอพร้อม 1669" },
+];
+const GAME_POSES = [
+  { id: "idle", label: "นิ่ง" }, { id: "talk", label: "พูด" }, { id: "panic", label: "ตกใจ" },
+  { id: "stern", label: "ดุ" }, { id: "happy", label: "ยิ้ม" },
+];
+// ย่อรูปให้สูงไม่เกิน 800px + แปลงเป็น webp (คงพื้นหลังโปร่งใส) → base64 ไม่รวม data: prefix
+const prepCharImage = (file) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => {
+    const scale = Math.min(1, 800 / img.height);
+    const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(img, 0, 0, w, h);
+    const dataUrl = cv.toDataURL("image/webp", 0.95);
+    URL.revokeObjectURL(img.src);
+    resolve(dataUrl.split(",")[1]);
+  };
+  img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error("bad image")); };
+  img.src = URL.createObjectURL(file);
+});
+const adminUploadCharImage = async (charId, poseKey, base64) => {
+  try {
+    const res = await fetch(FN_URL("admin-api"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "x-admin-key": _adminKey || "" },
+      body: JSON.stringify({ storage_upload: { charId, file: `${poseKey}-${Date.now()}.webp`, base64, contentType: "image/webp" } }),
+    });
+    const d = await res.json().catch(() => ({}));
+    return res.ok && d?.url ? d.url : null;
+  } catch (e) { return null; }
+};
+
+function GameCharacterImages() {
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(null); // key `${charId}/${pose}` ที่กำลังอัป/ลบ
+  const [msg, setMsg] = useState(null);
+  const reload = useCallback(async () => {
+    const data = await adminRest("game_character_images", "GET", null, "?select=*");
+    setRows(Array.isArray(data) ? data : []);
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+  const map = Object.fromEntries(rows.map(r => [`${r.char_id}/${r.pose}`, r.url]));
+  const flash = (t, ok) => { setMsg({ t, ok }); setTimeout(() => setMsg(null), 4000); };
+
+  const upload = async (charId, poseKey, file) => {
+    if (!file) return;
+    const key = `${charId}/${poseKey}`;
+    setBusy(key);
+    try {
+      const base64 = await prepCharImage(file);
+      if (base64.length > 2800000) { flash("ไฟล์ใหญ่เกินไป (เกิน ~2MB หลังย่อ)", false); setBusy(null); return; }
+      const url = await adminUploadCharImage(charId, poseKey, base64);
+      if (!url) { flash("อัปโหลดไม่สำเร็จ — เช็คอินเทอร์เน็ตหรือรหัสแอดมิน", false); setBusy(null); return; }
+      // upsert แบบสองจังหวะ (ลบของเดิมก่อนแล้วเพิ่มใหม่) — admin-api proxy ไม่รองรับ on_conflict
+      await adminRest("game_character_images", "DELETE", null, `?char_id=eq.${charId}&pose=eq.${poseKey}`);
+      await adminRest("game_character_images", "POST", { char_id: charId, pose: poseKey, url });
+      await reload();
+      flash("อัปโหลดสำเร็จ — เกมใช้รูปใหม่ทันที (ไม่ต้อง deploy)", true);
+    } catch (e) { flash("อ่านไฟล์รูปไม่ได้", false); }
+    setBusy(null);
+  };
+  const revert = async (charId, poseKey) => {
+    if (!confirm("ลบรูปที่อัปโหลด แล้วกลับไปใช้รูปมาตรฐานของเกม?")) return;
+    setBusy(`${charId}/${poseKey}`);
+    await adminRest("game_character_images", "DELETE", null, `?char_id=eq.${charId}&pose=eq.${poseKey}`);
+    await reload();
+    setBusy(null);
+  };
+
+  const Cell = ({ charId, pose }) => {
+    const mainKey = `${charId}/${pose.id}`;
+    const talkKey = `${charId}/${pose.id}_talk`;
+    const preview = map[mainKey] || `/images/characters/${charId}/${pose.id}.webp`;
+    return (
+      <div style={{ background: B.white, borderRadius: 12, padding: 10, border: `2px solid ${map[mainKey] ? B.green : B.ltGray}`, textAlign: "center", width: 128 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{pose.label} <span style={{ color: B.dkGray, fontWeight: 400 }}>({pose.id})</span></div>
+        <div style={{ height: 110, display: "flex", alignItems: "center", justifyContent: "center", background: "#10182F", borderRadius: 8, marginBottom: 6 }}>
+          <img src={preview} alt={mainKey} style={{ maxHeight: 104, maxWidth: 104, imageRendering: "pixelated" }} onError={e => { e.currentTarget.style.opacity = .25; }}/>
+        </div>
+        {map[mainKey] && <div style={{ fontSize: 10, color: B.green, fontWeight: 700, marginBottom: 4 }}>✓ ใช้รูปที่อัปโหลด</div>}
+        <label style={{ display: "block", background: B.red, color: B.white, borderRadius: 8, padding: "6px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: busy === mainKey ? .5 : 1 }}>
+          {busy === mainKey ? "กำลังอัป..." : "อัปรูปหลัก"}
+          <input type="file" accept="image/*" style={{ display: "none" }} disabled={!!busy}
+            onChange={e => { upload(charId, pose.id, e.target.files?.[0]); e.target.value = ""; }}/>
+        </label>
+        <label style={{ display: "block", background: B.gray, color: B.dkGray, borderRadius: 8, padding: "5px 0", fontSize: 11, fontWeight: 600, cursor: "pointer", marginTop: 4, opacity: busy === talkKey ? .5 : 1 }}>
+          {busy === talkKey ? "กำลังอัป..." : map[talkKey] ? "เฟรมปากอ้า ✓" : "เฟรมปากอ้า (ไม่บังคับ)"}
+          <input type="file" accept="image/*" style={{ display: "none" }} disabled={!!busy}
+            onChange={e => { upload(charId, `${pose.id}_talk`, e.target.files?.[0]); e.target.value = ""; }}/>
+        </label>
+        {(map[mainKey] || map[talkKey]) && (
+          <button onClick={() => { if (map[mainKey]) revert(charId, pose.id); if (map[talkKey]) revert(charId, `${pose.id}_talk`); }} disabled={!!busy}
+            style={{ marginTop: 4, width: "100%", background: "transparent", border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "4px 0", fontSize: 11, color: B.dkGray, cursor: "pointer" }}>
+            ใช้รูปมาตรฐาน
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ background: `${B.gold}12`, border: `1px solid ${B.gold}40`, borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 13, lineHeight: 1.7 }}>
+        🎮 รูปตัวละครเกม CPR HERO — อัปโหลดรูปใหม่แทน pixel art มาตรฐานได้ทันที ไม่ต้อง deploy
+        <div style={{ fontSize: 12, color: B.dkGray }}>แนะนำ: รูปพื้นหลังโปร่งใส (PNG/WebP) สัดส่วนแนวตั้ง ~4:5 · ระบบย่อให้สูงไม่เกิน 800px อัตโนมัติ · "เฟรมปากอ้า" ใช้สลับตอนตัวละครพูด มีหรือไม่มีก็ได้</div>
+      </div>
+      {msg && <div style={{ background: msg.ok ? `${B.green}15` : `${B.red}12`, color: msg.ok ? "#15803D" : B.red, borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 13, fontWeight: 600 }}>{msg.t}</div>}
+      {GAME_CHARS.map(ch => (
+        <div key={ch.id} style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>{ch.name} <span style={{ fontSize: 12, color: B.dkGray, fontWeight: 400 }}>({ch.id})</span></div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {GAME_POSES.map(p => <Cell key={p.id} charId={ch.id} pose={p}/>)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Admin() {
   const [authed, setAuthed] = useState(() => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1");
   const [tab, setTab] = useState("pipeline");
@@ -3652,6 +3781,7 @@ function Admin() {
         {tab === "team" && <TeamManager/>}
         {tab === "voucher_issue" && <><VoucherIssuePanel/><StandingCodePanel/></>}
         {tab === "company_report" && <CompanyReport/>}
+        {tab === "game_chars" && <GameCharacterImages/>}
 
         {/* Search & filter (for table tabs only) */}
         {!isCustomTab && (
@@ -3920,7 +4050,7 @@ export default function App() {
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
-          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }}/>;
+          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")}/>;
           default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
         }
       })()}
