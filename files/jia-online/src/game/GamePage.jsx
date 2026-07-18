@@ -16,7 +16,8 @@ import {
 import './game.css';
 
 // CPR HERO — เกมตัดสินใจสไตล์ Code Blue Sim (จาก acls/bls.morroo.com) ฉบับประชาชน
-// ทุกเคสเล่นฟรี ไม่ล็อก — props: onExit() กลับหน้าเว็บ, onTrack(name, props) ส่ง event
+// เคสส่วนใหญ่เล่นฟรี ไม่ล็อก ยกเว้นเคสที่ requiresFinalExam (ล็อกจนสอบ Final Exam ผ่าน)
+// props: onExit() กลับหน้าเว็บ, onTrack(name, props) ส่ง event, finalExamPassed ปลดล็อกเคสโบนัส
 const GAME_NAME = 'CPR HERO';
 const GAME_EYEBROW = 'ภารกิจพลเมืองดี';
 
@@ -46,9 +47,12 @@ const readCleared = () => {
   catch { return new Set(); }
 };
 
+// ป้ายอ้างอิงบทเรียน — เคสที่ไม่ผูกกับบทใดบทหนึ่ง (bonus) ใช้ c.tag แทน "บทที่ N"
+const lessonTag = (c) => (c.lesson ? `บทที่ ${c.lesson}` : (c.tag || 'โบนัส'));
+
 // fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
 // (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
-export default function GamePage({ onExit, onTrack, fetchCustomImages }) {
+export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -445,7 +449,11 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages }) {
     later(() => advance(), reducedMotion ? 100 : 400);
   }
 
+  // เคสที่ requiresFinalExam ต้องสอบ Final Exam ผ่านก่อน (ตรวจจาก prop finalExamPassed)
+  const isLocked = (c) => !!c.requiresFinalExam && !finalExamPassed;
+
   function pickScenario(chosen) {
+    if (isLocked(chosen)) return;
     setSc(chosen);
     setScreen('title');
     window.scrollTo(0, 0);
@@ -476,8 +484,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages }) {
 
   // ============ CASE SELECT ============
   if (screen === 'select') {
-    // เคสแนะนำถัดไป = เคสแรกที่ยังไม่ผ่าน (ทุกเคสเล่นฟรี ไม่ล็อก)
-    const nextCase = scenarios.find((c) => !cleared.has(c.id));
+    // เคสแนะนำถัดไป = เคสแรกที่ยังไม่ผ่านและไม่ถูกล็อก
+    const nextCase = scenarios.find((c) => !cleared.has(c.id) && !isLocked(c));
     return (
       <div className="cbs-app">
         <section className="cbs-select">
@@ -485,28 +493,31 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages }) {
           <h1 className="cbs-select-title"><span className="cbs-gold-text">{GAME_NAME}</span> ภารกิจพลเมืองดี</h1>
           <p className="cbs-select-sub">
             คุณคือคนแรกที่เจอเหตุ — ตัดสินใจถูก คนตรงหน้ารอด ตัดสินใจพลาด เขาแย่ลงจริง
-            ทุกเคสอิงเนื้อหาบทเรียนของคอร์สนี้ เล่นฟรีทุกเคส
+            ทุกเคสอิงเนื้อหาบทเรียนของคอร์สนี้ เล่นฟรีทุกเคส (เคสโบนัสปลดล็อกเมื่อสอบผ่าน Final Exam)
           </p>
           {nextCase && (
             <div className="cbs-quick-row">
               <button type="button" className="cbs-next" onClick={() => pickScenario(nextCase)}>
                 <span className="cbs-next-eyebrow">▶ ภารกิจแนะนำถัดไป</span>
                 <span className="cbs-next-name">{nextCase.title}</span>
-                <span className="cbs-next-meta">อิงบทที่ {nextCase.lesson} · {LEVEL_META[nextCase.level]?.label}</span>
+                <span className="cbs-next-meta">อิง{lessonTag(nextCase)} · {LEVEL_META[nextCase.level]?.label}</span>
               </button>
             </div>
           )}
           <div className="cbs-case-list">
-            {scenarios.map((c) => (
-              <button key={c.id} type="button" className="cbs-case" onClick={() => pickScenario(c)}>
-                <div className="cbs-case-top">
-                  <span className={`cbs-case-level cbs-lvl-${c.level}`}>บทที่ {c.lesson} · {LEVEL_META[c.level]?.label}</span>
-                  {cleared.has(c.id) && <span className="cbs-case-done">✓ ผ่านแล้ว</span>}
-                </div>
-                <div className="cbs-case-name">{c.title}</div>
-                <div className="cbs-case-desc">{c.subtitle}</div>
-              </button>
-            ))}
+            {scenarios.map((c) => {
+              const locked = isLocked(c);
+              return (
+                <button key={c.id} type="button" className={`cbs-case${locked ? ' cbs-case-locked' : ''}`} disabled={locked} onClick={() => pickScenario(c)}>
+                  <div className="cbs-case-top">
+                    <span className={`cbs-case-level cbs-lvl-${c.level}`}>{lessonTag(c)} · {LEVEL_META[c.level]?.label}</span>
+                    {locked ? <span className="cbs-case-lock">🔒 ปลดล็อกเมื่อสอบผ่าน Final Exam</span> : cleared.has(c.id) && <span className="cbs-case-done">✓ ผ่านแล้ว</span>}
+                  </div>
+                  <div className="cbs-case-name">{c.title}</div>
+                  <div className="cbs-case-desc">{c.subtitle}</div>
+                </button>
+              );
+            })}
           </div>
           <button type="button" className="cbs-btn-ghost" onClick={onExit}>
             ← กลับหน้าคอร์ส
@@ -521,7 +532,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages }) {
     return (
       <div className="cbs-app">
         <section className="cbs-title">
-          <div className="cbs-eyebrow">{GAME_EYEBROW} · อิงบทที่ {sc.lesson}</div>
+          <div className="cbs-eyebrow">{GAME_EYEBROW} · อิง{lessonTag(sc)}</div>
           <h1><span className="cbs-gold-text">{sc.title}</span></h1>
           <p className="cbs-title-sub">
             {sc.subtitle}<br />
@@ -634,7 +645,9 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages }) {
             ))}
           </div>
           <div className="cbs-cert-note">
-            📚 เคสนี้อิงเนื้อหา <b>บทที่ {sc.lesson}</b> ของคอร์ส — พลาดตรงไหน กลับไปดูวิดีโอบทนั้นซ้ำได้เลย
+            {sc.lesson
+              ? <>📚 เคสนี้อิงเนื้อหา <b>บทที่ {sc.lesson}</b> ของคอร์ส — พลาดตรงไหน กลับไปดูวิดีโอบทนั้นซ้ำได้เลย</>
+              : <>📚 {sc.debriefNote || 'เคสเสริมตามแนวทาง AHA 2025 — ทบทวนได้จากทุกบทของคอร์ส'}</>}
           </div>
           <div className="cbs-debrief-actions">
             <button type="button" className="cbs-btn-main" onClick={startGame}>

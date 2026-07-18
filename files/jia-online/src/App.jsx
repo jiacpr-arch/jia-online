@@ -2,6 +2,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { track } from "@vercel/analytics";
 import { useState, useEffect, useCallback, useRef } from "react";
 import GamePage from "./game/GamePage";
+import { shuffled } from "./game/storyEngine";
 
 // ==================== BRAND ====================
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
@@ -166,6 +167,15 @@ const daysUntil = (iso) => { if (!iso) return 0; const ms = new Date(iso).getTim
 const genIdempotencyKey = (email, phone) => `${normalizeEmail(email)}|${normalizePhone(phone)}|${Math.floor(Date.now() / 60000)}`.slice(0, 80);
 const save = (k, v) => { try { localStorage.setItem(`jia_${k}`, JSON.stringify(v)); } catch(e){} };
 const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
+
+// ========== QUIZ RANDOMIZATION ==========
+// สุ่มโจทย์จากคลัง + สลับลำดับตัวเลือก พร้อม remap เฉลย ทุกครั้งที่เข้าทำแบบทดสอบ
+const QUIZ_DRAW_N = (mod) => (mod.vid ? 5 : 10); // บทเรียน 5 ข้อ, ข้อสอบสุดท้าย 10 ข้อ
+const drawQuiz = (mod) =>
+  shuffled(mod.quiz).slice(0, Math.min(QUIZ_DRAW_N(mod), mod.quiz.length)).map((q) => {
+    const order = shuffled(q.c.map((_, i) => i));
+    return { q: q.q, c: order.map((i) => q.c[i]), a: order.indexOf(q.a) };
+  });
 
 // ========== AUTH HELPERS (LIFF / Supabase Auth / PostHog — โหลดแบบ on-demand) ==========
 let _liff = null;
@@ -404,6 +414,13 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
     { q: "ความลึกในการกดหน้าอกผู้ใหญ่คือเท่าไร?", c: ["อย่างน้อย 3 ซม.", "อย่างน้อย 5 ซม. ถึง 6 ซม.", "อย่างน้อย 7 ซม.", "อย่างน้อย 10 ซม."], a: 1 },
     { q: "อัตราความเร็วในการกดหน้าอกที่ถูกต้องคือเท่าไร?", c: ["80-100 ครั้ง/นาที", "100-120 ครั้ง/นาที", "120-140 ครั้ง/นาที", "60-80 ครั้ง/นาที"], a: 1 },
     { q: "อัตราส่วนกดหน้าอก:ช่วยหายใจ ในผู้ใหญ่?", c: ["15:2", "30:2", "15:1", "30:1"], a: 1 },
+    { q: "ประเมินการหายใจของผู้ป่วยใช้เวลานานเท่าไร?", c: ["5 วินาที", "ไม่เกิน 10 วินาที", "30 วินาที", "1 นาที"], a: 1 },
+    { q: "ถ้าผู้ป่วยหายใจเฮือก (gasping) ถือว่าอย่างไร?", c: ["หายใจปกติ ไม่ต้องช่วย", "ไม่ใช่การหายใจปกติ ต้องเริ่ม CPR ทันที", "หายใจดีขึ้นแล้ว", "รอดูอาการก่อน"], a: 1 },
+    { q: "ควรปล่อยให้หน้าอกคืนตัวสุดหลังกดแต่ละครั้งหรือไม่?", c: ["ไม่ต้อง กดถี่ๆ ไปเลย", "ควร ปล่อยให้อกคืนตัวสุดทุกครั้ง", "ปล่อยแค่ครึ่งเดียวพอ", "ไม่มีผลต่อประสิทธิภาพ"], a: 1 },
+    { q: "ถ้าไม่มั่นใจเรื่องการเป่าปาก สามารถทำอะไรแทนได้?", c: ["ไม่ต้องช่วยเลย", "กดหน้าอกอย่างเดียวต่อเนื่อง (Hands-only CPR)", "รอรถพยาบาลอย่างเดียว", "เป่าจมูกแทน"], a: 1 },
+    { q: "ควรสลับคนกดหน้าอกทุกกี่นาที เพื่อคงคุณภาพการกด?", c: ["ทุก 30 วินาที", "ทุก 2 นาที", "ทุก 10 นาที", "ไม่ต้องสลับ"], a: 1 },
+    { q: "ระหว่างทำ CPR ควรหยุดกดหน้าอกได้นานสุดกี่วินาที?", c: ["ไม่เกิน 10 วินาที", "30 วินาที", "1 นาที", "หยุดได้ตามสะดวก"], a: 0 },
+    { q: "เมื่อโทร 1669 ควรทำอะไรร่วมด้วยเสมอ?", c: ["วางสายทันทีหลังบอกที่อยู่", "เปิดลำโพงไว้ให้เจ้าหน้าที่แนะนำระหว่างช่วย", "ปิดเสียงโทรศัพท์", "ให้คนอื่นคุยแทน"], a: 1 },
   ]},
   { id: 2, title: "บทที่ 2: CPR ทารก", short: "CPR ทารก", desc: "เทคนิค CPR สำหรับทารก ความแตกต่างจากผู้ใหญ่", vid: "fu65-_ENCLo", dur: 50, quiz: [
     { q: "การกดหน้าอกทารก ใช้อะไรกด?", c: ["ฝ่ามือ 2 ข้าง", "สันมือ หรือ 2 นิ้วโป้ง", "กำปั้น", "ฝ่ามือ 1 ข้าง"], a: 1 },
@@ -411,6 +428,12 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
     { q: "อัตราส่วนกดหน้าอก:เป่าปาก สำหรับทารก (ผู้ช่วย 1 คน)?", c: ["15:2", "30:2", "30:1", "10:2"], a: 1 },
     { q: "ถ้ามีผู้ช่วยเหลือ 2 คน อัตราส่วนกด:เป่า เปลี่ยนเป็นเท่าไร?", c: ["30:2", "15:2", "30:1", "10:2"], a: 1 },
     { q: "ตำแหน่งกดหน้าอกทารกอยู่ที่ไหน?", c: ["กึ่งกลางหน้าอก ใต้แนวราวนม", "ด้านซ้ายหน้าอก", "บนท้อง", "ที่คอ"], a: 0 },
+    { q: "ท่านอนของทารกตอนทำ CPR คือแบบไหน?", c: ["นอนหงายบนพื้นแข็ง", "นอนคว่ำ", "อุ้มตั้งขึ้น", "นอนตะแคง"], a: 0 },
+    { q: "ประเมินการตอบสนองของทารกทำอย่างไร?", c: ["เขย่าตัวแรงๆ", "ดีดฝ่าเท้าเบาๆ พร้อมเรียก ห้ามเขย่า", "จับหัวเขย่า", "ตบหน้า"], a: 1 },
+    { q: "ทำไมแนวทางล่าสุดจึงเลิกใช้เทคนิค \"2 นิ้ว\" กดหน้าอกทารก?", c: ["ใช้แรงเกินไป", "กดได้ไม่ลึกพอ", "ทำยากเกินไป", "ใช้เวลานานกว่า"], a: 1 },
+    { q: "ถ้ามือโอบรอบอกทารกด้วย 2 นิ้วโป้งไม่ถึง ใช้วิธีใดแทน?", c: ["ใช้กำปั้น", "ใช้ส้นมือข้างเดียว", "ใช้ฝ่ามือ 2 ข้าง", "งดกดหน้าอก"], a: 1 },
+    { q: "อัตราเร็วในการกดหน้าอกทารกเทียบกับผู้ใหญ่เป็นอย่างไร?", c: ["ช้ากว่าผู้ใหญ่มาก", "เท่ากับผู้ใหญ่ คือ 100-120 ครั้ง/นาที", "เร็วกว่าผู้ใหญ่เท่าตัว", "ไม่มีมาตรฐาน"], a: 1 },
+    { q: "การเป่าปากช่วยหายใจทารก ต้องครอบปากผู้ช่วยที่ส่วนไหนของทารก?", c: ["ปากอย่างเดียว", "จมูกอย่างเดียว", "ทั้งปากและจมูกพร้อมกัน", "ไม่ต้องเป่า"], a: 2 },
   ]},
   { id: 3, title: "บทที่ 3: สิ่งอุดกั้นทางเดินหายใจ ผู้ใหญ่", short: "Choking ผู้ใหญ่", desc: "วิธีช่วยเหลือผู้ใหญ่สำลัก แยกแยะอุดกั้นบางส่วนและสมบูรณ์", vid: "_nT-BcNoUzE", dur: 51, quiz: [
     { q: "การอุดกั้นบางส่วน สังเกตอย่างไร?", c: ["พูดไม่ออก หน้าเขียว", "ผู้ป่วยยังพูดได้ ไอเสียงดัง", "ใช้มือจับคอ", "หมดสติ"], a: 1 },
@@ -419,6 +442,10 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
     { q: "การอุดกั้นสมบูรณ์ ช่วยเหลืออย่างไร (แนวทาง 2025)?", c: ["กดท้อง Heimlich อย่างเดียว", "ตบหลัง 5 ครั้ง สลับกดท้อง 5 ครั้ง จนกว่าสิ่งอุดกั้นจะหลุด", "เป่าปากทันที", "ให้ดื่มน้ำ"], a: 1 },
     { q: "วิธี Heimlich Maneuver ตำแหน่งกดท้องอยู่ที่ไหน?", c: ["เหนือสะดือ ต่ำกว่ากระดูกหน้าอก", "กลางหน้าอก", "ที่สะดือพอดี", "ใต้สะดือ"], a: 0 },
     { q: "ถ้าผู้ป่วยสำลักจนหมดสติ ต้องทำอย่างไร?", c: ["ทำ Heimlich ต่อ", "วางลงบนพื้น เริ่มทำ CPR ทันที", "ให้ดื่มน้ำ", "นั่งรอรถพยาบาล"], a: 1 },
+    { q: "ก่อนเป่าปากช่วยหายใจหลังผู้ป่วยสำลักหมดสติ ควรทำอะไรก่อน?", c: ["เป่าเลยไม่ต้องดู", "เปิดปากดูก่อน เขี่ยออกเฉพาะของที่เห็นชัด", "ล้วงนิ้วกวาดในคอทันที", "ให้ดื่มน้ำล้างคอ"], a: 1 },
+    { q: "ทำไมจึงห้ามล้วงนิ้วกวาดในคอแบบมองไม่เห็น (blind sweep)?", c: ["เสียเวลาเปล่า", "อาจดันสิ่งอุดกั้นลึกลงไปกว่าเดิม", "ทำให้ผู้ป่วยเจ็บ", "ไม่มีเหตุผลพิเศษ"], a: 1 },
+    { q: "ทำไมการกดหน้าอก (CPR) จึงช่วยคนสำลักที่หมดสติได้ด้วย?", c: ["ไม่ได้ช่วยอะไรเรื่องสำลัก", "แรงกดหน้าอกช่วยดันสิ่งอุดกั้นออกได้ด้วย", "ทำให้ผู้ป่วยตื่นเร็วขึ้นเฉยๆ", "ต้องรอแพทย์เท่านั้น"], a: 1 },
+    { q: "คนท้องแก่หรืออ้วนมากที่ท้องโตจนโอบรอบเอวไม่ได้ ควรช่วยสำลักอย่างไร?", c: ["กดท้อง Heimlich แรงกว่าปกติ", "เปลี่ยนเป็นกดหน้าอก (Chest Thrust) ที่กระดูกอกส่วนล่างแทน", "งดช่วยเหลือ รอรถพยาบาลอย่างเดียว", "จับนอนคว่ำเคาะหลัง"], a: 1 },
   ]},
   { id: 4, title: "บทที่ 4: สิ่งอุดกั้นทางเดินหายใจ ทารก", short: "Choking ทารก", desc: "วิธีช่วยเหลือทารกสำลัก ตบหลังสลับกดหน้าอก", vid: "pCgxwQUzph0", dur: 32, quiz: [
     { q: "ถ้าทารกยังร้องได้ ไอเสียงดัง ควรทำอย่างไร?", c: ["ตบหลังทันที", "ปล่อยให้ไอเอาสิ่งอุดกั้นออกเอง ห้ามตบหลัง", "กดท้อง", "จับขาสะบัด"], a: 1 },
@@ -426,6 +453,9 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
     { q: "ตบหลังทารก ตบตรงไหน กี่ครั้ง?", c: ["กึ่งกลางกระดูกสะบักทั้ง 2 ข้าง จำนวน 5 ครั้ง", "ตบที่ศีรษะ 3 ครั้ง", "ตบที่ก้น 5 ครั้ง", "ตบที่ท้อง 5 ครั้ง"], a: 0 },
     { q: "หลังตบหลัง 5 ครั้ง ยังไม่ออก ทำอะไรต่อ?", c: ["ตบหลังต่อ", "พลิกหงาย กดหน้าอก 5 ครั้ง ใต้แนวราวนม", "ใช้นิ้วล้วงคอ", "เป่าปาก"], a: 1 },
     { q: "ข้อห้ามในการช่วยทารกสำลัก?", c: ["ห้ามตบหลัง", "ห้ามกดหน้าอก", "ห้ามจับขาสะบัด ห้ามกดท้องแบบผู้ใหญ่ ห้ามล้วงนิ้วเข้าปาก", "ห้ามเป่าปาก"], a: 2 },
+    { q: "ข้อห้ามข้อใดอันตรายที่สุดต่อคอและสมองทารก?", c: ["ห้ามตบหลังแรงเกินไป", "ห้ามจับขาสะบัดห้อยหัว", "ห้ามอุ้มตอนตบหลัง", "ห้ามเรียกชื่อทารก"], a: 1 },
+    { q: "ทำไมห้ามกดท้องแบบผู้ใหญ่ (Heimlich) กับทารก?", c: ["ทำได้ยากเกินไป", "เสี่ยงบาดเจ็บตับ/ม้ามของทารก", "ไม่มีผลอะไร", "ใช้เวลานานกว่า"], a: 1 },
+    { q: "ถ้าทารกยังไอเสียงดังหรือร้องได้อยู่ ควรทำอย่างไร?", c: ["ตบหลังทันที", "ปล่อยให้ไอเอาสิ่งอุดกั้นออกเอง ห้ามตบหลัง", "กดหน้าอกทันที", "ให้ดื่มน้ำ"], a: 1 },
   ]},
   { id: 5, title: "บทที่ 5: Megacode — CPR & AED ผู้ใหญ่", short: "CPR & AED ผู้ใหญ่", desc: "การใช้เครื่อง AED ร่วมกับ CPR และการช่วยจนรอด", vid: "dQ9TcHdhIr0", dur: 217, quiz: [
     { q: "ตำแหน่งแปะแผ่น AED ที่แนะนำคือ?", c: ["ทั้ง 2 แผ่นบนหน้าอก", "แผ่นแรกใต้ไหปลาร้าขวา แผ่นสองใต้ราวนมซ้ายแนวรักแร้", "แผ่นบนท้อง 2 แผ่น", "แผ่นบนหลัง 2 แผ่น"], a: 1 },
@@ -433,6 +463,11 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
     { q: "ก่อนกดปุ่ม Shock ต้องตะโกนว่าอะไร?", c: ["\"ถอยเลย!\"", "\"หลบออก!\"", "\"ฉันถอย คุณถอย ทุกคนถอย!\"", "\"ห้ามแตะ!\""], a: 2 },
     { q: "จะหยุดปั๊มหัวใจได้เมื่อไหร่?", c: ["เมื่อเหนื่อย", "ทีมฉุกเฉินมาถึง / ผู้ป่วยหายใจเอง / ผู้ป่วยรู้สึกตัว", "เมื่อครบ 5 นาที", "เมื่อ AED ช็อกแล้ว"], a: 1 },
     { q: "ถ้าผู้ป่วยหายใจเองแล้วแต่ยังไม่รู้สึกตัว ต้องทำอย่างไร?", c: ["ปิดเครื่อง AED แล้วรอ", "กด CPR ต่อ", "จัดท่านอนตะแคงกึ่งคว่ำ (Recovery Position) ดูการหายใจทุก 2 นาที", "ให้ดื่มน้ำ"], a: 2 },
+    { q: "ถ้าตัวผู้ป่วยเปียกน้ำ ก่อนแปะแผ่น AED ต้องทำอะไรก่อน?", c: ["แปะทับไปเลย รีบๆ", "เช็ดหน้าอกให้แห้งก่อน", "รอให้แห้งเองอย่างเดียว", "ไม่ต้องใช้ AED"], a: 1 },
+    { q: "ทำไมห้ามแปะแผ่น AED บนตัวที่เปียกน้ำ?", c: ["แผ่นจะหลุดง่าย", "ไฟฟ้าจะวิ่งบนผิวน้ำแทนที่จะผ่านหัวใจ ช็อกไม่ได้ผล", "ทำให้เครื่องพัง", "ไม่มีเหตุผลพิเศษ"], a: 1 },
+    { q: "หลังเครื่อง AED ช็อกแล้ว ต้องทำอะไรทันที?", c: ["รอดูอาการก่อน", "กดหน้าอกต่อทันที 2 นาที แล้วให้เครื่องวิเคราะห์ใหม่", "ปิดเครื่องพัก", "ช็อกซ้ำทันที"], a: 1 },
+    { q: "ระหว่างที่ AED กำลังวิเคราะห์จังหวะหัวใจ ต้องทำอะไร?", c: ["กดหน้าอกต่อไปเรื่อยๆ", "ห้ามสัมผัสตัวผู้ป่วยเด็ดขาด", "เป่าปากช่วยหายใจ", "จับชีพจร"], a: 1 },
+    { q: "ทำไมต้องย้ายผู้ป่วยจากขอบสระที่ลื่นไปพื้นแห้งก่อนเริ่มช่วย?", c: ["เพื่อความสวยงาม", "ขอบสระลื่นและอันตราย ต้องหาที่มั่นคงปลอดภัยก่อน", "ไม่มีเหตุผลพิเศษ", "เพื่อให้คนอื่นมองเห็นง่าย"], a: 1 },
   ]},
   { id: 6, title: "บทที่ 6: Megacode — CPR & AED ทารก/เด็ก", short: "CPR & AED ทารก/เด็ก", desc: "ขั้นตอนการช่วยเหลือและการใช้ AED สำหรับเด็กทารก", vid: "lCbImOmcrNA", dur: 119, quiz: [
     { q: "เวลากดหน้าอกทารก ควรกดลึกประมาณเท่าไหร่?", c: ["1 เซนติเมตร", "4 เซนติเมตร", "6 เซนติเมตร", "8 เซนติเมตร"], a: 1 },
@@ -440,6 +475,10 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
     { q: "ตำแหน่งในการติดแผ่น AED สำหรับทารก ที่ดีที่สุดคือข้อใด?", c: ["ติดที่หน้าอกด้านซ้ายและขวา", "ติดที่หน้าอกด้านหน้าและแผ่นหลัง", "ติดที่หน้าผากและท้อง", "ติดที่ท้องและหลัง"], a: 1 },
     { q: "ก่อนกดปุ่มช็อก (Shock) ด้วยเครื่อง AED ต้องทำอะไรก่อน?", c: ["ตรวจดูชีพจร", "เป่าลมเพิ่ม 1 ครั้ง", "บอกให้ทุกคนถอยห่างจากตัวเด็ก", "ถอดแผ่น AED ออกก่อน"], a: 2 },
     { q: "ถ้าไม่มีแผ่น AED สำหรับเด็ก ควรทำอย่างไร?", c: ["ไม่ต้องช็อก", "ใช้แผ่นผู้ใหญ่ แต่ต้องแน่ใจว่าแผ่นไม่แตะกัน", "รอให้มีคนเอาอุปกรณ์สำหรับเด็กมา", "กด CPR อย่างเดียว ไม่ต้องใช้ AED"], a: 1 },
+    { q: "ถ้ามีแผ่น AED สำหรับเด็กโดยเฉพาะ ควรใช้แผ่นไหน?", c: ["ใช้แผ่นผู้ใหญ่ดีกว่าเสมอ", "ใช้แผ่นเด็กโดยเฉพาะ", "ใช้แผ่นไหนก็ได้ไม่ต่างกัน", "ไม่ต้องใช้แผ่นเลย"], a: 1 },
+    { q: "เด็กจมน้ำ ก่อนเริ่มกดหน้าอกควรทำอะไรก่อน (ต่างจากผู้ใหญ่ที่หัวใจหยุดเต้นเฉยๆ)?", c: ["กดหน้าอกเลยไม่ต้องเป่า", "เป่าปากช่วยหายใจ 2 ครั้งก่อน เพราะเป็นภาวะขาดออกซิเจน", "รอให้น้ำไหลออกจากปอดก่อน", "จับพลิกคว่ำเขย่า"], a: 1 },
+    { q: "เด็กจมน้ำแม้ฟื้นและหายใจเองแล้ว ต้องทำอย่างไรต่อ?", c: ["ปล่อยกลับไปเล่นต่อได้เลย", "ต้องไปตรวจโรงพยาบาลทุกราย เพราะภาวะแทรกซ้อนทางปอดอาจเกิดตามหลัง", "ให้นอนพักที่บ้าน", "ให้ดื่มน้ำอุ่นเยอะๆ"], a: 1 },
+    { q: "อัตราส่วนกด:เป่า สำหรับเด็ก เมื่อมีผู้ช่วยเหลือ 2 คน?", c: ["30:2", "15:2", "10:1", "5:1"], a: 1 },
   ]},
   { id: 7, title: "แบบทดสอบสุดท้าย", short: "Final Exam", desc: "ทดสอบความรู้ทั้งหมด 6 บท ต้องได้ 80% ขึ้นไปจึงผ่าน", vid: null, dur: null, quiz: [
     { q: "ขั้นตอนแรกเมื่อพบผู้หมดสติคืออะไร?", c: ["ทำ CPR ทันที", "โทร 1669", "ประเมินความปลอดภัยที่เกิดเหตุ (Scene Safety)", "ใช้ AED"], a: 2 },
@@ -452,6 +491,18 @@ const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 
     { q: "ห้ามทำอะไรกับทารกที่สำลัก?", c: ["ห้ามตบหลัง", "ห้ามกดท้อง ห้ามจับขาสะบัด", "ห้ามกดหน้าอก", "ห้ามเป่าปาก"], a: 1 },
     { q: "ก่อนกด Shock ต้องตะโกนว่าอะไร?", c: ["\"ถอยเลย!\"", "\"ฉันถอย คุณถอย ทุกคนถอย!\"", "\"หลบออก!\"", "\"ห้ามแตะ!\""], a: 1 },
     { q: "จะหยุดปั๊มหัวใจเมื่อไหร่?", c: ["เมื่อเหนื่อย", "เมื่อครบ 5 นาที", "ทีมฉุกเฉินมาถึง / ผู้ป่วยหายใจเอง / ผู้ป่วยรู้สึกตัว", "เมื่อ AED ช็อกแล้ว"], a: 2 },
+    { q: "ความลึกกดหน้าอกทารก?", c: ["1 ซม.", "ประมาณ 4 ซม. (1/3 ของความหนาหน้าอก)", "6 ซม.", "8 ซม."], a: 1 },
+    { q: "ตำแหน่งกดหน้าอกทารกอยู่ที่ไหน?", c: ["กึ่งกลางหน้าอก ใต้แนวราวนม", "ด้านซ้ายหน้าอก", "บนท้อง", "ที่คอ"], a: 0 },
+    { q: "อัตราส่วนกด:เป่า ทารก ผู้ช่วยเหลือ 2 คน?", c: ["30:2", "15:2", "30:1", "10:2"], a: 1 },
+    { q: "ท่าตบหลังทารกที่ถูกต้องคือแบบไหน?", c: ["อุ้มตั้งขึ้น", "คว่ำหน้าบนแขน ศีรษะต่ำกว่าลำตัว", "วางนอนหงายบนพื้น", "จับตั้งศีรษะขึ้น"], a: 1 },
+    { q: "ข้อห้ามที่อันตรายที่สุดกับทารกสำลัก?", c: ["ห้ามตบหลัง", "ห้ามจับขาสะบัดห้อยหัว", "ห้ามอุ้ม", "ห้ามเรียกชื่อ"], a: 1 },
+    { q: "ตำแหน่งแปะแผ่น AED ผู้ใหญ่ที่ถูกต้อง?", c: ["ทั้ง 2 แผ่นบนหน้าอก", "แผ่นแรกใต้ไหปลาร้าขวา แผ่นสองใต้ราวนมซ้ายแนวรักแร้", "แผ่นบนท้อง 2 แผ่น", "แผ่นบนหลัง 2 แผ่น"], a: 1 },
+    { q: "ถ้าไม่มีแผ่น AED สำหรับเด็ก ควรทำอย่างไร?", c: ["ไม่ต้องช็อก", "ใช้แผ่นผู้ใหญ่ แต่ต้องแน่ใจว่าแผ่นไม่แตะกัน", "รอให้มีอุปกรณ์เด็กมาก่อน", "กด CPR อย่างเดียว"], a: 1 },
+    { q: "เด็กจมน้ำ ก่อนกดหน้าอกควรทำอะไรก่อน?", c: ["เป่าปากช่วยหายใจ 2 ครั้งก่อน", "กดหน้าอกอย่างเดียว", "รอน้ำไหลออกจากปอดก่อน", "จับพลิกคว่ำเขย่า"], a: 0 },
+    { q: "คนท้องแก่ที่ท้องโตจนโอบรอบเอวไม่ได้ สำลักขั้นรุนแรง ควรช่วยอย่างไร?", c: ["กดท้อง Heimlich แรงกว่าปกติ", "เปลี่ยนเป็นกดหน้าอก (Chest Thrust) ที่กระดูกอกส่วนล่างแทน", "งดช่วยเหลือ รอรถพยาบาล", "จับนอนคว่ำเคาะหลังแรงๆ"], a: 1 },
+    { q: "ก่อนเป่าปากช่วยหายใจหลังผู้ป่วยสำลักหมดสติ ควรทำอะไรก่อน?", c: ["เป่าเลยไม่ต้องดู", "เปิดปากดูก่อน เขี่ยออกเฉพาะของที่เห็นชัด", "ล้วงนิ้วกวาดในคอทันที", "ให้ดื่มน้ำล้างคอ"], a: 1 },
+    { q: "ถ้าไม่มั่นใจเรื่องการเป่าปาก สามารถทำอะไรแทนได้?", c: ["ไม่ต้องช่วยเลย", "กดหน้าอกอย่างเดียวต่อเนื่อง (Hands-only CPR)", "รอรถพยาบาลอย่างเดียว", "เป่าจมูกแทน"], a: 1 },
+    { q: "ควรสลับคนกดหน้าอกทุกกี่นาที?", c: ["ทุก 30 วินาที", "ทุก 2 นาที", "ทุก 10 นาที", "ไม่ต้องสลับ"], a: 1 },
   ]},
 ]};
 
@@ -1808,7 +1859,8 @@ const ENCOURAGE = ["","เยี่ยมมาก! รู้เรื่อง 
 
 // ==================== COURSE ====================
 function Course({ go, progress, setProgress, user, openBlog }) {
-  const [active, setActive] = useState(null); const [quiz, setQuiz] = useState(false); const [ans, setAns] = useState({}); const [result, setResult] = useState(null); const [watched, setWatched] = useState(false); const [reviewMode, setReviewMode] = useState(false); const [timer, setTimer] = useState(0); const [canWatch, setCanWatch] = useState(false); const [mustRewatch, setMustRewatch] = useState(false);
+  const [active, setActive] = useState(null); const [quiz, setQuiz] = useState(false); const [ans, setAns] = useState({}); const [result, setResult] = useState(null); const [watched, setWatched] = useState(false); const [reviewMode, setReviewMode] = useState(false); const [timer, setTimer] = useState(0); const [canWatch, setCanWatch] = useState(false); const [mustRewatch, setMustRewatch] = useState(false); const [drawnQuiz, setDrawnQuiz] = useState(null);
+  const beginQuiz = (mod) => { setDrawnQuiz(drawQuiz(mod)); setAns({}); setResult(null); setQuiz(true); };
   const timerRef = useRef(null);
   const purchased = getPurchased();
   const hasMod = (id) => isModuleAccessible(id, purchased);
@@ -1841,7 +1893,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
   useEffect(() => { if (active && !reviewMode && !done(active)) { const mod = COURSE.modules.find(m => m.id === active); if (mod && mod.dur) { const target = Math.floor(mod.dur * 0.9); setTimer(target); setCanWatch(false); timerRef.current = setInterval(() => { setTimer(prev => { if (prev <= 1) { clearInterval(timerRef.current); setCanWatch(true); return 0; } return prev - 1; }); }, 1000); } } return () => { if (timerRef.current) clearInterval(timerRef.current); }; }, [active, reviewMode, mustRewatch]);
 
   const submitQuiz = () => {
-    const mod = COURSE.modules.find(m => m.id === active); let correct = 0; mod.quiz.forEach((q, i) => { if (ans[i] === q.a) correct++; }); const score = Math.round((correct / mod.quiz.length) * 100); const passed = score >= 80; setResult({ score, correct, total: mod.quiz.length, passed });
+    const mod = COURSE.modules.find(m => m.id === active); const qz = drawnQuiz || mod.quiz; let correct = 0; qz.forEach((q, i) => { if (ans[i] === q.a) correct++; }); const score = Math.round((correct / qz.length) * 100); const passed = score >= 80; setResult({ score, correct, total: qz.length, passed });
     if (passed && !progress.done.includes(active)) { const np = { ...progress, done: [...progress.done, active], scores: { ...progress.scores, [active]: score } }; setProgress(np); save("progress", np); syncProgressRemote(np);
       // เก็บคะแนนรายบทลง online_students ตรงๆ (ไม่ผ่าน course_progress) เพื่อให้พนักงานดูคะแนนย่อยได้
       // แม้ผู้เรียนจะลงทะเบียนแบบชื่อ+เบอร์โทรอย่างเดียว ไม่ได้ล็อกอินผ่าน LINE/Google/Email OTP จริง
@@ -1862,7 +1914,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
       }
     }
   };
-  const resetLesson = () => { setActive(null); setQuiz(false); setAns({}); setResult(null); setWatched(false); setReviewMode(false); setMustRewatch(false); setCanWatch(false); setTimer(0); if (timerRef.current) clearInterval(timerRef.current); };
+  const resetLesson = () => { setActive(null); setQuiz(false); setAns({}); setResult(null); setWatched(false); setReviewMode(false); setMustRewatch(false); setCanWatch(false); setTimer(0); setDrawnQuiz(null); if (timerRef.current) clearInterval(timerRef.current); };
   const formatTime = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   if (active) {
@@ -1889,25 +1941,25 @@ function Course({ go, progress, setProgress, user, openBlog }) {
             <div style={{ background: `${B.red}08`, borderRadius: 12, padding: 16, marginBottom: 12, textAlign: "center", border: `1px solid ${B.red}20` }}>
               <I name="warn" size={24} color={B.red}/><div style={{ color: B.red, fontSize: 14, fontWeight: 600, marginTop: 8 }}>สอบไม่ผ่าน — กรุณาดูวิดีโอใหม่ก่อนสอบอีกครั้ง</div>
             </div>
-            {!canWatch ? (<div style={{ textAlign: "center", color: B.dkGray, fontSize: 13 }}>รอดูวิดีโอ... เหลือ {formatTime(timer)}</div>) : (<button onClick={() => { setMustRewatch(false); setWatched(true); setQuiz(true); setAns({}); setResult(null); }} style={css.btn(B.red, B.white, true)}>ดูจบแล้ว → ทำแบบทดสอบอีกครั้ง</button>)}
+            {!canWatch ? (<div style={{ textAlign: "center", color: B.dkGray, fontSize: 13 }}>รอดูวิดีโอ... เหลือ {formatTime(timer)}</div>) : (<button onClick={() => { setMustRewatch(false); setWatched(true); beginQuiz(mod); }} style={css.btn(B.red, B.white, true)}>ดูจบแล้ว → ทำแบบทดสอบอีกครั้ง</button>)}
           </>) : reviewMode ? (<button onClick={resetLesson} style={css.btn(B.black, B.white, true)}>← กลับหน้าบทเรียน</button>
           ) : alreadyDone ? (<><div style={{ background: `${B.green}15`, borderRadius: 12, padding: 16, marginBottom: 12, textAlign: "center" }}><div style={{ color: B.green, fontSize: 14, fontWeight: 600 }}>✓ ผ่านบทนี้แล้ว ({progress.scores[mod.id]}%)</div></div><button onClick={resetLesson} style={css.btn(B.black, B.white, true)}>← กลับ</button></>
           ) : !canWatch ? (<div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 16, textAlign: "center" }}><div style={{ fontSize: 13, color: B.dkGray }}>กรุณาดูวิดีโอก่อน</div><div style={{ fontSize: 20, fontWeight: 700, color: B.gold, marginTop: 4 }}>{formatTime(timer)}</div></div>
           ) : !watched ? (<button onClick={() => setWatched(true)} style={css.btn(B.green, B.white, true)}>ดูวิดีโอจบแล้ว ✓</button>
-          ) : (<button onClick={() => setQuiz(true)} style={css.btn(B.red, B.white, true)}>ทำแบบทดสอบ →</button>)}
-        </>) : (
-          <div style={css.card}><h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>{isFinal ? "แบบทดสอบสุดท้าย" : "แบบทดสอบท้ายบท"}</h3><p style={{ fontSize: 12, color: B.dkGray, margin: "0 0 20px" }}>ต้องได้ 80% ขึ้นไป ({Math.ceil(mod.quiz.length * 0.8)}/{mod.quiz.length} ข้อ)</p>
-            {mod.quiz.map((q, qi) => (<div key={qi} style={{ marginBottom: 22 }}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{qi + 1}. {q.q}</div>{q.c.map((c, ci) => { let bg = B.gray, border = "transparent"; if (result) { if (ci === q.a) { bg = `${B.green}18`; border = B.green; } else if (ans[qi] === ci) { bg = `${B.red}12`; border = B.red; } } else if (ans[qi] === ci) { bg = `${B.red}10`; border = B.red; } return <button key={ci} onClick={() => !result && setAns({...ans, [qi]: ci})} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", marginBottom: 5, background: bg, border: `2px solid ${border}`, borderRadius: 8, fontSize: 13, cursor: result ? "default" : "pointer" }}>{c}</button>; })}</div>))}
-            {!result ? <button onClick={submitQuiz} disabled={Object.keys(ans).length < mod.quiz.length} style={css.btn(Object.keys(ans).length >= mod.quiz.length ? B.red : B.ltGray, Object.keys(ans).length >= mod.quiz.length ? B.white : B.dkGray, true)}>ส่งคำตอบ</button>
+          ) : (<button onClick={() => beginQuiz(mod)} style={css.btn(B.red, B.white, true)}>ทำแบบทดสอบ →</button>)}
+        </>) : (() => { const qz = drawnQuiz || mod.quiz; return (
+          <div style={css.card}><h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>{isFinal ? "แบบทดสอบสุดท้าย" : "แบบทดสอบท้ายบท"}</h3><p style={{ fontSize: 12, color: B.dkGray, margin: "0 0 20px" }}>ต้องได้ 80% ขึ้นไป ({Math.ceil(qz.length * 0.8)}/{qz.length} ข้อ)</p>
+            {qz.map((q, qi) => (<div key={qi} style={{ marginBottom: 22 }}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{qi + 1}. {q.q}</div>{q.c.map((c, ci) => { let bg = B.gray, border = "transparent"; if (result) { if (ci === q.a) { bg = `${B.green}18`; border = B.green; } else if (ans[qi] === ci) { bg = `${B.red}12`; border = B.red; } } else if (ans[qi] === ci) { bg = `${B.red}10`; border = B.red; } return <button key={ci} onClick={() => !result && setAns({...ans, [qi]: ci})} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", marginBottom: 5, background: bg, border: `2px solid ${border}`, borderRadius: 8, fontSize: 13, cursor: result ? "default" : "pointer" }}>{c}</button>; })}</div>))}
+            {!result ? <button onClick={submitQuiz} disabled={Object.keys(ans).length < qz.length} style={css.btn(Object.keys(ans).length >= qz.length ? B.red : B.ltGray, Object.keys(ans).length >= qz.length ? B.white : B.dkGray, true)}>ส่งคำตอบ</button>
             : <div style={{ textAlign: "center" }}><div style={{ background: result.passed ? `${B.green}12` : `${B.red}08`, borderRadius: 12, padding: 20, marginBottom: 16 }}><div style={{ fontSize: 40, fontWeight: 800, color: result.passed ? B.green : B.red }}>{result.score}%</div><div style={{ fontSize: 14, fontWeight: 600, color: result.passed ? B.green : B.red }}>{result.passed ? "ผ่าน!" : "ไม่ผ่าน"}</div><div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>ตอบถูก {result.correct}/{result.total} ข้อ</div></div>
               {result.passed && !isFinal && <div style={{ background: `${B.green}08`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.green}20` }}><div style={{ fontSize: 14, fontWeight: 600, color: B.green, textAlign: "center" }}>{ENCOURAGE[mod.id] || "เยี่ยมมาก! ไปต่อได้เลย"}</div></div>}
               {!result.passed && <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 12, textAlign: "center" }}>ไม่เป็นไร ทบทวนวิดีโออีกครั้ง แล้วสอบใหม่ได้เลย</div>}
               {result.passed ? (<button onClick={() => { const gate = gateOn && mod.id === 1 && !isFinal && !signedUp; resetLesson(); if (isFinal) go("register"); else if (gate) go("signupgate"); }} style={css.btn(B.green, B.white)}>{isFinal ? "ลงทะเบียนรับใบประกาศนียบัตร →" : (gateOn && mod.id === 1 && !signedUp ? "สมัครเพื่อรับใบผ่าน + เรียนต่อ →" : "กลับหน้าบทเรียน →")}</button>)
               : mod.vid ? (<button onClick={() => { setQuiz(false); setResult(null); setAns({}); setWatched(false); setMustRewatch(true); setCanWatch(false); setTimer(Math.floor(mod.dur * 0.9)); }} style={css.btn(B.red, B.white)}>← กลับดูวิดีโอใหม่แล้วสอบอีกครั้ง</button>)
-              : (<button onClick={() => { setAns({}); setResult(null); }} style={css.btn(B.red, B.white)}>ทำใหม่</button>)}
+              : (<button onClick={() => beginQuiz(mod)} style={css.btn(B.red, B.white)}>ทำใหม่</button>)}
             </div>}
           </div>
-        )}
+        ); })()}
       </div></div>);
   }
 
@@ -1937,12 +1989,12 @@ function Course({ go, progress, setProgress, user, openBlog }) {
         <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🚨</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>เกม CPR HERO — ลองของจริง!</div>
-          <div style={{ fontSize: 11, opacity: .8, marginTop: 2 }}>จำลอง 6 สถานการณ์ตามบทเรียน • เล่นฟรี</div>
+          <div style={{ fontSize: 11, opacity: .8, marginTop: 2 }}>จำลอง 8 สถานการณ์ตามบทเรียน • เล่นฟรี</div>
         </div>
         <span style={{ fontSize: 11, fontWeight: 800, color: "#F2C14E" }}>เล่นเลย →</span>
       </button>
       {doneCount > 0 && remaining > 0 && <div style={{ background: `${B.gold}10`, borderRadius: 12, padding: "12px 16px", marginBottom: 12, border: `1px solid ${B.gold}30`, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 600, color: "#B45309" }}>{cheer}</div><div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: 11, color: "#B45309", opacity: .8, marginTop: 4 }}><I name="cert" size={12} color={B.gold}/><span>อีก {remaining} บท จะจบและรับใบประกาศ</span></div></div>}
-      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } setActive(m.id); if (fin) setQuiz(true); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${m.quiz.length} คำถาม` : `${m.quiz.length} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
@@ -4051,7 +4103,7 @@ export default function App() {
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
-          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")}/>;
+          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)}/>;
           default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
         }
       })()}
