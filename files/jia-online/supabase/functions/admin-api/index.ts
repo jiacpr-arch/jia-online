@@ -26,8 +26,15 @@ const ALLOW = new Set<string>([
   "online_students", "online_purchases", "customers", "bookings",
   "sales_tracking", "lead_promo_codes", "lead_capture_events", "promo_codes",
   "jiaroo_leads", "jiaroo_lead_events", "jiaroo_messages", "jiaroo_team",
+  "game_character_images",
 ]);
 const METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
+
+// อัปโหลดรูปตัวละครเกม CPR HERO — จำกัด bucket เดียว + path ตาม charId/pose เท่านั้น
+const CHAR_BUCKET = "game-characters";
+const CHAR_IDS = new Set(["aunt_kaew", "helper_oat", "guard_dam", "dispatcher_prom"]);
+const POSE_RE = /^(idle|talk|panic|stern|happy)(_talk)?-\d{10,16}\.(webp|png)$/;
+const MAX_UPLOAD_B64 = 3_000_000; // ~2.2MB ไฟล์จริง — รูป sprite ควรเล็กกว่านี้มาก
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -62,6 +69,41 @@ Deno.serve(async (req: Request) => {
 
   const { table, method = "GET", filters = "", body = null } = payload || {};
   if (table === "__ping") return json({ ok: true }); // ผ่านการตรวจรหัสแล้ว
+
+  // อัปโหลดรูปตัวละครเกมขึ้น storage (service key ฝั่ง server — bucket ไม่เปิด anon write)
+  // payload: { storage_upload: { charId, file, base64, contentType } }
+  //   file = ชื่อไฟล์ เช่น "panic-1760000000000.webp" (ต้อง match POSE_RE)
+  if (payload?.storage_upload) {
+    const { charId, file, base64, contentType } = payload.storage_upload || {};
+    if (!CHAR_IDS.has(String(charId))) return json({ error: "unknown charId" }, 400);
+    if (typeof file !== "string" || !POSE_RE.test(file)) return json({ error: "bad file name" }, 400);
+    if (typeof base64 !== "string" || !base64 || base64.length > MAX_UPLOAD_B64) {
+      return json({ error: "bad or oversized file" }, 400);
+    }
+    const ct = contentType === "image/png" ? "image/png" : "image/webp";
+    let bytes: Uint8Array;
+    try {
+      const bin = atob(base64);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } catch { return json({ error: "bad base64" }, 400); }
+    const path = `${charId}/${file}`;
+    const up = await fetch(`${SUPABASE_URL}/storage/v1/object/${CHAR_BUCKET}/${path}`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "Content-Type": ct,
+        "x-upsert": "true",
+      },
+      body: bytes,
+    });
+    if (!up.ok) {
+      const detail = (await up.text()).slice(0, 200);
+      return json({ error: "upload failed", detail }, 502);
+    }
+    return json({ ok: true, url: `${SUPABASE_URL}/storage/v1/object/public/${CHAR_BUCKET}/${path}` });
+  }
 
   if (typeof table !== "string" || !ALLOW.has(table)) return json({ error: "table not allowed" }, 403);
   const m = String(method).toUpperCase();

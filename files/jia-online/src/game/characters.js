@@ -177,7 +177,16 @@ export function getCharacter(charId) {
   };
 }
 
-// URL รูปจริง — วางไฟล์ที่ public/images/characters/{charId}/{pose}.webp เมื่อมีภาพวาดจริง
+// รูป override ที่แอดมินอัปโหลดผ่านหน้า /admin (ตาราง game_character_images ใน Supabase)
+// key = `${charId}/${pose}` (pose มี suffix _talk สำหรับเฟรมปากอ้า) → URL บน storage
+let customImages = {};
+export function registerCustomImages(map) {
+  customImages = map || {};
+}
+
+// URL รูปจริง — ลำดับ: รูปที่แอดมินอัปโหลด > ไฟล์ใน public/images/characters/ > SVG placeholder
 export function characterImageUrl(charId, pose, talking = false) {
+  const key = `${charId}/${pose}${talking ? '_talk' : ''}`;
+  if (customImages[key]) return customImages[key];
   return `/images/characters/${charId}/${pose}${talking ? '_talk' : ''}.webp`;
 }
