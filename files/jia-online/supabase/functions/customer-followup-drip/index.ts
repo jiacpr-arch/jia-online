@@ -45,12 +45,18 @@ function couponLine(code: string | null) {
   return code ? `🎁 คูปองส่วนลด ฿100 คอร์สภาคปฏิบัติ on-site (โค้ด ${code})`
               : `🎁 มีคูปองส่วนลด ฿100 คอร์สภาคปฏิบัติ on-site (พิมพ์ขอรับโค้ดได้เลย)`;
 }
-const MSG: Record<string, (name: string, code: string | null) => string> = {
+// paid = นักเรียน pre-course (จ่ายค่าคอร์ส on-site แล้ว) — ข้อความต้องไม่พูดถึงคูปอง/ส่วนลด
+// ไม่งั้นนักเรียนเข้าใจว่ามีส่วนลดค้างอยู่แล้วมาขอเงินคืน
+const MSG: Record<string, (name: string, code: string | null, paid?: boolean) => string> = {
   unpaid_d0: (n, c) => `สวัสดีคุณ ${n} 🎉\nยินดีด้วยที่จบคอร์ส CPR & AED ออนไลน์! 🏆\n\nทฤษฎีแน่นแล้ว เหลือ "ลงมือจริง" กับหุ่นให้มั่นใจ 💪\n${couponLine(c)}\n\nสนใจรอบไหน พิมพ์ตอบกลับได้เลย เดี๋ยวจัดให้ครับ\n${FOOTER}`,
   unpaid_d3: (n, c) => `คุณ ${n} ครับ 🚑\nงานวิจัยบอกว่าคนที่ "ฝึกกับหุ่นจริง" ช่วยชีวิตได้มั่นใจกว่าหลายเท่า\n\nคอร์ส on-site ใช้เวลาแค่ครึ่งวัน ได้ใบเซอร์ภาคปฏิบัติ + ฝึกใช้ AED จริง\n${couponLine(c)}\nอยากได้รอบเสาร์/อาทิตย์ บอกได้นะครับ\n${FOOTER}`,
   unpaid_d7: (n, c) => `คุณ ${n} 😊 ${couponLine(c)} ยังใช้ได้อยู่นะครับ\nถ้ามีคำถามเรื่องวันเวลา/สถานที่/ราคา พิมพ์ถามได้เลย ยินดีช่วยเลือกให้ครับ\n${FOOTER}`,
-  stuck_d2: (n) => `คุณ ${n} 👋 เห็นว่าเรียน CPR ออนไลน์ค้างไว้นิดเดียวเอง!\nเหลืออีกไม่กี่บทก็ได้ใบประกาศ + คูปองส่วนลดแล้วนะครับ\n👉 เรียนต่อ: cpr.morroo.com\n${FOOTER}`,
-  stuck_d5: (n) => `คุณ ${n} 💪 ทักษะ CPR ช่วยชีวิตคนใกล้ตัวได้จริง อย่าเพิ่งหยุดกลางทางนะครับ\nเรียนจบรับใบประกาศ + คูปอง on-site ฿100 ฟรีๆ\n👉 cpr.morroo.com\n${FOOTER}`,
+  stuck_d2: (n, _c, paid) => paid
+    ? `คุณ ${n} 👋 เห็นว่าเรียนทฤษฎี CPR ออนไลน์ค้างไว้นิดเดียวเอง!\nเรียนให้จบก่อนวันอบรม จะได้เต็มที่กับการฝึกภาคปฏิบัติครับ\n👉 เรียนต่อ: cpr.morroo.com\n${FOOTER}`
+    : `คุณ ${n} 👋 เห็นว่าเรียน CPR ออนไลน์ค้างไว้นิดเดียวเอง!\nเหลืออีกไม่กี่บทก็ได้ใบประกาศ + คูปองส่วนลดแล้วนะครับ\n👉 เรียนต่อ: cpr.morroo.com\n${FOOTER}`,
+  stuck_d5: (n, _c, paid) => paid
+    ? `คุณ ${n} 💪 ทักษะ CPR ช่วยชีวิตคนใกล้ตัวได้จริง อย่าเพิ่งหยุดกลางทางนะครับ\nเรียนทฤษฎีให้จบก่อนวันเข้าคลาส แล้วพบกันในวันอบรมครับ\n👉 cpr.morroo.com\n${FOOTER}`
+    : `คุณ ${n} 💪 ทักษะ CPR ช่วยชีวิตคนใกล้ตัวได้จริง อย่าเพิ่งหยุดกลางทางนะครับ\nเรียนจบรับใบประกาศ + คูปอง on-site ฿100 ฟรีๆ\n👉 cpr.morroo.com\n${FOOTER}`,
 };
 
 // เลือกสเต็ปตามจำนวนวัน (มีกรอบเวลา กัน backlog ถ้าผูก LINE ช้า)
@@ -69,7 +75,7 @@ function stuckStep(days: number): string | null {
 async function enqueueDrip(preview: boolean) {
   const now = Date.now();
   const [studentsRes, custRes, bookingsRes, existingRes] = await Promise.all([
-    supa.from("online_students").select("customer_id,name,status,completed_at,registered_at,coupon_code").limit(10000),
+    supa.from("online_students").select("customer_id,name,status,completed_at,registered_at,coupon_code,pre_course").limit(10000),
     supa.from("customers").select("id,name,line_user_id").not("line_user_id", "is", null).limit(10000),
     supa.from("bookings").select("customer_id").not("customer_id", "is", null).limit(10000),
     supa.from("line_broadcasts").select("customer_id,type").limit(100000),
@@ -85,8 +91,10 @@ async function enqueueDrip(preview: boolean) {
     if (!cust) continue; // ส่งเฉพาะคนที่ผูก LINE แล้ว
     const name = s.name || cust.name || "";
     const status = s.status || "";
+    const preCourse = !!s.pre_course; // จ่ายค่าคอร์ส on-site แล้ว — ห้ามส่งข้อความขาย/คูปอง
     let type: string | null = null;
     if (status.startsWith("จบคอร์ส") && s.completed_at && !booked.has(s.customer_id)) {
+      if (preCourse) continue; // จบทฤษฎีแล้ว รอเข้าคลาสที่จองไว้ — ไม่ต้องตามขาย on-site
       type = unpaidStep(Math.floor((now - new Date(s.completed_at).getTime()) / DAY));
     } else if (status === "กำลังเรียน" && s.registered_at) {
       type = stuckStep(Math.floor((now - new Date(s.registered_at).getTime()) / DAY));
@@ -96,7 +104,7 @@ async function enqueueDrip(preview: boolean) {
     already.add(`${s.customer_id}|${type}`); // กันซ้ำในรอบเดียวกัน
     toInsert.push({
       customer_id: s.customer_id, line_user_id: cust.line_user_id, type,
-      message_text: MSG[type](name, s.coupon_code || null),
+      message_text: MSG[type](name, s.coupon_code || null, preCourse),
       scheduled_at: new Date().toISOString(), status: "pending",
     });
   }
