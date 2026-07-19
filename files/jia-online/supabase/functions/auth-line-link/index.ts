@@ -54,6 +54,8 @@ Deno.serve(async (req: Request) => {
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
 
   const { id_token, phone, pdpa, display_name, utm, landing_url, local_progress, gate_variant } = body;
+  // นักเรียน pre-course (redeem โค้ด pre_course มา — จ่ายค่าคอร์ส on-site แล้ว): ไม่ออกคูปอง ฿100
+  const preCourse = body.pre_course === true;
   if (!id_token) return json({ error: "missing id_token" }, 400);
   if (!pdpa) return json({ error: "pdpa consent required" }, 400);
 
@@ -126,12 +128,15 @@ Deno.serve(async (req: Request) => {
   const { data: stu } = await supa.from("online_students").select("id").eq("customer_id", customerId).limit(1);
   if (!Array.isArray(stu) || stu.length === 0) {
     await supa.from("online_students").insert({
-      customer_id: customerId, name: name, phone: cleanPhone, status: "กำลังเรียน",
+      customer_id: customerId, name: name, phone: cleanPhone, status: "กำลังเรียน", pre_course: preCourse,
     });
+  } else if (preCourse) {
+    await supa.from("online_students").update({ pre_course: true }).eq("customer_id", customerId);
   }
 
-  // 5) ยิงข้อความต้อนรับ + คูปอง ฿100 เข้าแชต LINE ทุกครั้งที่สมัครสำเร็จ (ด่านอยู่ก่อนเรียน)
-  const push = await runSignupPush({ line_user_id: lineUserId, name });
+  // 5) ยิงข้อความต้อนรับเข้าแชต LINE ทุกครั้งที่สมัครสำเร็จ (ด่านอยู่ก่อนเรียน)
+  //    lead ทั่วไปแนบคูปอง ฿100 — นักเรียน pre-course ได้ข้อความต้อนรับอย่างเดียว (จ่ายเงินแล้ว)
+  const push = await runSignupPush({ line_user_id: lineUserId, name, pre_course: preCourse });
   const coupon: string | null = (push as any)?.coupon || null;
 
   return json({ ok: true, customer_id: customerId, line_user_id: lineUserId, name, progress: merged, coupon });

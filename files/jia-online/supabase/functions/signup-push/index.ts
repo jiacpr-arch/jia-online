@@ -41,10 +41,39 @@ const genCoupon = () => {
   return r;
 };
 
+async function pushLine(to: string, text: string) {
+  const token = await loadToken();
+  if (!token) return { ok: false, error: "no LINE token" };
+  try {
+    const r = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+    });
+    // 403 = ลูกค้ายังไม่ได้แอดเพื่อน — ไม่ถือว่า error ที่ต้อง block (drip จะตามทีหลัง)
+    if (!r.ok) return { ok: false, status: r.status, detail: (await r.text()).slice(0, 160) };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e).slice(0, 160) };
+  }
+}
+
 // แยกเป็นฟังก์ชันเพื่อให้ auth-line-link import มาเรียกตรงได้ (ไม่ต้อง http รอบสอง)
-export async function runSignupPush(opts: { line_user_id: string; name?: string; dry_run?: boolean }) {
+// pre_course = นักเรียนที่จ่ายค่าคอร์ส on-site เต็มราคาแล้ว มาเรียนออนไลน์ก่อนเข้าคลาส
+// → ห้ามออก/ส่งคูปอง ฿100 (เคยส่งให้ทุกคน ทำให้นักเรียนกลุ่มนี้ทวงส่วนลด/ขอเงินคืน)
+export async function runSignupPush(opts: { line_user_id: string; name?: string; dry_run?: boolean; pre_course?: boolean }) {
   const { line_user_id, name } = opts;
   if (!line_user_id) return { ok: false, error: "missing line_user_id" };
+
+  if (opts.pre_course) {
+    const text =
+      `🎉 ยินดีต้อนรับ${name ? " คุณ" + name : ""}! ผูกบัญชีคอร์ส CPR & AED ออนไลน์เรียบร้อย\n\n` +
+      `เรียนทฤษฎีออนไลน์ให้จบก่อนวันอบรม แล้วพบกันในคลาสภาคปฏิบัติครับ 💙\n` +
+      `มีคำถามเรื่องวันเวลา/สถานที่ ทักแชตนี้ได้เลย`;
+    if (opts.dry_run) return { ok: true, dry_run: true, coupon: null, preview: text };
+    const push = await pushLine(line_user_id, text);
+    return { ...push, coupon: null };
+  }
 
   // ออกคูปอง ฿100 (เหมือน submitQuiz ฝั่ง frontend) แล้วบันทึกให้ redeem ได้
   // retry เมื่อชนรหัสซ้ำ (code unique) — ห้ามคืนคูปองที่ insert ไม่สำเร็จ ไม่งั้นลูกค้าได้โค้ด redeem ไม่ได้
@@ -68,20 +97,8 @@ export async function runSignupPush(opts: { line_user_id: string; name?: string;
 
   if (opts.dry_run) return { ok: true, dry_run: true, coupon, preview: text };
 
-  const token = await loadToken();
-  if (!token) return { ok: false, error: "no LINE token", coupon };
-  try {
-    const r = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ to: line_user_id, messages: [{ type: "text", text }] }),
-    });
-    // 403 = ลูกค้ายังไม่ได้แอดเพื่อน — ไม่ถือว่า error ที่ต้อง block (drip จะตามทีหลัง)
-    if (!r.ok) return { ok: false, coupon, status: r.status, detail: (await r.text()).slice(0, 160) };
-    return { ok: true, coupon };
-  } catch (e) {
-    return { ok: false, coupon, error: String(e).slice(0, 160) };
-  }
+  const push = await pushLine(line_user_id, text);
+  return { ...push, coupon };
 }
 
 // รันเซิร์ฟเวอร์เฉพาะตอนถูกเรียกเป็น entrypoint โดยตรง (กัน Deno.serve ทำงานซ้ำตอน auth-line-link import มาใช้ runSignupPush)
@@ -96,7 +113,7 @@ if (import.meta.main) {
     let payload: any = {};
     try { payload = await req.json(); } catch { /* ignore */ }
     const dry_run = payload?.dry_run === true || url.searchParams.get("dry_run") === "1";
-    const res = await runSignupPush({ line_user_id: payload?.line_user_id, name: payload?.name, dry_run });
+    const res = await runSignupPush({ line_user_id: payload?.line_user_id, name: payload?.name, dry_run, pre_course: payload?.pre_course === true });
     return json(res, 200);
   });
 }
