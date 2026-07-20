@@ -3998,6 +3998,8 @@ export default function App() {
     /\/admin\/?$/.test(window.location.pathname)
   );
   const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
+  // QR บูธ/อีเวนต์ (เช่น JIA-NIEMS-2026): ?game=1 เปิดเกม CPR HERO ทันที ไม่ผ่านด่านสมัคร/หน้าที่ค้างไว้
+  const gameParam = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("game") === "1";
   // ต้องมี session_id (Stripe แทนค่าให้ตอน redirect กลับ) ถึงจะเข้าสู่หน้าตรวจสอบการจ่ายเงิน
   // ได้ — กัน exploit เดิมที่พิมพ์ ?stripe=success&modules=... เองแล้วปลดล็อกฟรีทันที
   const stripeSessionId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("session_id") : null;
@@ -4011,6 +4013,7 @@ export default function App() {
     || load("enrolled", false) || load("promo_redeemed", false)
     || (load("purchased", []) || []).some(x => x > 1) || (load("promo_unlocked", []) || []).length > 0;
   const [page, setPage] = useState(() => {
+    if (gameParam) return "game";
     if (promoParam) return "claim";
     if (stripeSuccess) return "stripe-verify";
     // จำหน้าล่าสุดที่เปิดค้างไว้ — เปิดเว็บใหม่ก็เรียนต่อจากเดิมได้
@@ -4076,6 +4079,8 @@ export default function App() {
   // UTM + A/B variant
   useEffect(() => {
     captureUTM();
+    // เข้าจาก QR บูธ → บันทึก event พร้อม utm (เช่น utm_campaign=jia-niems-2026) ไว้วัดยอดสแกน
+    if (gameParam) { const u = getUTM(); safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
   }, []);
 
