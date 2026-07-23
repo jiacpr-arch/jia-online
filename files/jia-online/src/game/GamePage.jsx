@@ -54,9 +54,19 @@ const readCleared = () => {
 // ป้ายอ้างอิงบทเรียน — เคสที่ไม่ผูกกับบทใดบทหนึ่ง (bonus) ใช้ c.tag แทน "บทที่ N"
 const lessonTag = (c) => (c.lesson ? `บทที่ ${c.lesson}` : (c.tag || 'โบนัส'));
 
+// สุ่มเคสที่ยังไม่ถูกล็อก — สำหรับเข้าจากแบนเนอร์/ลิงก์ ?game=random เสิร์ฟโจทย์ให้นักเรียนทันที
+// เลี่ยงเคสที่เคยผ่านมาก่อน (ให้เจอของใหม่) — ถ้าผ่านครบแล้วค่อยสุ่มจากทั้งหมด
+const randomUnlockedScenario = (finalExamPassed) => {
+  const cleared = readCleared();
+  const unlocked = scenarios.filter((c) => !(c.requiresFinalExam && !finalExamPassed));
+  const fresh = unlocked.filter((c) => !cleared.has(c.id));
+  const pool = fresh.length ? fresh : unlocked;
+  return pool[Math.floor(Math.random() * pool.length)] || scenarios[0];
+};
+
 // fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
 // (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
-export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking }) {
+export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -69,6 +79,17 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   const track = useCallback((name, props) => { try { onTrack && onTrack(name, props); } catch (e) {} }, [onTrack]);
+
+  // เข้าจากแบนเนอร์/ลิงก์สุ่มโจทย์ — เก็บสถิติว่าเสิร์ฟเคสไหนให้ (funnel: banner → random case → win → voucher)
+  const autoRandomTracked = useRef(false);
+  useEffect(() => {
+    if (autoRandom && !autoRandomTracked.current) {
+      autoRandomTracked.current = true;
+      track('game_random_served', { scenario_id: sc.id, lesson: sc.lesson });
+    }
+    // ครั้งเดียวตอน mount — sc ตอนนี้คือเคสสุ่มที่ล็อกไว้ใน useState initializer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // โหลดรูปตัวละคร override จากแอดมิน (best-effort — พังก็ใช้รูป default)
   const [imgV, setImgV] = useState(0);
@@ -91,9 +112,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   const S = useRef(createInitialState(DEFAULT_DIFFICULTY));
   const [view, setView] = useState(() => snapshot(createInitialState(DEFAULT_DIFFICULTY)));
 
-  const [sc, setSc] = useState(scenarios[0]);
+  // เข้าจากแบนเนอร์/ลิงก์ ?game=random → เริ่มที่เคสสุ่มบนหน้า title ทันที (ไม่ผ่านหน้าเลือกเคส)
+  const [sc, setSc] = useState(() => (autoRandom ? randomUnlockedScenario(finalExamPassed) : scenarios[0]));
   const [cleared, setCleared] = useState(readCleared);
-  const [screen, setScreen] = useState('select'); // select | title | game | debrief
+  const [screen, setScreen] = useState(autoRandom ? 'title' : 'select'); // select | title | game | debrief
   const [quitMenu, setQuitMenu] = useState(false);
 
   const [speaker, setSpeaker] = useState(null); // { who, pose, popN }
