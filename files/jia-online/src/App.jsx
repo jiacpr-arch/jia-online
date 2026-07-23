@@ -777,7 +777,7 @@ function BlogDetail({ slug, goBack, openBlog }) {
 }
 
 // ==================== LANDING ====================
-function Landing({ go, enterCourse, openBlog }) {
+function Landing({ go, enterCourse, openBlog, goGameRandom }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
   return (<div style={css.page}>
     <div style={{ background: `linear-gradient(135deg, ${B.red} 0%, ${B.dkRed} 100%)`, color: B.white, padding: "52px 24px 56px", textAlign: "center", position: "relative", overflow: "hidden" }}>
@@ -802,7 +802,7 @@ function Landing({ go, enterCourse, openBlog }) {
 
     {/* CPR HERO — เกมภารกิจพลเมืองดี (เล่นฟรีทุกเคส) */}
     <div style={{ ...css.wrap, paddingTop: 24 }}>
-      <button onClick={() => { safeTrack("game_banner_click", { from: "landing" }); phCapture("game_banner_click", { from: "landing" }); go("game"); }} style={{ width: "100%", background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 16, padding: 18, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 16px rgba(16,24,47,.35)" }}>
+      <button onClick={() => { safeTrack("game_banner_click", { from: "landing" }); phCapture("game_banner_click", { from: "landing" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 16, padding: 18, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 16px rgba(16,24,47,.35)" }}>
         <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 26 }}>🚨</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#F2C14E", textTransform: "uppercase", letterSpacing: 1 }}>เกมใหม่ • เล่นฟรี</div>
@@ -1870,7 +1870,7 @@ function Payment({ go, user }) {
 const ENCOURAGE = ["","เยี่ยมมาก! รู้เรื่อง CPR ผู้ใหญ่แล้ว ไปบทต่อไปเลย","ดีมาก! รู้ทั้ง CPR และ AED แล้ว","เก่งมาก! CPR เด็กก็ไม่ยากเลย","สุดยอด! เรียนมาครึ่งทางแล้ว","ใกล้จบแล้ว! อีกบทเดียว","ผ่านครบทุกบทแล้ว! พร้อมสอบข้อสอบสุดท้ายได้เลย"];
 
 // ==================== COURSE ====================
-function Course({ go, progress, setProgress, user, openBlog }) {
+function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
   const [active, setActive] = useState(null); const [quiz, setQuiz] = useState(false); const [ans, setAns] = useState({}); const [result, setResult] = useState(null); const [watched, setWatched] = useState(false); const [reviewMode, setReviewMode] = useState(false); const [timer, setTimer] = useState(0); const [canWatch, setCanWatch] = useState(false); const [mustRewatch, setMustRewatch] = useState(false); const [drawnQuiz, setDrawnQuiz] = useState(null);
   const beginQuiz = (mod) => { setDrawnQuiz(drawQuiz(mod)); setAns({}); setResult(null); setQuiz(true); };
   const timerRef = useRef(null);
@@ -2000,7 +2000,7 @@ function Course({ go, progress, setProgress, user, openBlog }) {
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
       {/* CPR HERO — เกมฝึกสถานการณ์จริง อิงเนื้อหาบทเรียน (เล่นฟรีทุกเคส) */}
-      <button onClick={() => { safeTrack("game_banner_click", { from: "course" }); phCapture("game_banner_click", { from: "course" }); go("game"); }} style={{ width: "100%", marginBottom: 12, background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 14, padding: "14px 16px", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
+      <button onClick={() => { safeTrack("game_banner_click", { from: "course" }); phCapture("game_banner_click", { from: "course" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", marginBottom: 12, background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 14, padding: "14px 16px", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🚨</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>เกม CPR HERO — ลองของจริง!</div>
@@ -3998,8 +3998,12 @@ export default function App() {
     /\/admin\/?$/.test(window.location.pathname)
   );
   const promoParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("promo") : null;
-  // QR บูธ/อีเวนต์ (เช่น JIA-NIEMS-2026): ?game=1 เปิดเกม CPR HERO ทันที ไม่ผ่านด่านสมัคร/หน้าที่ค้างไว้
-  const gameParam = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("game") === "1";
+  // เปิดเกม CPR HERO ทันที ไม่ผ่านด่านสมัคร/หน้าที่ค้างไว้:
+  //   ?game=1      → QR บูธ/อีเวนต์ (เช่น JIA-NIEMS-2026) เข้าหน้าเลือกเคส (hub)
+  //   ?game=random → ลิงก์แบนเนอร์ "ท้าดวลกู้ชีพ" สุ่มโจทย์ให้นักเรียนเล่นทันที → ชนะรับคูปองส่วนลด
+  const gameValue = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("game") : null;
+  const gameRandomParam = gameValue === "random";
+  const gameParam = gameValue === "1" || gameRandomParam;
   // ต้องมี session_id (Stripe แทนค่าให้ตอน redirect กลับ) ถึงจะเข้าสู่หน้าตรวจสอบการจ่ายเงิน
   // ได้ — กัน exploit เดิมที่พิมพ์ ?stripe=success&modules=... เองแล้วปลดล็อกฟรีทันที
   const stripeSessionId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("session_id") : null;
@@ -4029,6 +4033,9 @@ export default function App() {
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const [blogSlug, setBlogSlug] = useState(null);
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
+  // แบนเนอร์ในแอป + ลิงก์ ?game=random → เข้าเกมแบบสุ่มโจทย์ให้ทันที (ไม่ผ่านหน้าเลือกเคส)
+  const [gameAutoRandom, setGameAutoRandom] = useState(gameRandomParam);
+  const goGameRandom = useCallback(() => { setGameAutoRandom(true); go("game"); }, [go]);
   // ชนะเกม CPR HERO → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (funnel ดึงคนมาเรียนจริง)
   // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) และยกเว้นนักเรียน pre-course ที่จ่ายค่า on-site แล้ว
   // (กันเข้าใจผิดเรื่องส่วนลด/เงินคืน — กฎเดียวกับหน้าใบประกาศ/สมัคร)
@@ -4092,7 +4099,7 @@ export default function App() {
   useEffect(() => {
     captureUTM();
     // เข้าจาก QR บูธ → บันทึก event พร้อม utm (เช่น utm_campaign=jia-niems-2026) ไว้วัดยอดสแกน
-    if (gameParam) { const u = getUTM(); safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
+    if (gameParam) { const u = { ...getUTM(), mode: gameRandomParam ? "random" : "hub" }; safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
   }, []);
 
@@ -4136,22 +4143,22 @@ export default function App() {
       {(() => {
         switch (page) {
           case "stripe-verify": return <StripeVerify status={stripeVerify} go={go}/>;
-          case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
+          case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog} goGameRandom={goGameRandom}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
           case "lineprompt": return <LineAddPrompt go={go} user={user} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
           case "teaserquiz": return <TeaserQuiz go={go}/>;
           case "signupgate": return <SignupGate go={go} setUser={u => { setUser(u); save("user", u); }} setProgress={p => { setProgress(p); save("progress", p); }}/>;
           case "payment": return <Payment go={go} user={user}/>;
           case "store": return <Store go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-          case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog}/>;
+          case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog} goGameRandom={goGameRandom}/>;
           case "certificate": return <Certificate user={user} go={go}/>;
           case "minicert": return <MiniCert user={user} go={go}/>;
           case "booking": return <Booking go={go}/>;
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
-          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")}/>;
-          default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
+          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")} autoRandom={gameAutoRandom}/>;
+          default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog} goGameRandom={goGameRandom}/>;
         }
       })()}
       <Analytics />
