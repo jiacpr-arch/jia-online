@@ -11,7 +11,9 @@ import {
 } from './storyEngine';
 import {
   initAudio, playShockSound, playROSCSound, playWarningBeep,
-  playMetronomeClick, playBeep,
+  playMetronomeClick, playBeep, playTapSound, playTypeBlip,
+  playChoiceAppear, playTickSound, playCorrectSound, playComboBreakSound,
+  playWinJingle, playLoseSound, playImpactSound, playHeartbeatThump,
 } from './sound';
 import './game.css';
 
@@ -136,6 +138,44 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   }, []);
   useEffect(() => clearAllTimers, [clearAllTimers]);
 
+  // เลเยอร์ความกดดัน: เสียงหัวใจเต้น "ตุบ-ตุบ" พื้นหลังระหว่างเล่น
+  // คำนวณ "ความตึงเครียด" ใหม่ทุกจังหวะเต้น จาก HP + ภาวะผู้ป่วย + นาทีบีบคั้นตอนตัดสินใจ
+  // ยิ่งแย่/ยิ่งลุ้น ยิ่งเต้นเร็วและดังขึ้นพร้อมกัน (~55→130 ครั้ง/นาที)
+  // — ระหว่าง CPR เว้นจังหวะให้ metronome นำแทน (110/นาทีคือสาระของบทเรียน)
+  useEffect(() => {
+    if (screen !== 'game' || muted) return undefined;
+    let t = null;
+    const tick = () => {
+      const st = S.current;
+      let period = 800; // ช่วงที่งดตุบ (CPR/หมด HP) — เช็คซ้ำถี่พอให้กลับมาทันเมื่อสถานะเปลี่ยน
+      if (st.hp > 0 && !(st.cpr && !st.rosc)) {
+        if (st.rosc) {
+          // ฟื้นแล้ว — จังหวะสงบ เบาๆ ให้รู้สึกโล่ง
+          if (!mutedRef.current) playHeartbeatThump(0.09);
+          period = Math.round(60000 / 64);
+        } else {
+          const maxHp = st.maxHp || getDifficulty(st.difficulty).hp;
+          const frac = Math.max(0, Math.min(1, st.hp / maxHp));
+          let tension = (1 - frac) * 0.7; // ฐาน: อาการผู้ป่วยยิ่งแย่ยิ่งเครียด
+          if (st.alarm) tension += 0.15; // หมดสติ/ไม่หายใจ
+          if (currentChoiceRef.current) { // กำลังลุ้นตัดสินใจ = ช่วงตื่นเต้นสุด
+            tension += 0.15;
+            const dt = getDifficulty(st.difficulty).decisionTime;
+            const leftFrac = dt > 0 ? Math.max(0, decisionLeftRef.current / dt) : 1;
+            tension += (1 - leftFrac) * 0.3; // เวลายิ่งงวด ยิ่งระทึก
+          }
+          tension = Math.min(1, tension);
+          // ดัง (0.10→0.36) และเร็ว (55→130 bpm) ไปด้วยกันตามระดับความตึงเครียด
+          if (!mutedRef.current) playHeartbeatThump(0.1 + tension * 0.26);
+          period = Math.round(60000 / (55 + tension * 75));
+        }
+      }
+      t = setTimeout(tick, period);
+    };
+    t = setTimeout(tick, 600);
+    return () => clearTimeout(t);
+  }, [screen, muted]);
+
   // ---- flow ทั้งหมดเป็น plain functions: แตะเฉพาะ ref + state setter (stable) ----
 
   function syncView() {
@@ -189,6 +229,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     setDlgHtml('');
     let i = 0;
     let out = '';
+    let blipN = 0;
     const step = () => {
       if (i >= html.length) { finishTyping(); return; }
       const ch = html[i];
@@ -199,6 +240,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
       } else {
         out += ch;
         i += 1;
+        // เสียงพิมพ์ทีละตัว (สไตล์ visual novel) — เว้นทุก 3 ตัวอักษรกันถี่เกิน
+        if (!reducedMotion && ch !== ' ' && blipN++ % 3 === 0) sfx(playTypeBlip);
       }
       setDlgHtml(out);
       timers.current.type = setTimeout(step, reducedMotion ? 0 : 16);
@@ -249,6 +292,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     setInter(null);
     setScreen('debrief');
     window.scrollTo(0, 0);
+    // เสียงปิดเคส: ชนะ = แตรสั้น, แพ้ = โน้ตลง
+    sfx(won ? playWinJingle : playLoseSound);
   }
 
   function showChoice(c) {
@@ -260,6 +305,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
       ? (c.options.find((o) => o.ok)?.tgt || null)
       : null;
     setChoice({ q: c.q, options: shuffled(c.options), hintTgt });
+    sfx(playChoiceAppear); // มีคำถามเด้งขึ้น — เรียกสมาธิ
     setDecisionLeft(diff.decisionTime);
     decisionLeftRef.current = diff.decisionTime;
     if (timers.current.dec) clearInterval(timers.current.dec);
@@ -268,6 +314,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
       left -= 0.25;
       decisionLeftRef.current = left;
       setDecisionLeft(left);
+      // 5 วิสุดท้ายติ๊กเตือนรายวินาที (2 วิสุดท้ายโทนสูงขึ้น) — เร่งจังหวะหัวใจ
+      if (left > 0 && left <= 5 && Number.isInteger(left)) {
+        sfx(() => playTickSound(left <= 2));
+      }
       if (left <= 0) {
         clearInterval(timers.current.dec);
         timers.current.dec = null;
@@ -309,6 +359,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
       if (node.drama) setDrama(node.drama);
       syncView();
       doBigMoment();
+      // ป้ายเด้ง: เหตุดี = โน้ตชื่นชม, เหตุวิกฤต = เสียงตุบกระแทก
+      sfx(node.green ? playCorrectSound : playImpactSound);
       setInter({ text: node.inter, green: !!node.green });
       later(() => {
         setInter(null);
@@ -364,14 +416,17 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
       recordCorrect(st, option, speedFrac);
       currentChoiceRef.current = null;
       hintUsedRef.current = false;
+      // เสียงตอบถูก — คอมโบยิ่งยาวโทนยิ่งสูงขึ้น (juice), ตอบถูกธรรมดาก็มีเสียงชม
       if (st.combo >= 2) sfx(() => playBeep(360 + Math.min(st.combo, 8) * 70, 0.1, 0.22));
+      else sfx(playCorrectSound);
       syncView();
       advance();
       return;
     }
 
     // คอมโบขาด — ถ้าสตรีคเคยยาวพอ โชว์ "BREAK"
-    if (st.combo >= 3) {
+    const broke = st.combo >= 3;
+    if (broke) {
       setComboBreak({ n: st.combo, k: comboBreakN.current++ });
       later(() => setComboBreak(null), reducedMotion ? 300 : 900);
     }
@@ -379,7 +434,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     pushEtco2(st);
     hintUsedRef.current = true;
     vibrate([60, 40, 60]);
-    sfx(() => playBeep(160, 0.28, 0.35));
+    // เสียงผิดต่ำ / ถ้าสตรีคขาดใช้เสียงไล่โน้ตลงแทน ให้เจ็บกว่า
+    sfx(broke ? playComboBreakSound : () => playBeep(160, 0.28, 0.35));
     if (!reducedMotion) {
       setRedN((n) => n + 1);
       doShake();
@@ -413,8 +469,9 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
 
   function onDialogTap() {
     if (busyRef.current) return;
-    if (timers.current.type) { finishTyping(); return; }
+    if (timers.current.type) { sfx(playTapSound); finishTyping(); return; }
     if (!awaitTap) return;
+    sfx(playTapSound);
     setAwaitTap(false);
     if (retryChoiceRef.current) {
       const c = retryChoiceRef.current;
@@ -477,7 +534,16 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     setMuted((m) => {
       const next = !m;
       localStorage.setItem(MUTE_KEY, next ? '1' : '0');
-      if (next) stopMetronome();
+      // เก็บสถิติว่าคนเปิด/ปิดเสียงจากหน้าไหน — ใช้ตัดสินใจเรื่อง backing track/จูนความดัง
+      track('game_mute_toggle', { muted: next, screen });
+      mutedRef.current = next; // อัพเดตทันที ไม่รอ effect — ให้ startMetronome ด้านล่างไม่โดนเบรก
+      if (next) {
+        stopMetronome();
+      } else {
+        initAudio();
+        // เปิดเสียงกลางเคสที่กำลังปั๊มหัวใจอยู่ — จังหวะ metronome ต้องกลับมาเอง
+        if (S.current.cpr && !S.current.rosc) startMetronome();
+      }
       return next;
     });
   }
@@ -795,6 +861,9 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
             </button>
             <button type="button" className="cbs-btn-ghost" onClick={startGame}>
               ⟳ เริ่มเคสนี้ใหม่
+            </button>
+            <button type="button" className="cbs-btn-ghost" onClick={toggleMute}>
+              {muted ? '🔊 เปิดเสียง' : '🔇 ปิดเสียง'}
             </button>
             <button type="button" className="cbs-btn-ghost" onClick={backToSelect}>
               ออกไปเลือกภารกิจอื่น
