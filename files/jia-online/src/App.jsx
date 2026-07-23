@@ -4029,6 +4029,18 @@ export default function App() {
   const [progress, setProgress] = useState(() => load("progress", { done: [], scores: {} }));
   const [blogSlug, setBlogSlug] = useState(null);
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
+  // ชนะเกม CPR HERO → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (funnel ดึงคนมาเรียนจริง)
+  // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) และยกเว้นนักเรียน pre-course ที่จ่ายค่า on-site แล้ว
+  // (กันเข้าใจผิดเรื่องส่วนลด/เงินคืน — กฎเดียวกับหน้าใบประกาศ/สมัคร)
+  const issueGameVoucher = useCallback(() => {
+    if (isPreCourseStudent()) return null;
+    const existing = load("coupon", null);
+    if (existing) return existing;
+    const c = genCoupon();
+    save("coupon", c);
+    try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "game" }); } catch (e) {}
+    return c;
+  }, []);
   // เข้าคอร์ส: ขึ้นกับตัวแปรด่าน (A/B) — before-course เด้งสมัครก่อน, soft = แอด LINE แบบข้ามได้, after-lesson-1 = เข้าเลย (ด่านไปโผล่หลังจบบท 1)
   const enterCourse = useCallback(() => {
     const v = getGateVariant();
@@ -4138,7 +4150,7 @@ export default function App() {
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
-          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)}/>;
+          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")}/>;
           default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog}/>;
         }
       })()}

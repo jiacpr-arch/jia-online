@@ -20,6 +20,8 @@ import './game.css';
 // CPR HERO — เกมตัดสินใจสไตล์ Code Blue Sim (จาก acls/bls.morroo.com) ฉบับประชาชน
 // เคสส่วนใหญ่เล่นฟรี ไม่ล็อก ยกเว้นเคสที่ requiresFinalExam (ล็อกจนสอบ Final Exam ผ่าน)
 // props: onExit() กลับหน้าเว็บ, onTrack(name, props) ส่ง event, finalExamPassed ปลดล็อกเคสโบนัส
+//   earnVoucher() -> คืนรหัสคูปองส่วนลด ฿100 (หรือ null) เมื่อชนะเคส — ออก/บันทึกฝั่ง App
+//   onGoBooking() ไปหน้าจองคอร์ส on-site (ใช้คูปองที่เพิ่งได้)
 const GAME_NAME = 'CPR HERO';
 const GAME_EYEBROW = 'ภารกิจพลเมืองดี';
 
@@ -54,7 +56,7 @@ const lessonTag = (c) => (c.lesson ? `บทที่ ${c.lesson}` : (c.tag || '
 
 // fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
 // (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
-export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false }) {
+export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -107,6 +109,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   const [shaking, setShaking] = useState(false);
   const [comboBreak, setComboBreak] = useState(null); // { n, k }
   const [result, setResult] = useState(null); // { won, grade, score, isHiscore }
+  const [voucher, setVoucher] = useState(null); // รหัสคูปองส่วนลด ฿100 ที่ได้จากการชนะเกม (null = ยังไม่ได้/ไม่มีสิทธิ์)
   const [hiscore, setHiscore] = useState(() => Number(localStorage.getItem(hiscoreKey(difficulty)) || 0));
 
   const timers = useRef({ type: null, dec: null, misc: [], metronome: null });
@@ -276,15 +279,25 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
       setHiscore(score);
       isHiscore = score > 0;
     }
+    // ชนะเคสใดก็ได้ → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (เกม = funnel ดึงคนมาเรียนจริง)
+    // earnVoucher() ฝั่ง App เป็นคนออก/บันทึกโค้ด (รียูสของเดิมถ้ามี, ยกเว้นนักเรียน pre-course → คืน null)
+    let earnedVoucher = null;
     if (won) {
       const nextCleared = new Set(cleared);
       nextCleared.add(sc.id);
       setCleared(nextCleared);
       localStorage.setItem(CLEARED_KEY, JSON.stringify([...nextCleared]));
+      const alreadyHad = !!voucher;
+      try { earnedVoucher = earnVoucher ? earnVoucher() : null; } catch (e) { earnedVoucher = null; }
+      setVoucher(earnedVoucher);
+      if (earnedVoucher && !alreadyHad) {
+        track('game_voucher_earned', { scenario_id: sc.id, difficulty: st.difficulty, grade });
+      }
     }
     track('game_completed', {
       scenario_id: sc.id, lesson: sc.lesson, difficulty: st.difficulty,
       won, grade, wrong: st.wrong, duration: Math.round(st.simTime),
+      voucher: !!earnedVoucher,
     });
     syncView();
     setResult({ won, grade, score, isHiscore, bonus, speed });
@@ -697,6 +710,26 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
               <Metric label="เวลาทั้งเคส" value={fmtTime(st.simTime)} tone="" />
             </div>
           </div>
+          {result.won && voucher && (
+            <div className="cbs-voucher">
+              <div className="cbs-voucher-eyebrow">🎁 รางวัลพลเมืองดี — ปลดล็อกแล้ว</div>
+              <div className="cbs-voucher-title">คูปองส่วนลด ฿100 คอร์ส On-site</div>
+              <div className="cbs-voucher-code">{voucher}</div>
+              <div className="cbs-voucher-note">
+                เก็บรหัสนี้ไว้ใช้ลดราคาคอร์สภาคปฏิบัติ (ฝึกจริงกับหุ่น + ครูผู้สอน) —
+                แจ้งตอนจอง หรือกรอกตอนชำระเงิน
+              </div>
+              {onGoBooking && (
+                <button
+                  type="button"
+                  className="cbs-btn-main cbs-voucher-cta"
+                  onClick={() => { track('game_voucher_cta', { scenario_id: sc.id }); onGoBooking(); }}
+                >
+                  จองคอร์ส On-site ใช้ส่วนลดนี้ →
+                </button>
+              )}
+            </div>
+          )}
           <div className="cbs-tl-title">TIMELINE การตัดสินใจของคุณ</div>
           <div className="cbs-timeline">
             {st.timeline.map((it, i) => (

@@ -607,6 +607,25 @@
   background: rgba(242, 193, 78, .08);
 }
 
+/* คูปองส่วนลด ฿100 ที่ได้จากการชนะเกม — ดัน conversion ไปคอร์ส on-site */
+.cbs-voucher {
+  width: 100%; margin: 4px 0 6px; padding: 16px 14px; text-align: center;
+  border: 2px solid var(--cbs-gold); border-radius: 14px;
+  background: linear-gradient(180deg, rgba(242, 193, 78, .2), rgba(10, 16, 36, .55));
+  box-shadow: 0 6px 20px rgba(242, 193, 78, .18);
+}
+.cbs-voucher-eyebrow {
+  font-family: var(--cbs-mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--cbs-gold); text-transform: uppercase; margin-bottom: 6px;
+}
+.cbs-voucher-title { font-size: 15px; font-weight: 800; color: var(--cbs-ink); }
+.cbs-voucher-code {
+  font-family: var(--cbs-mono); font-size: 26px; font-weight: 800;
+  letter-spacing: .18em; color: var(--cbs-gold); margin: 10px 0 8px;
+}
+.cbs-voucher-note { font-size: 12px; line-height: 1.7; color: var(--cbs-dim); }
+.cbs-voucher-cta { margin-top: 12px; width: 100%; }
+
 /* เผยรางวัลใหม่ในหน้า debrief */
 .cbs-award-reveal {
   width: 100%; margin: 4px 0 14px; padding: 12px;
