@@ -80,14 +80,16 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
 
   const track = useCallback((name, props) => { try { onTrack && onTrack(name, props); } catch (e) {} }, [onTrack]);
 
-  // เข้าจากแบนเนอร์/ลิงก์สุ่มโจทย์ — เก็บสถิติว่าเสิร์ฟเคสไหนให้ (funnel: banner → random case → win → voucher)
-  const autoRandomTracked = useRef(false);
+  // เข้าจากแบนเนอร์/ลิงก์สุ่มโจทย์ → เริ่มเล่นเคสสุ่มทันทีตอน mount (ข้ามหน้า title — กดลิงก์แล้วเข้าเกมเลย)
+  // funnel: banner/QR → random case → win → voucher. เก็บสถิติว่าเสิร์ฟเคสไหนให้ด้วย
+  const autoRandomStarted = useRef(false);
   useEffect(() => {
-    if (autoRandom && !autoRandomTracked.current) {
-      autoRandomTracked.current = true;
+    if (autoRandom && !autoRandomStarted.current) {
+      autoRandomStarted.current = true;
       track('game_random_served', { scenario_id: sc.id, lesson: sc.lesson });
+      startGame(); // sc ตอนนี้คือเคสสุ่มที่ล็อกไว้ใน useState initializer แล้ว
     }
-    // ครั้งเดียวตอน mount — sc ตอนนี้คือเคสสุ่มที่ล็อกไว้ใน useState initializer
+    // ครั้งเดียวตอน mount — startGame เป็น function declaration (hoisted) เรียกได้
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -112,10 +114,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   const S = useRef(createInitialState(DEFAULT_DIFFICULTY));
   const [view, setView] = useState(() => snapshot(createInitialState(DEFAULT_DIFFICULTY)));
 
-  // เข้าจากแบนเนอร์/ลิงก์ ?game=random → เริ่มที่เคสสุ่มบนหน้า title ทันที (ไม่ผ่านหน้าเลือกเคส)
+  // เข้าจากแบนเนอร์/ลิงก์ ?game=random → เริ่มที่เคสสุ่ม + เข้าหน้าเกมเลย (ข้ามเลือกเคส/title)
   const [sc, setSc] = useState(() => (autoRandom ? randomUnlockedScenario(finalExamPassed) : scenarios[0]));
   const [cleared, setCleared] = useState(readCleared);
-  const [screen, setScreen] = useState(autoRandom ? 'title' : 'select'); // select | title | game | debrief
+  const [screen, setScreen] = useState(autoRandom ? 'game' : 'select'); // select | title | game | debrief
   const [quitMenu, setQuitMenu] = useState(false);
 
   const [speaker, setSpeaker] = useState(null); // { who, pose, popN }
@@ -504,6 +506,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
 
   function onDialogTap() {
     if (busyRef.current) return;
+    if (!mutedRef.current) initAudio(); // เข้าจากลิงก์ auto-start: แตะครั้งแรกในเกมคือ gesture ที่ปลดล็อกเสียง
     if (timers.current.type) { sfx(playTapSound); finishTyping(); return; }
     if (!awaitTap) return;
     sfx(playTapSound);
