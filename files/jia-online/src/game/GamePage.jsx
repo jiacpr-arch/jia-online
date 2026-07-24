@@ -739,10 +739,11 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
             <div className="cbs-voucher">
               <div className="cbs-voucher-eyebrow">🎁 รางวัลพลเมืองดี — ปลดล็อกแล้ว</div>
               <div className="cbs-voucher-title">คูปองส่วนลด ฿100 คอร์ส On-site</div>
-              <div className="cbs-voucher-code">{voucher}</div>
+              <div className="cbs-voucher-code">{voucher.code}</div>
+              {voucher.note && <div className="cbs-voucher-expiry">⏳ {voucher.note}</div>}
               <div className="cbs-voucher-note">
                 เก็บรหัสนี้ไว้ใช้ลดราคาคอร์สภาคปฏิบัติ (ฝึกจริงกับหุ่น + ครูผู้สอน) —
-                แจ้งตอนจอง หรือกรอกตอนชำระเงิน
+                แจ้งตอนจองกับทีมงาน
               </div>
               {onGoBooking && (
                 <button
