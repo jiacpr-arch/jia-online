@@ -222,9 +222,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   }
 
   // metronome ~110/นาที ระหว่าง CPR (หยุดเมื่อ shock/ฟื้น/ผิด/จบเคส)
+  // สร้าง interval เสมอตอนเข้า CPR แล้ว gate เสียงไว้ข้างใน — ถ้าเริ่ม CPR ตอน mute
+  // อยู่แล้วมา unmute กลางคัน เสียงจะกลับมาเอง (110/นาทีคือสาระของบทเรียน CPR)
   function startMetronome() {
     stopMetronome();
-    if (mutedRef.current) return;
     timers.current.metronome = setInterval(() => {
       if (!mutedRef.current) playMetronomeClick();
     }, 545);
@@ -346,14 +347,21 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     setDecisionLeft(diff.decisionTime);
     decisionLeftRef.current = diff.decisionTime;
     if (timers.current.dec) clearInterval(timers.current.dec);
-    let left = diff.decisionTime;
+    // จับเวลาจากนาฬิกาจริง (performance.now) แทนการนับ tick — ไม่เพี้ยนตอนเครื่องหน่วง
+    // หรือพับจอ/สลับแท็บ (มือถือ throttle interval เป็น ≥1s เมื่อ background)
+    const start = performance.now();
+    const total = diff.decisionTime;
+    let lastTickSec = Math.ceil(total); // กันเล่นเสียงติ๊กซ้ำวินาทีเดิม
     timers.current.dec = setInterval(() => {
-      left -= 0.25;
+      const left = Math.max(0, total - (performance.now() - start) / 1000);
       decisionLeftRef.current = left;
       setDecisionLeft(left);
       // 5 วิสุดท้ายติ๊กเตือนรายวินาที (2 วิสุดท้ายโทนสูงขึ้น) — เร่งจังหวะหัวใจ
-      if (left > 0 && left <= 5 && Number.isInteger(left)) {
-        sfx(() => playTickSound(left <= 2));
+      // เล่นเมื่อ "ข้าม" เส้นวินาทีเต็ม (อิงเวลาจริง) ครั้งเดียวต่อวินาที
+      const sec = Math.ceil(left);
+      if (left > 0 && sec < lastTickSec && sec <= 5) {
+        lastTickSec = sec;
+        sfx(() => playTickSound(sec <= 2));
       }
       if (left <= 0) {
         clearInterval(timers.current.dec);
@@ -365,7 +373,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
           worsen: true,
         });
       }
-    }, 250);
+    }, 100);
   }
 
   function runNode(node) {
