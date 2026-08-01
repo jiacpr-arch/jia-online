@@ -105,6 +105,27 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, url: `${SUPABASE_URL}/storage/v1/object/public/${CHAR_BUCKET}/${path}` });
   }
 
+  // ออก signed URL ให้แอดมินเปิดดูสลิป — bucket slips เป็น private แล้ว ลิงก์ public เดิมใช้ไม่ได้
+  // payload: { sign_slip: { url } } โดย url คือค่าที่เก็บใน online_purchases.slip_url (ลิงก์เต็มหรือชื่อไฟล์)
+  if (payload?.sign_slip) {
+    const raw = String(payload.sign_slip?.url || "");
+    const marker = "/slips/";
+    const at = raw.indexOf(marker);
+    let objectPath = "";
+    try { objectPath = decodeURIComponent((at >= 0 ? raw.slice(at + marker.length) : raw).split("?")[0]); }
+    catch { return json({ error: "bad slip path" }, 400); }
+    // จำกัดให้ชี้ไฟล์ใน bucket slips ชั้นเดียวเท่านั้น (ห้ามมี / หรือ .. หลุดไป bucket/โฟลเดอร์อื่น)
+    if (!objectPath || objectPath.includes("..") || objectPath.includes("/")) return json({ error: "bad slip path" }, 400);
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/slips/${encodeURIComponent(objectPath)}`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresIn: 600 }),
+    });
+    if (!r.ok) return json({ error: "sign failed", detail: (await r.text()).slice(0, 200) }, 502);
+    const d = await r.json();
+    return json({ url: `${SUPABASE_URL}/storage/v1${d.signedURL}` });
+  }
+
   if (typeof table !== "string" || !ALLOW.has(table)) return json({ error: "table not allowed" }, 403);
   const m = String(method).toUpperCase();
   if (!METHODS.has(m)) return json({ error: "method not allowed" }, 405);

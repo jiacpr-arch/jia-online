@@ -7,7 +7,7 @@
 //   - สร้างแถว online_purchases (status "รอชำระ") ฝั่ง server เอง ก่อนเรียก Stripe แล้วผูก
 //     stripe_session_id ของแถวนั้นกับ session ที่สร้างจริง — กัน webhook match ผิดแถว
 //   - ต่อท้าย successUrl ด้วย session_id={CHECKOUT_SESSION_ID} ให้ Stripe แทนค่าให้เอง
-// type อื่น (เช่น "booking") ยังไม่มีที่ไหนในแอปเรียกใช้ — คงพฤติกรรมเดิม (เชื่อ client) ไว้ก่อน
+// type อื่น (เช่น "booking") ไม่รับแล้ว — path เดิมเชื่อ items/amount จาก client และไม่มี caller จริง
 //
 // POST { type, items, metadata:{phone,modules,name}, successUrl, cancelUrl }
 // Secrets ที่ใช้: STRIPE_SECRET_KEY, SUPABASE_SERVICE_ROLE_KEY (มีอยู่แล้ว)
@@ -113,24 +113,10 @@ Deno.serve(async (req) => {
       return json({ url: session.url, sessionId: session.id });
     }
 
-    // type อื่น (เช่น booking) — ยังไม่มี caller ในแอปนี้ วันนี้คงพฤติกรรมเดิมไว้ก่อน
-    const lineItems = (items || []).map((item: { name: string; amount: number; quantity?: number }) => ({
-      price_data: {
-        currency: "thb",
-        product_data: { name: item.name },
-        unit_amount: item.amount * 100,
-      },
-      quantity: item.quantity || 1,
-    }));
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "promptpay"],
-      line_items: lineItems,
-      mode: "payment",
-      success_url: successUrl || "https://cpr.morroo.com",
-      cancel_url: cancelUrl || "https://cpr.morroo.com",
-      metadata: { type: type || "general", ...(metadata || {}) },
-    });
-    return json({ url: session.url, sessionId: session.id });
+    // ไม่รับ type อื่นแล้ว — path เดิมเชื่อ items/amount จาก client ตรงๆ (สร้าง session
+    // ราคาอะไรก็ได้) และไม่มี caller ในแอปนี้ ถ้าจะเพิ่ม type ใหม่ต้องคำนวณราคาฝั่ง server แบบ
+    // online_purchase ด้านบนเท่านั้น
+    return json({ error: "unsupported checkout type" }, 400);
   } catch (err) {
     console.error("Stripe checkout error:", err);
     return json({ error: err.message }, 400);
