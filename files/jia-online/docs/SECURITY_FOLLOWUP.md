@@ -22,16 +22,22 @@ migration ที่ auto-apply
 - ✅ **แอดมินเปิดสลิปผ่าน signed URL** — admin-api เพิ่ม action `sign_slip` (อายุ 10 นาที) รองรับ bucket private
 - ✅ **stripe-checkout ตัด path สำรอง** ที่เชื่อ `items/amount` จาก client (type อื่นนอกจาก `online_purchase` → 400)
 
-ลำดับ deploy (ต้องทำตามลำดับ ไม่งั้นฟีเจอร์พัง):
-1. Deploy `grade-quiz` (verify_jwt=false) + `admin-api` เวอร์ชันใหม่ + `stripe-checkout` เวอร์ชันใหม่
-2. Apply migration `20260801000001` (RPC `get_purchase_by_id`)
-3. Deploy frontend ใหม่
-4. Apply migration `20260801000000` (slips bucket → private) — หลัง frontend+admin-api ใหม่ขึ้นแล้วเท่านั้น
-5. Apply migration `20260801000002` (ปิด anon write: staff/settings/users/promo_codes) และ
-   `20260801000003` (revoke execute + search_path) — **ตรวจ consumer แอปอื่นบน DB ร่วมก่อน**
+**Deploy + apply แล้วทั้งหมด (2026-08-01):**
+- ✅ Deploy `grade-quiz` v1, `admin-api` v6, `stripe-checkout` v7 (verify_jwt=false ทุกตัวตามเดิม)
+- ✅ Apply `20260801000001` (RPC `get_purchase_by_id` — ทดสอบแล้ว: lookup uuid ว่างคืน 0 แถว, anon exec ได้)
+- ✅ Merge PR #67 → Vercel deploy production (ตรวจสถานะ READY แล้ว)
+- ✅ Apply `20260801000000` — bucket `slips` เป็น private แล้ว (ตรวจแล้ว: policy อัปโหลดยังอยู่)
+- ✅ Apply `20260801000003` (function hardening + grant service_role ให้ line_broadcasts_due_*)
+- ✅ Apply `20260801000002` เฉพาะส่วนปลอดภัย: `settings` (ไม่เคยมี write เลย) +
+  `promo_codes` UPDATE/DELETE (ไม่เคยถูกใช้เลย) — พิสูจน์จาก pg_stat_statements/pg_stat_user_tables
 
-ยังเหลือ (ไม่อยู่ใน PR นี้):
-- ⏳ เปิด **leaked password protection** (Supabase Dashboard → Auth → ปุ่มเดียว)
+ยังเหลือ (งานถัดไป):
+- ⏳ **ปิด anon write บน `users`/`staff` ทำไม่ได้จนกว่าแอปเดิม (jiacpr.com) จะเลิกใช้** —
+  ตรวจ statement cache พบ `UPDATE users SET last_login` (54 calls) และ `INSERT staff` (7 calls)
+  ผ่าน anon อยู่จริง ต้องย้าย login/จัดการ staff ของแอปนั้นไป server-side ก่อน (SQL เตรียมไว้แล้ว
+  ในคอมเมนต์ของ migration 20260801000002)
+- ⏳ เปิด **leaked password protection** (Supabase Dashboard → Authentication → Sign In / Providers
+  → เปิด "Leaked password protection" — กดเองในแดชบอร์ด ปุ่มเดียว)
 - ⏳ ปิด anon SELECT ตาราง PII ที่เหลือ (`customers`, `bookings`, `sales_tracking`, …) — ตรวจ consumer ก่อน
 - ⏳ ฟังก์ชัน `wmc_*` 15 ตัว (SECURITY DEFINER + PIN) — revoke จาก anon ถ้าไม่มีแอปไหนใช้
 - ⏳ ใบประกาศ/คูปองยังออกฝั่ง client (สถานะ "ผ่าน" อยู่ใน localStorage) — ขั้นถัดไปคือผูกกับ
