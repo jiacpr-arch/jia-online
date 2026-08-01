@@ -8,10 +8,14 @@
 -- ⚠️ ก่อน apply: ตรวจว่า cron/trigger ที่เรียกฟังก์ชันเหล่านี้รันด้วย role อื่น (postgres/
 --    service_role) จริง — ปกติ pg_cron รันเป็นเจ้าของ job และ trigger รันเป็นเจ้าของตาราง จึงไม่กระทบ
 
-revoke execute on function public.line_broadcasts_due_3mo() from anon, authenticated;
-revoke execute on function public.line_broadcasts_due_11mo() from anon, authenticated;
-revoke execute on function public.notify_new_student_fn() from anon, authenticated;
-revoke execute on function public.notify_new_booking_fn() from anon, authenticated;
+-- ต้อง revoke จาก PUBLIC ด้วย — ฟังก์ชันใน Postgres ให้สิทธิ์ EXECUTE กับ PUBLIC โดย default
+-- แค่ revoke จาก anon/authenticated ไม่พอ (ยังได้สิทธิ์ผ่าน PUBLIC อยู่ดี — เหตุที่ advisor ยังธง
+-- notify_new_student_fn ทั้งที่ 20260703000002 เคย revoke ไปแล้ว)
+-- trigger/cron ไม่กระทบ: trigger ตรวจ EXECUTE ตอน CREATE TRIGGER เท่านั้น, pg_cron รันเป็นเจ้าของ job
+revoke execute on function public.line_broadcasts_due_3mo() from public, anon, authenticated;
+revoke execute on function public.line_broadcasts_due_11mo() from public, anon, authenticated;
+revoke execute on function public.notify_new_student_fn() from public, anon, authenticated;
+revoke execute on function public.notify_new_booking_fn() from public, anon, authenticated;
 
 alter function public.line_broadcasts_due_3mo() set search_path = public;
 alter function public.line_broadcasts_due_11mo() set search_path = public;
