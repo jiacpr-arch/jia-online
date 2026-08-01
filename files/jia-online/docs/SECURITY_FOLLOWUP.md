@@ -15,6 +15,30 @@ migration ที่ auto-apply
 
 ---
 
+## สถานะรอบนี้ (2026-08-01) — แก้ในโค้ดแล้ว รอ deploy + apply migration
+แก้ใน PR นี้ (โค้ดฝั่ง repo — ยังไม่แตะ DB จริง):
+- ✅ **เฉลยควิซออกจากบันเดิลแล้ว** — ย้ายไป edge function `grade-quiz` (ตรวจฝั่ง server ทั้งข้อสอบท้ายบทและ Final Exam); `COURSE` ในบันเดิลไม่มีคำตอบอีกต่อไป
+- ✅ **อัปโหลดสลิปไม่ปลดล็อกทันทีแล้ว** — เข้าคิว "รอตรวจสอบ" ปลดล็อกเมื่อแอดมินตั้ง `payment_status = "ชำระแล้ว"` เท่านั้น (client sync ผ่าน RPC `get_purchase_by_id`)
+- ✅ **แอดมินเปิดสลิปผ่าน signed URL** — admin-api เพิ่ม action `sign_slip` (อายุ 10 นาที) รองรับ bucket private
+- ✅ **stripe-checkout ตัด path สำรอง** ที่เชื่อ `items/amount` จาก client (type อื่นนอกจาก `online_purchase` → 400)
+
+ลำดับ deploy (ต้องทำตามลำดับ ไม่งั้นฟีเจอร์พัง):
+1. Deploy `grade-quiz` (verify_jwt=false) + `admin-api` เวอร์ชันใหม่ + `stripe-checkout` เวอร์ชันใหม่
+2. Apply migration `20260801000001` (RPC `get_purchase_by_id`)
+3. Deploy frontend ใหม่
+4. Apply migration `20260801000000` (slips bucket → private) — หลัง frontend+admin-api ใหม่ขึ้นแล้วเท่านั้น
+5. Apply migration `20260801000002` (ปิด anon write: staff/settings/users/promo_codes) และ
+   `20260801000003` (revoke execute + search_path) — **ตรวจ consumer แอปอื่นบน DB ร่วมก่อน**
+
+ยังเหลือ (ไม่อยู่ใน PR นี้):
+- ⏳ เปิด **leaked password protection** (Supabase Dashboard → Auth → ปุ่มเดียว)
+- ⏳ ปิด anon SELECT ตาราง PII ที่เหลือ (`customers`, `bookings`, `sales_tracking`, …) — ตรวจ consumer ก่อน
+- ⏳ ฟังก์ชัน `wmc_*` 15 ตัว (SECURITY DEFINER + PIN) — revoke จาก anon ถ้าไม่มีแอปไหนใช้
+- ⏳ ใบประกาศ/คูปองยังออกฝั่ง client (สถานะ "ผ่าน" อยู่ใน localStorage) — ขั้นถัดไปคือผูกกับ
+  ผลสอบที่ server บันทึกเอง (ต้องมี identity จริง เช่น LINE/Supabase Auth ทุกเคสก่อน)
+
+---
+
 ## ✅ ทำแล้ว: `public.users.password_hash` (คงไว้เป็นบันทึก)
 
 ### 1. `public.users.password_hash` เปิดให้ anon อ่านได้ (14 แถวมี hash จริง)
