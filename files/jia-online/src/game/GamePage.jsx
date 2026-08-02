@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { scenarios, LEVEL_META } from './scenarios';
+import { scenarios, LEVEL_META, backgroundUrl } from './scenarios';
 import { getCharacter, COACH_ID, registerCustomImages } from './characters';
 import CharacterSprite from './CharacterSprite';
 import EcgStrip from './EcgStrip';
@@ -118,6 +118,12 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   const [sc, setSc] = useState(() => (autoRandom ? randomUnlockedScenario(finalExamPassed) : scenarios[0]));
   const [cleared, setCleared] = useState(readCleared);
   const [screen, setScreen] = useState(autoRandom ? 'game' : 'select'); // select | title | game | debrief
+
+  // อุ่นรูปฉากของเคสที่เลือกไว้ล่วงหน้า — กันเวที gradient วาบก่อนภาพจริงโหลดเสร็จ
+  useEffect(() => {
+    const url = backgroundUrl(sc);
+    if (url && typeof Image !== 'undefined') { new Image().src = url; }
+  }, [sc]);
   const [quitMenu, setQuitMenu] = useState(false);
 
   const [speaker, setSpeaker] = useState(null); // { who, pose, popN }
@@ -803,7 +809,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   return (
     <div className={`cbs-app ${shaking ? 'cbs-shake' : ''}`}>
       <section className="cbs-game">
-        <div className={`cbs-stage ${drama === 'red' ? 'cbs-drama-red' : drama === 'white' ? 'cbs-drama' : ''}`}>
+        <div
+          className={`cbs-stage ${drama === 'red' ? 'cbs-drama-red' : drama === 'white' ? 'cbs-drama' : ''}`}
+          style={backgroundUrl(sc) ? { '--cbs-stage-bg': `url('${backgroundUrl(sc)}')` } : undefined}
+        >
           <div className="cbs-hud">
             <div className="cbs-hud-monitor">
               <span className={`cbs-rhythm-name ${rhythmBad ? 'cbs-bad' : ''}`}>
