@@ -16,6 +16,7 @@
 // ── เคสที่ 1 · อิงบทที่ 1: CPR ผู้ใหญ่ ─────────────────────────────
 const adultCollapse = {
   id: 'hero-adult-cpr-01',
+  bg: 'public_park',
   title: 'ลุงล้มกลางสวนสาธารณะ',
   subtitle: 'เช้าวันอาทิตย์ ลุงวัย 60 วิ่งออกกำลังอยู่ดีๆ ก็ทรุดลงกับพื้น คุณอยู่ใกล้ที่สุด',
   lesson: 1,
@@ -172,6 +173,7 @@ const adultCollapse = {
 // ── เคสที่ 2 · อิงบทที่ 2: CPR ทารก ─────────────────────────────
 const infantCpr = {
   id: 'hero-infant-cpr-01',
+  bg: 'bedroom_crib',
   title: 'ทารกนิ่งไปในเปล',
   subtitle: 'เสียงป้าแก้วข้างห้องกรีดร้อง — หลานวัย 5 เดือนนอนนิ่ง ตัวอ่อน ริมฝีปากเริ่มคล้ำ',
   lesson: 2,
@@ -296,6 +298,7 @@ const infantCpr = {
 // ── เคสที่ 3 · อิงบทที่ 3: สิ่งอุดกั้นทางเดินหายใจ ผู้ใหญ่ ─────────────
 const adultChoking = {
   id: 'hero-adult-choking-01',
+  bg: 'mookata_restaurant',
   title: 'สำลักกลางวงหมูกระทะ',
   subtitle: 'เพื่อนร่วมโต๊ะกินไปคุยไป จู่ๆ ก็ไอโขลกๆ แล้วลุกขึ้นเอามือกุมคอ',
   lesson: 3,
@@ -410,6 +413,7 @@ const adultChoking = {
 // ── เคสที่ 4 · อิงบทที่ 4: สิ่งอุดกั้นทางเดินหายใจ ทารก ─────────────
 const infantChoking = {
   id: 'hero-infant-choking-01',
+  bg: 'bedroom_crib',
   title: 'ทารกสำลักของเล่น',
   subtitle: 'น้องวัย 9 เดือน คว้าชิ้นส่วนของเล่นของพี่เข้าปาก ไอแขกๆ สองทีแล้วเงียบ',
   lesson: 4,
@@ -520,6 +524,7 @@ const infantChoking = {
 // ── เคสที่ 5 · อิงบทที่ 5: Megacode CPR & AED ผู้ใหญ่ ─────────────
 const adultAed = {
   id: 'hero-adult-aed-01',
+  bg: 'village_pool',
   title: 'AED ข้างสระว่ายน้ำ',
   subtitle: 'ชายวัย 50 ถูกช่วยขึ้นจากสระฟิตเนส นอนนิ่ง ตัวเปียกโชก — ผนังตึกมีตู้ AED',
   lesson: 5,
@@ -645,6 +650,7 @@ const adultAed = {
 // ── เคสที่ 6 · อิงบทที่ 6: Megacode CPR & AED เด็ก/ทารก ─────────────
 const childAed = {
   id: 'hero-child-aed-01',
+  bg: 'village_pool',
   title: 'เด็กจมน้ำหน้าหมู่บ้าน',
   subtitle: 'เด็กชายวัย 7 ขวบลอยคออยู่ในสระหมู่บ้าน ห่างขอบไม่กี่เมตร — ป้อมยามมี AED แต่ไม่มีแผ่นสำหรับเด็ก',
   lesson: 6,
@@ -788,6 +794,7 @@ const childAed = {
 // ── เคสเสริม · AHA 2025: คนท้องสำลัก (ไม่ผูกกับบทใดบทหนึ่ง) ─────────
 const pregnantChoking = {
   id: 'hero-pregnant-choking-01',
+  bg: 'party_hall',
   title: 'คุณแม่ท้องแก่สำลักในงานเลี้ยง',
   subtitle: 'เพื่อนท้อง 8 เดือนกำลังกินเค้กฉลองแล้วสำลักกะทันหัน ท้องโตจนโอบรอบเอวแบบ Heimlich ปกติไม่ได้',
   lesson: null,
@@ -887,6 +894,7 @@ const pregnantChoking = {
 // ── เคสโบนัส · Final Rescue (ปลดล็อกหลังสอบ Final Exam ผ่าน) ────────
 const finalRescue = {
   id: 'hero-final-rescue-01',
+  bg: 'running_event',
   title: 'Final Rescue — ภารกิจสุดท้าย',
   subtitle: 'คุณอาสาประจำจุดปฐมพยาบาลงานวิ่งการกุศล นักวิ่งวัยกลางคนล้มลงหลังผ่านเส้นชัย — ทุกทักษะที่เรียนมาต้องใช้ในเคสเดียว',
   lesson: null,
@@ -1006,3 +1014,19 @@ export const LEVEL_META = {
   intermediate: { label: 'ปานกลาง', order: 1 },
   megacode: { label: 'ภารกิจใหญ่', order: 2 },
 };
+
+// ── ฉากพื้นหลังบนเวที ──────────────────────────────────────────────────
+// ไฟล์อยู่ที่ public/images/backgrounds/{key}.webp (แนวนอน 1536x1024)
+// เคสระบุฉากด้วย field `bg` — ไม่ระบุ (หรือ key ที่ไม่รู้จัก) ใช้ฉาก gradient เดิม
+export const BACKGROUNDS = {
+  public_park: 'สวนสาธารณะ',
+  bedroom_crib: 'ห้องนอนมีเปลทารก',
+  mookata_restaurant: 'ร้านหมูกระทะ',
+  village_pool: 'สระว่ายน้ำ (มีตู้ AED)',
+  party_hall: 'งานเลี้ยง',
+  running_event: 'งานวิ่งการกุศล',
+};
+
+export function backgroundUrl(s) {
+  return s && BACKGROUNDS[s.bg] ? `/images/backgrounds/${s.bg}.webp` : null;
+}

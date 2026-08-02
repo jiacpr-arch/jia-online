@@ -259,9 +259,11 @@
 .cbs-stage {
   position: relative; flex: 1; min-height: 54dvh;
   display: flex; align-items: flex-end; justify-content: center;
-  background:
+  /* ฉากมาจากเคส (--cbs-stage-bg ที่ GamePage ใส่ให้เมื่อเคสระบุ bg) —
+     เคสที่ไม่มีรูปฉากใช้ gradient เดิมเป็นเวทีเหมือนก่อน */
+  background: var(--cbs-stage-bg,
     radial-gradient(ellipse 120% 70% at 50% 108%, rgba(88, 196, 220, .14), transparent 55%),
-    linear-gradient(180deg, #0C1226 0%, #17224A 62%, #1E2C5E 100%);
+    linear-gradient(180deg, #0C1226 0%, #17224A 62%, #1E2C5E 100%)) center center / cover no-repeat;
   overflow: hidden;
 }
 .cbs-stage::after {
