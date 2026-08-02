@@ -524,6 +524,7 @@ const infantChoking = {
 // ── เคสที่ 5 · อิงบทที่ 5: Megacode CPR & AED ผู้ใหญ่ ─────────────
 const adultAed = {
   id: 'hero-adult-aed-01',
+  bg: 'village_pool',
   title: 'AED ข้างสระว่ายน้ำ',
   subtitle: 'ชายวัย 50 ถูกช่วยขึ้นจากสระฟิตเนส นอนนิ่ง ตัวเปียกโชก — ผนังตึกมีตู้ AED',
   lesson: 5,
@@ -649,6 +650,7 @@ const adultAed = {
 // ── เคสที่ 6 · อิงบทที่ 6: Megacode CPR & AED เด็ก/ทารก ─────────────
 const childAed = {
   id: 'hero-child-aed-01',
+  bg: 'village_pool',
   title: 'เด็กจมน้ำหน้าหมู่บ้าน',
   subtitle: 'เด็กชายวัย 7 ขวบลอยคออยู่ในสระหมู่บ้าน ห่างขอบไม่กี่เมตร — ป้อมยามมี AED แต่ไม่มีแผ่นสำหรับเด็ก',
   lesson: 6,
@@ -1020,6 +1022,7 @@ export const BACKGROUNDS = {
   public_park: 'สวนสาธารณะ',
   bedroom_crib: 'ห้องนอนมีเปลทารก',
   mookata_restaurant: 'ร้านหมูกระทะ',
+  village_pool: 'สระว่ายน้ำ (มีตู้ AED)',
   party_hall: 'งานเลี้ยง',
   running_event: 'งานวิ่งการกุศล',
 };
