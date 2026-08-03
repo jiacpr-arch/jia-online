@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex" />
+<title>ตัวอย่างใบประกาศนียบัตร (ออนไลน์ + ส่วนลด ฿100) — JIA TRAINER CENTER</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800;900&family=Bai+Jamjuree:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Noto Sans Thai', -apple-system, sans-serif; background: #F5F5F5; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  .note { max-width: 480px; text-align: center; margin-bottom: 16px; }
+  .note h1 { font-size: 18px; font-weight: 800; color: #1A1A1A; }
+  .note p { font-size: 13px; color: #666; margin-top: 4px; line-height: 1.6; }
+  /* wrapper ย่อ-ขยายใบเซอร์ตามหน้าจอ (สัดส่วนเดิม 900x636 เหมือนในแอป) */
+  .cert-wrap { width: 100%; max-width: 900px; overflow: hidden; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
+  .cert-scale { width: 900px; transform-origin: top left; }
+  /* ฟอนต์ Bai Jamjuree ทั้งใบ */
+  .cert { position: relative; width: 900px; height: 636px; background: #FFFDF7; overflow: hidden; font-family: 'Bai Jamjuree', 'Noto Sans Thai', sans-serif; }
+  .cert .abs { position: absolute; left: 0; right: 0; text-align: center; }
+  .serif { font-family: 'Bai Jamjuree', 'Noto Sans Thai', sans-serif; }
+  /* ลายน้ำ "ตัวอย่าง" — กันเอาไปใช้จริง (เปิดหน้าด้วย ?clean=1 เพื่อซ่อน) */
+  .watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
+  .watermark span { font-size: 110px; font-weight: 900; color: #C8102E; opacity: .08; transform: rotate(-22deg); letter-spacing: 10px; white-space: nowrap; }
+  body.clean .watermark { display: none; }
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>ตัวอย่างใบประกาศนียบัตร — คอร์สออนไลน์</h1>
+  <p>ใบประกาศที่ผู้เรียนได้รับเมื่อเรียนจบคอร์ส CPR &amp; AED ออนไลน์<br/>พร้อมคูปองส่วนลด <strong style="color:#C8102E">฿100</strong> สำหรับคอร์สภาคปฏิบัติ On-site</p>
+</div>
+<div class="cert-wrap" id="wrap">
+  <div class="cert-scale" id="scaler">
+    <div class="cert">
+      <!-- กราฟิกตกแต่ง: กรอบทอง + คลื่นน้ำเงิน + ซีล + ริบบิ้น (ชุดเดียวกับ CERT_DECO ในแอป) -->
+      <div style="position:absolute;inset:0">
+        <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 900 636" preserveAspectRatio="none">
+        <defs>
+        <linearGradient id="cg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1D481"/><stop offset="0.5" stop-color="#C49A48"/><stop offset="1" stop-color="#8C6B22"/></linearGradient>
+        <linearGradient id="ch" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#B8862F"/><stop offset="0.5" stop-color="#F3DB8E"/><stop offset="1" stop-color="#B8862F"/></linearGradient>
+        <radialGradient id="cs" cx="0.35" cy="0.3" r="0.85"><stop offset="0" stop-color="#F6E3A0"/><stop offset="0.55" stop-color="#C9A24B"/><stop offset="1" stop-color="#8C6B22"/></radialGradient>
+        </defs>
+        <rect width="900" height="636" fill="#FFFDF7"/>
+        <g transform="scale(0.85)">
+        <path d="M0,0 L232,0 C168,44 92,40 76,112 C60,176 40,170 0,212 Z" fill="#1B315A"/>
+        <path d="M0,0 L198,0 C146,36 88,33 74,108 C58,172 36,156 0,186 Z" fill="#0E1E3C"/>
+        <path d="M198,0 C146,36 88,33 74,108 C58,172 36,156 0,186" fill="none" stroke="url(#ch)" stroke-width="5.5"/>
+        <path d="M232,0 C168,44 92,40 76,112 C60,176 40,170 0,212" fill="none" stroke="url(#ch)" stroke-width="2.2" opacity="0.8"/>
+        </g>
+        <g transform="translate(900,636) rotate(180) scale(0.85)">
+        <path d="M0,0 L232,0 C168,44 92,40 76,112 C60,176 40,170 0,212 Z" fill="#1B315A"/>
+        <path d="M0,0 L198,0 C146,36 88,33 74,108 C58,172 36,156 0,186 Z" fill="#0E1E3C"/>
+        <path d="M198,0 C146,36 88,33 74,108 C58,172 36,156 0,186" fill="none" stroke="url(#ch)" stroke-width="5.5"/>
+        <path d="M232,0 C168,44 92,40 76,112 C60,176 40,170 0,212" fill="none" stroke="url(#ch)" stroke-width="2.2" opacity="0.8"/>
+        </g>
+        <rect x="22" y="22" width="856" height="592" fill="none" stroke="url(#cg)" stroke-width="2.5"/>
+        <rect x="30" y="30" width="840" height="576" fill="none" stroke="url(#cg)" stroke-width="1" opacity="0.6"/>
+        <g stroke="url(#cg)" stroke-width="2" fill="none">
+        <path d="M838,30 h34 v34"/><path d="M845,38 h22 v22" stroke-width="1"/>
+        <path d="M62,606 h-34 v-34"/><path d="M55,598 h-22 v-22" stroke-width="1"/>
+        </g>
+        <g fill="url(#cg)" stroke="url(#cg)">
+        <line x1="305" y1="376" x2="438" y2="376" stroke="#B8862F" stroke-width="1.4"/><line x1="462" y1="376" x2="595" y2="376" stroke="#B8862F" stroke-width="1.4"/>
+        <rect x="445" y="371" width="10" height="10" transform="rotate(45 450 376)"/>
+        <circle cx="305" cy="376" r="2.2" stroke="none"/><circle cx="595" cy="376" r="2.2" stroke="none"/>
+        </g>
+        <g transform="translate(160,500)">
+        <circle r="34" fill="url(#cs)" stroke="#8C6B22" stroke-width="1.5"/><circle r="26.5" fill="none" stroke="#FFF4D6" stroke-width="1.1" opacity="0.7"/>
+        <rect x="-13" y="-11" width="26" height="22" rx="3" fill="#0E1E3C"/><rect x="-13" y="-11" width="26" height="7" rx="3" fill="#1B315A"/>
+        <line x1="-7" y1="-15" x2="-7" y2="-8" stroke="#FFF4D6" stroke-width="2.4" stroke-linecap="round"/><line x1="7" y1="-15" x2="7" y2="-8" stroke="#FFF4D6" stroke-width="2.4" stroke-linecap="round"/>
+        <g fill="#FFF4D6"><circle cx="-6" cy="0" r="1.5"/><circle cx="0" cy="0" r="1.5"/><circle cx="6" cy="0" r="1.5"/><circle cx="-6" cy="6" r="1.5"/><circle cx="0" cy="6" r="1.5"/></g>
+        </g>
+        <g transform="translate(740,500)">
+        <circle r="34" fill="url(#cs)" stroke="#8C6B22" stroke-width="1.5"/><circle r="26.5" fill="none" stroke="#FFF4D6" stroke-width="1.1" opacity="0.7"/>
+        <path transform="translate(-12,-11)" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="#C8102E"/>
+        <polyline points="-10,0 -4,0 -1,-5 2,4 5,-1 8,0 11,0" fill="none" stroke="#FFF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+        </g>
+        <g transform="translate(450,500)">
+        <path d="M-150,-4 l-26,0 l8,15 l-8,15 l26,0 Z" fill="#8C6B22"/><path d="M150,-4 l26,0 l-8,15 l8,15 l-26,0 Z" fill="#8C6B22"/>
+        <rect x="-150" y="-29" width="300" height="58" rx="6" fill="#0E1E3C" stroke="url(#ch)" stroke-width="2.5"/>
+        <rect x="-144" y="-23" width="288" height="46" rx="4" fill="none" stroke="url(#ch)" stroke-width="0.8" opacity="0.55"/>
+        </g>
+        </svg>
+      </div>
+      <div class="abs" style="top:36px;display:flex;justify-content:center"><img src="/logo.png" alt="JIA TRAINER CENTER" style="width:180px;height:auto" onerror="this.style.display='none'"/></div>
+      <div class="abs serif" style="top:196px;font-size:44px;font-weight:700;line-height:1;letter-spacing:1px;color:#0E1E3C">ใบประกาศนียบัตร</div>
+      <div class="abs serif" style="top:252px;font-size:13px;font-weight:700;letter-spacing:5px;color:#B8862F">CERTIFICATE OF COMPLETION</div>
+      <div class="abs" style="top:288px;font-size:15px;line-height:1;color:#666">ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
+      <div class="abs serif" style="top:318px;font-size:46px;font-weight:700;line-height:1;color:#0E1E3C">สมชาย ใจดี</div>
+      <div class="abs" style="top:392px;left:70px;right:70px;font-size:14px;color:#666">ได้ผ่านการอบรม <strong style="color:#0E1E3C">ภาคทฤษฎี (ออนไลน์)</strong></div>
+      <div class="abs" style="top:412px;left:70px;right:70px;font-size:14px;font-weight:700;color:#1A1A1A">หลักสูตรการช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED · มาตรฐาน 2025</div>
+      <div class="abs" style="top:436px;font-size:12.5px;font-weight:600;color:#C8102E">ขอเชิญฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
+      <!-- คูปองส่วนลด ฿100 บนริบบิ้นน้ำเงิน (โค้ดตัวอย่าง — ใช้จริงไม่ได้) -->
+      <div class="abs" style="top:484px;font-size:12.5px;font-weight:600;color:#FFF9E8">ส่วนลด ฿100 คอร์ส On-site</div>
+      <div class="abs" style="top:506px;font-size:15px;font-weight:800;letter-spacing:1px;color:#F3DB8E;font-family:monospace">• JIA-XXXXXX •</div>
+      <div style="position:absolute;top:542px;left:64px;width:216px;text-align:center;background:#FFFDF7;border:1px solid rgba(196,154,72,.55);border-radius:10px;padding:5px 6px;box-sizing:border-box">
+        <div id="certDate" style="font-size:15px;font-weight:600;line-height:1.25;color:#1A1A1A"></div>
+        <div style="border-top:1.5px solid #C49A48;margin-top:4px;padding-top:4px;font-size:11.5px;line-height:1.25;color:#666">วันที่ออกใบประกาศ</div>
+      </div>
+      <div style="position:absolute;top:542px;right:64px;width:216px;text-align:center;background:#FFFDF7;border:1px solid rgba(196,154,72,.55);border-radius:10px;padding:5px 6px;box-sizing:border-box">
+        <div class="serif" style="font-size:14px;font-weight:600;line-height:1.25;color:#0E1E3C">JIA TRAINER CENTER</div>
+        <div style="border-top:1.5px solid #C49A48;margin-top:4px;padding-top:4px;font-size:11.5px;line-height:1.25;color:#666">ศูนย์ฝึกอบรม CPR &amp; AED</div>
+      </div>
+      <div class="abs" style="bottom:4px;font-size:10.5px;letter-spacing:.5px;color:#8A7A55">088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
+      <div class="watermark"><span>ตัวอย่าง</span></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="margin-top:16px">
+  <p>ชื่อ "สมชาย ใจดี" และรหัสคูปอง "JIA-XXXXXX" เป็นข้อมูลสมมติเพื่อการนำเสนอเท่านั้น<br/>ใบจริงจะแสดงชื่อผู้เรียนและรหัสคูปองเฉพาะบุคคลที่ใช้เป็นส่วนลดได้จริง</p>
+</div>
+<script>
+  // วันที่ปัจจุบันแบบ พ.ศ. (รูปแบบเดียวกับใบจริงในแอป)
+  const d = new Date();
+  document.getElementById("certDate").textContent = d.getDate() + "/" + (d.getMonth() + 1) + "/" + (d.getFullYear() + 543);
+  // ย่อใบเซอร์ให้พอดีจอ (เหมือน ResizeObserver ในแอป)
+  const wrap = document.getElementById("wrap"), scaler = document.getElementById("scaler");
+  const fit = () => { const s = Math.min(1, wrap.clientWidth / 900); scaler.style.transform = "scale(" + s + ")"; wrap.style.height = (636 * s) + "px"; };
+  new ResizeObserver(fit).observe(wrap); fit();
+  // ?clean=1 → ซ่อนลายน้ำ "ตัวอย่าง"
+  if (new URLSearchParams(location.search).get("clean") === "1") document.body.classList.add("clean");
+</script>
+</body>
+</html>
