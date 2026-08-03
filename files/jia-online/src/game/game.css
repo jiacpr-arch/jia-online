@@ -320,6 +320,34 @@
 }
 .cbs-sprite-img { user-select: none; }
 
+/* กรอบวิดีโอคอล "สายด่วน" — ตัวละครที่คุยผ่านโทรศัพท์ (จนท.1669)
+   ขอบกรอบครอปข้างลำตัวที่โดนตัดจากภาพต้นฉบับแผงแคบ ให้ดูเป็นเฟรมที่ตั้งใจ */
+.cbs-phoneframe {
+  position: relative; width: 52%; margin: 0 auto;
+  border: 3px solid #33406E; border-radius: 16px;
+  background: linear-gradient(180deg, #16224C, #0B1130);
+  overflow: hidden;
+  box-shadow: 0 0 0 3px rgba(4, 8, 18, .55), 0 14px 34px rgba(0, 0, 0, .55);
+}
+/* ขยายรูปกลับเท่าขนาด sprite จริง (1/0.52) — กรอบทำหน้าที่ครอปซ้ายขวา */
+.cbs-phoneframe .cbs-sprite-img, .cbs-phoneframe svg {
+  width: 192.3%; margin-left: -46.15%;
+  filter: none; /* เงา drop-shadow ไม่จำเป็นในกรอบ — กรอบมีเงาของตัวเอง */
+}
+.cbs-phoneframe-head {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--cbs-mono); font-size: 11px; letter-spacing: .08em;
+  color: #FFD9DA; background: rgba(4, 8, 18, .78);
+  border: 1.5px solid rgba(229, 72, 77, .65); border-radius: 999px;
+  padding: 4px 12px; white-space: nowrap;
+}
+.cbs-phoneframe-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--cbs-red); box-shadow: 0 0 8px var(--cbs-red);
+  animation: cbs-blink 1.2s steps(2) infinite;
+}
+
 /* HUD */
 .cbs-hud {
   position: absolute; top: 0; left: 0; right: 0; z-index: 5;
