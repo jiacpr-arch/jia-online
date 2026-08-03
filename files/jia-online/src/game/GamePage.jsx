@@ -877,6 +877,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
 
           {choice && (
             <div className="cbs-choices">
+              {/* กลับมาตอบใหม่หลังตอบผิด — แบนเนอร์ต้องเห็นแม้ไม่อ่านบทพูด */}
+              {choice.tried && choice.tried.size > 0 && (
+                <div className="cbs-retry-banner">✗ ตอบผิดไปแล้ว {choice.tried.size} ข้อ — เลือกตอบใหม่อีกครั้ง</div>
+              )}
               <div className="cbs-qbanner">⚖ {choice.q}</div>
               {choice.hintTgt && (
                 <div className="cbs-hint">💡 ลองมองหมวด <b>{choice.hintTgt}</b> ดูสิ</div>
