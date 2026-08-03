@@ -164,11 +164,15 @@ const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = 
 
 // แคมเปญคูปองจากเกม — แจกเฉพาะช่วงแคมเปญเท่านั้น (นอกช่วง ชนะเกมจะไม่ออกคูปอง) + คูปองหมดอายุวันสุดท้ายของช่วง
 // ✏️ เพิ่ม/แก้แถวเพื่อเปิดแคมเปญใหม่ (YYYY-MM-DD ตามเวลาไทย) — แคมเปญวันเดียวใช้ start = end
+// key = ลิงก์เฉพาะกิจ: คูปองออกเฉพาะคนที่เข้าผ่าน ?camp=<key> เท่านั้น (คนเข้าเว็บเองไม่ได้) — ไม่ใส่ key = ได้ทุกคนในช่วงวัน
 const GAME_VOUCHER_CAMPAIGNS = [
-  { start: "2026-08-06", end: "2026-08-06", event: "แคมเปญ LINE @jiacpr" }, // ยิงแอด LINE OA 6 ส.ค. — คูปองใช้ได้วันเดียว
+  { start: "2026-08-06", end: "2026-08-06", event: "แคมเปญ LINE @jiacpr", key: "line0806" }, // auto-reply แอด LINE OA 6 ส.ค. — วันเดียว + ผ่านลิงก์เท่านั้น
   { start: "2026-10-01", end: "2026-10-31", event: "งาน TCAS Fair" },
 ];
-const activeGameVoucherCampaign = () => { const t = todayISOTH(); return GAME_VOUCHER_CAMPAIGNS.find(c => t >= c.start && t <= c.end) || null; };
+const activeGameVoucherCampaign = () => {
+  const t = todayISOTH();
+  return GAME_VOUCHER_CAMPAIGNS.find(c => t >= c.start && t <= c.end && (!c.key || load("game_camp", null) === c.key)) || null;
+};
 const todayISOTH = () => { const t = new Date(Date.now() + 7 * 3600 * 1000); return t.toISOString().slice(0, 10); }; // วันนี้เวลาไทย (UTC+7)
 const thaiShortDate = (iso) => { try { const [y, m, d] = iso.split("-").map(Number); const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; return `${d} ${months[m - 1]} ${(y + 543) % 100}`; } catch (e) { return iso; } };
 const genLeadCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = PROMO_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
@@ -4073,6 +4077,8 @@ export default function App() {
   // UTM + A/B variant
   useEffect(() => {
     captureUTM();
+    // ลิงก์เฉพาะกิจแคมเปญ (?camp=line0806) — จำ key ไว้ให้ issueGameVoucher เช็คสิทธิ์คูปอง
+    try { const ck = new URLSearchParams(window.location.search).get("camp"); if (ck) save("game_camp", ck); } catch (e) {}
     // เข้าจาก QR บูธ → บันทึก event พร้อม utm (เช่น utm_campaign=jia-niems-2026) ไว้วัดยอดสแกน
     if (gameParam) { const u = { ...getUTM(), mode: gameRandomParam ? "random" : "hub" }; safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
