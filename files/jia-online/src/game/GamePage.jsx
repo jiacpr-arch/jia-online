@@ -63,6 +63,23 @@ const lessonTag = (c) => (c.lesson ? `บทที่ ${c.lesson}` : (c.tag || '
 // นาฬิกาจับเวลาสาย 1669 บนกรอบโทรศัพท์ (mm:ss)
 const fmtCall = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
+// ลำโพงบนหน้าจอโทรศัพท์ — off = ขีดคาดทับ (เสียงเกมปิดอยู่)
+function Speaker({ off = false }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="currentColor" d="M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z" />
+      {off ? (
+        <path stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M15.5 9.5l5 5m0-5l-5 5" />
+      ) : (
+        <path
+          fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"
+          d="M15.4 9.1a4 4 0 0 1 0 5.8M18 6.6a7.6 7.6 0 0 1 0 10.8"
+        />
+      )}
+    </svg>
+  );
+}
+
 // หูโทรศัพท์สำหรับปุ่มรับสาย/วางสาย — down = หมุนเป็นท่าวางสาย
 function Handset({ down = false }) {
   return (
@@ -565,6 +582,12 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     vibrate(20);
   }
 
+  // ปุ่มลำโพงบนกรอบโทรศัพท์ = สวิตช์เสียงของเกม (ปุ่มบนหน้าจอโทรศัพท์ที่ทำงานจริง)
+  function toggleSpeaker(e) {
+    e.stopPropagation();
+    toggleMute();
+  }
+
   function onDialogTap() {
     if (busyRef.current) return;
     if (!mutedRef.current) initAudio(); // เข้าจากลิงก์ auto-start: แตะครั้งแรกในเกมคือ gesture ที่ปลดล็อกเสียง
@@ -966,21 +989,34 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
                 <div className="cbs-phone">
                   <div className="cbs-phone-ear" />
                   <div className="cbs-phone-screen">
+                    {/* แถบสถานะบนสุดแบบมือถือ: ชื่อเครือข่าย + สัญญาณ + แบต */}
+                    <div className="cbs-phone-status">
+                      <span>EMS 1669</span>
+                      <span className="cbs-phone-status-r">
+                        <span className="cbs-phone-sig" aria-hidden="true"><i /><i /><i /><i /></span>
+                        <span className="cbs-phone-batt" aria-hidden="true" />
+                      </span>
+                    </div>
+
                     {callLive ? (
-                      <>
-                        <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
-                        <div className="cbs-phone-head">
-                          <span className="cbs-phone-dot" />{char.phoneFrame}
-                          <span className="cbs-phone-time">{fmtCall(callSec)}</span>
-                        </div>
-                      </>
+                      <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
                     ) : (
                       <div className="cbs-phone-idle">
-                        <span className="cbs-phone-avatar" aria-hidden="true">📞</span>
-                        <b>{char.phoneFrame}</b>
-                        <span className="cbs-phone-idle-note">วางสายแล้ว — แตะปุ่มเขียวเพื่อโทรกลับ</span>
+                        <span className="cbs-phone-avatar" aria-hidden="true"><Handset down /></span>
+                        <span className="cbs-phone-idle-note">แตะปุ่มเขียวเพื่อโทรกลับ</span>
                       </div>
                     )}
+
+                    {/* บล็อกชื่อผู้โทร — วางแบบหน้าจอสายเรียกเข้าจริง */}
+                    <div className="cbs-phone-caller">
+                      <b>{char.name}</b>
+                      <span className="cbs-phone-sub">{char.role}</span>
+                      <span className={`cbs-phone-state ${callLive ? '' : 'cbs-off'}`}>
+                        <i className="cbs-phone-dot" />
+                        {callLive ? `กำลังสนทนา ${fmtCall(callSec)}` : `วางสายแล้ว · ${fmtCall(callSec)}`}
+                      </span>
+                    </div>
+
                     <div className="cbs-phone-keys">
                       <button
                         type="button"
@@ -991,6 +1027,15 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
                       >
                         <span className="cbs-phone-ico"><Handset /></span>
                         รับสาย
+                      </button>
+                      <button
+                        type="button"
+                        className={`cbs-phone-key cbs-phone-speaker ${muted ? '' : 'cbs-on'}`}
+                        onClick={toggleSpeaker}
+                        aria-label={muted ? 'เปิดลำโพง' : 'ปิดลำโพง'}
+                      >
+                        <span className="cbs-phone-ico"><Speaker off={muted} /></span>
+                        ลำโพง
                       </button>
                       <button
                         type="button"

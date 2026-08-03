@@ -310,8 +310,9 @@
 
 .cbs-sprite {
   position: relative; z-index: 2; flex-shrink: 0;
-  /* ขนาดเดียวกับ Code Blue Sim (acls.morroo.com) — ตัวละครใหญ่เกือบเต็มความกว้างจอมือถือ */
-  width: min(105vw, 445px);
+  /* ตัวละครใหญ่เกือบเต็มความกว้างจอมือถือ — แต่ไม่เกิน 100vw
+     เพราะเวที overflow:hidden จะเฉือนแขน/ไหล่ที่ล้นออกไปจนดูแหว่ง */
+  width: min(100vw, 445px);
 }
 .cbs-sprite.cbs-pop { animation: cbs-pop .22s ease; }
 .cbs-sprite svg, .cbs-sprite-img {
@@ -324,7 +325,7 @@
    จอครอปข้างลำตัวที่โดนตัดจากภาพต้นฉบับแผงแคบ ให้ดูเป็นเฟรมที่ตั้งใจ
    + ปุ่มรับสาย/วางสายบนจอ เหมือนหน้าจอสายเรียกเข้าในมือถือจริง */
 .cbs-phone {
-  position: relative; width: 60%; margin: 0 auto;
+  position: relative; width: 63%; margin: 0 auto;
   padding: 9px 8px 10px;
   border: 2px solid #3A466F; border-radius: 26px;
   background: linear-gradient(180deg, #2A3254, #171D35 46%, #0E1327);
@@ -353,62 +354,101 @@
   width: 192.3%; margin-left: -46.15%;
   filter: none; /* เงา drop-shadow ไม่จำเป็นในกรอบ — กรอบมีเงาของตัวเอง */
 }
-.cbs-phone-head {
-  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-  display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--cbs-mono); font-size: 11px; letter-spacing: .08em;
-  color: #FFD9DA; background: rgba(4, 8, 18, .78);
-  border: 1.5px solid rgba(229, 72, 77, .65); border-radius: 999px;
-  padding: 4px 12px; white-space: nowrap;
+/* แถบสถานะบนสุดของจอ — เครือข่าย/สัญญาณ/แบต */
+.cbs-phone-status {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 11px 9px;
+  font-family: var(--cbs-mono); font-size: 8.5px; letter-spacing: .1em;
+  color: rgba(233, 239, 255, .9);
+  background: linear-gradient(180deg, rgba(4, 8, 18, .8), transparent);
 }
+.cbs-phone-status-r { display: inline-flex; align-items: center; gap: 5px; }
+.cbs-phone-sig { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 8px; }
+.cbs-phone-sig i { width: 2px; background: currentColor; border-radius: 1px; }
+.cbs-phone-sig i:nth-child(1) { height: 3px; }
+.cbs-phone-sig i:nth-child(2) { height: 5px; }
+.cbs-phone-sig i:nth-child(3) { height: 6.5px; }
+.cbs-phone-sig i:nth-child(4) { height: 8px; }
+.cbs-phone-batt {
+  position: relative; width: 15px; height: 8px; border-radius: 2px;
+  border: 1px solid currentColor; padding: 1px;
+  background:
+    linear-gradient(90deg, currentColor 72%, transparent 72%) content-box no-repeat;
+}
+.cbs-phone-batt::after {
+  content: ""; position: absolute; right: -3px; top: 2px;
+  width: 1.5px; height: 3px; border-radius: 0 1px 1px 0; background: currentColor;
+}
+
+/* บล็อกชื่อผู้โทร — ชื่อ + หน่วยงาน + สถานะสาย เหมือนหน้าจอโทรออกจริง */
+.cbs-phone-caller {
+  position: absolute; top: 22px; left: 0; right: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 4px 10px 16px; text-align: center;
+  background: linear-gradient(180deg, rgba(4, 8, 18, .72) 45%, transparent);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .85);
+}
+.cbs-phone-caller b { font-size: 13.5px; letter-spacing: .02em; }
+.cbs-phone-sub { font-size: 9.5px; color: #A8B4D8; letter-spacing: .06em; }
+.cbs-phone-state {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 2px;
+  font-family: var(--cbs-mono); font-size: 10px; color: #BFE9CF;
+  font-variant-numeric: tabular-nums;
+}
+.cbs-phone-state.cbs-off { color: #C79AA0; }
 .cbs-phone-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--cbs-red); box-shadow: 0 0 8px var(--cbs-red);
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--cbs-green); box-shadow: 0 0 7px var(--cbs-green);
   animation: cbs-blink 1.2s steps(2) infinite;
 }
-.cbs-phone-time {
-  color: #FFE7B4; font-variant-numeric: tabular-nums;
-  padding-left: 6px; border-left: 1px solid rgba(255, 255, 255, .22);
+.cbs-phone-state.cbs-off .cbs-phone-dot {
+  background: var(--cbs-red); box-shadow: 0 0 7px var(--cbs-red); animation: none;
 }
 
 /* หน้าจอตอนวางสายไปแล้ว — บทพูดยังเดินต่อได้ แค่ปิดภาพปลายสาย */
 .cbs-phone-idle {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 9px; min-height: 260px; padding: 26px 16px 92px; text-align: center;
+  gap: 12px; min-height: 250px; padding: 84px 16px 92px;
 }
+.cbs-phone-idle-note { font-size: 10.5px; color: #8B99C4; letter-spacing: .04em; }
 .cbs-phone-avatar {
-  width: 64px; height: 64px; border-radius: 50%;
-  display: grid; place-items: center; font-size: 26px;
-  background: rgba(88, 196, 220, .14);
-  border: 1.5px solid rgba(120, 140, 200, .32);
+  width: 74px; height: 74px; border-radius: 50%;
+  display: grid; place-items: center; color: #7C8AB4;
+  background: rgba(120, 140, 200, .12);
+  border: 1.5px solid rgba(120, 140, 200, .28);
 }
-.cbs-phone-idle b {
-  font-family: var(--cbs-mono); font-size: 12.5px; letter-spacing: .08em;
-}
-.cbs-phone-idle-note { font-size: 11px; color: #8B99C4; line-height: 1.55; }
+.cbs-phone-avatar svg { width: 30px; height: 30px; filter: none; }
 
 /* แถบปุ่มรับสาย/วางสาย — ลอยบนจอเหมือน call screen (ไม่กินความสูงเวที) */
 .cbs-phone-keys {
   position: absolute; left: 0; right: 0; bottom: 0;
-  display: flex; justify-content: center; gap: 18px;
-  padding: 30px 8px 10px;
-  background: linear-gradient(180deg, transparent, rgba(4, 8, 18, .88) 58%);
+  display: flex; justify-content: center; gap: 14px;
+  padding: 34px 8px 12px;
+  background: linear-gradient(180deg, transparent, rgba(4, 8, 18, .9) 58%);
 }
 .cbs-phone-key {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
   padding: 0; border: 0; background: none; cursor: pointer;
-  font-family: var(--cbs-mono); font-size: 10px; letter-spacing: .06em;
+  font-family: var(--cbs-mono); font-size: 9.5px; letter-spacing: .06em;
   color: #E7ECFF;
 }
 .cbs-phone-ico {
   width: 42px; height: 42px; border-radius: 50%;
-  display: grid; place-items: center; color: #fff;
+  display: grid; place-items: center; color: #fff; font-size: 17px;
   border: 1.5px solid rgba(4, 8, 18, .45);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .28);
 }
 .cbs-phone-key svg { width: 21px; height: 21px; display: block; filter: none; }
 .cbs-phone-answer .cbs-phone-ico { background: linear-gradient(180deg, #4BD97F, #1E9B4C); }
 .cbs-phone-hangup .cbs-phone-ico { background: linear-gradient(180deg, #F2686C, #C22026); }
+/* ลำโพง = สวิตช์เสียงเกม — สว่างเมื่อเปิดเสียง */
+.cbs-phone-speaker .cbs-phone-ico {
+  background: rgba(233, 239, 255, .14); border-color: rgba(233, 239, 255, .3);
+}
+.cbs-phone-speaker.cbs-on .cbs-phone-ico {
+  background: rgba(233, 239, 255, .92); border-color: rgba(255, 255, 255, .6);
+}
 .cbs-phone-key:disabled { opacity: .32; cursor: default; }
 .cbs-phone-key:not(:disabled):active .cbs-phone-ico { transform: scale(.92); }
 /* ปุ่มที่กดได้ตอนนี้สั่นเรียกสายให้เห็นชัดว่าแตะได้ */
