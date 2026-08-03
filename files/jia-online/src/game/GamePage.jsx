@@ -60,6 +60,21 @@ const readCleared = () => {
 // ป้ายอ้างอิงบทเรียน — เคสที่ไม่ผูกกับบทใดบทหนึ่ง (bonus) ใช้ c.tag แทน "บทที่ N"
 const lessonTag = (c) => (c.lesson ? `บทที่ ${c.lesson}` : (c.tag || 'โบนัส'));
 
+// นาฬิกาจับเวลาสาย 1669 บนกรอบโทรศัพท์ (mm:ss)
+const fmtCall = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+// หูโทรศัพท์สำหรับปุ่มรับสาย/วางสาย — down = หมุนเป็นท่าวางสาย
+function Handset({ down = false }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" style={down ? { transform: 'rotate(133deg)' } : undefined}>
+      <path
+        fill="currentColor"
+        d="M6.6 10.8c1.4 2.8 3.8 5.2 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.2.4 2.4.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.4 0 .8-.2 1l-2.3 2.2z"
+      />
+    </svg>
+  );
+}
+
 // สุ่มเคสที่ยังไม่ถูกล็อก — สำหรับเข้าจากแบนเนอร์/ลิงก์ ?game=random เสิร์ฟโจทย์ให้นักเรียนทันที
 // เลี่ยงเคสที่เคยผ่านมาก่อน (ให้เจอของใหม่) — ถ้าผ่านครบแล้วค่อยสุ่มจากทั้งหมด
 const randomUnlockedScenario = (finalExamPassed) => {
@@ -147,6 +162,17 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   const [result, setResult] = useState(null); // { won, grade, score, isHiscore }
   const [voucher, setVoucher] = useState(null); // รหัสคูปองส่วนลด ฿100 ที่ได้จากการชนะเกม (null = ยังไม่ได้/ไม่มีสิทธิ์)
   const [hiscore, setHiscore] = useState(() => Number(localStorage.getItem(hiscoreKey(difficulty)) || 0));
+
+  // สายด่วน 1669 — สถานะกรอบโทรศัพท์ (คุมแค่การแสดงผลของกรอบ ไม่แตะ flow เนื้อเรื่อง:
+  // วางสายแล้วบทพูดยังเดินต่อได้ตามปกติ แค่ปิดภาพปลายสายจนกว่าจะกดรับสายใหม่)
+  const [callLive, setCallLive] = useState(true);
+  const [callSec, setCallSec] = useState(0);
+  const onCall = !!(speaker && getCharacter(speaker.who)?.phoneFrame);
+  useEffect(() => {
+    if (!onCall || !callLive) return undefined;
+    const iv = setInterval(() => setCallSec((s) => s + 1), 1000);
+    return () => clearInterval(iv);
+  }, [onCall, callLive]);
 
   const timers = useRef({ type: null, dec: null, misc: [], metronome: null });
   const busyRef = useRef(false);
@@ -521,6 +547,24 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     );
   }
 
+  // ปุ่มบนกรอบโทรศัพท์ — stopPropagation กันไปโดนแตะเวที (ซึ่ง = ข้าม/ไปต่อบทพูด)
+  function answerCall(e) {
+    e.stopPropagation();
+    if (callLive) return;
+    setCallLive(true);
+    setCallSec(0);
+    sfx(() => playBeep(680, 0.12, 0.2));
+    vibrate(30);
+  }
+
+  function hangCall(e) {
+    e.stopPropagation();
+    if (!callLive) return;
+    setCallLive(false);
+    sfx(() => playBeep(220, 0.2, 0.24));
+    vibrate(20);
+  }
+
   function onDialogTap() {
     if (busyRef.current) return;
     if (!mutedRef.current) initAudio(); // เข้าจากลิงก์ auto-start: แตะครั้งแรกในเกมคือ gesture ที่ปลดล็อกเสียง
@@ -556,6 +600,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     setDrama(null);
     setSpeaker(null);
     setPlate(null);
+    setCallLive(true);
+    setCallSec(0);
     setDlgHtml('');
     setScreen('game');
     track('game_started', { scenario_id: sc.id, lesson: sc.lesson, difficulty });
@@ -915,13 +961,50 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
           {speaker && (
             <div className={`cbs-sprite ${reducedMotion ? '' : 'cbs-pop'}`} key={`sp-${speaker.popN}`}>
               {char?.phoneFrame ? (
-                /* ตัวละครที่คุยผ่านสาย — ใส่กรอบวิดีโอคอล: ขอบกรอบครอปข้างลำตัว
-                   ที่โดนตัดจากภาพต้นฉบับ ให้ดูเป็นเฟรมสายด่วนที่ตั้งใจ */
-                <div className="cbs-phoneframe">
-                  <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
-                  <div className="cbs-phoneframe-head">
-                    <span className="cbs-phoneframe-dot" />{char.phoneFrame}
+                /* ตัวละครที่คุยผ่านสาย — ใส่กรอบโทรศัพท์: จอครอปข้างลำตัวที่โดนตัด
+                   จากภาพต้นฉบับ ให้ดูเป็นเฟรมสายด่วนที่ตั้งใจ + ปุ่มรับสาย/วางสายจริง */
+                <div className="cbs-phone">
+                  <div className="cbs-phone-ear" />
+                  <div className="cbs-phone-screen">
+                    {callLive ? (
+                      <>
+                        <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
+                        <div className="cbs-phone-head">
+                          <span className="cbs-phone-dot" />{char.phoneFrame}
+                          <span className="cbs-phone-time">{fmtCall(callSec)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="cbs-phone-idle">
+                        <span className="cbs-phone-avatar" aria-hidden="true">📞</span>
+                        <b>{char.phoneFrame}</b>
+                        <span className="cbs-phone-idle-note">วางสายแล้ว — แตะปุ่มเขียวเพื่อโทรกลับ</span>
+                      </div>
+                    )}
+                    <div className="cbs-phone-keys">
+                      <button
+                        type="button"
+                        className="cbs-phone-key cbs-phone-answer"
+                        onClick={answerCall}
+                        disabled={callLive}
+                        aria-label="รับสาย"
+                      >
+                        <span className="cbs-phone-ico"><Handset /></span>
+                        รับสาย
+                      </button>
+                      <button
+                        type="button"
+                        className="cbs-phone-key cbs-phone-hangup"
+                        onClick={hangCall}
+                        disabled={!callLive}
+                        aria-label="วางสาย"
+                      >
+                        <span className="cbs-phone-ico"><Handset down /></span>
+                        วางสาย
+                      </button>
+                    </div>
                   </div>
+                  <div className="cbs-phone-chin" />
                 </div>
               ) : (
                 <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
