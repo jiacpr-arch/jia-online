@@ -162,11 +162,13 @@ const adminPing = async (key) => {
 };
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 
-// แคมเปญคูปองจากเกม — แจกเฉพาะช่วงงานเท่านั้น (นอกช่วงนี้ ชนะเกมจะไม่ออกคูปอง) + คูปองมีวันหมดอายุ
-// ✏️ ปรับ 2 วันนี้เพื่อเปลี่ยนช่วงงาน (รูปแบบ YYYY-MM-DD ตามเวลาไทย)
-const GAME_VOUCHER_START = "2026-10-01"; // วันเริ่มแจกคูปอง
-const GAME_VOUCHER_END   = "2026-10-31"; // วันสุดท้ายที่แจก + วันหมดอายุคูปอง
-const GAME_VOUCHER_EVENT = "TCAS Fair";  // ชื่องาน (โชว์บนคูปอง)
+// แคมเปญคูปองจากเกม — แจกเฉพาะช่วงแคมเปญเท่านั้น (นอกช่วง ชนะเกมจะไม่ออกคูปอง) + คูปองหมดอายุวันสุดท้ายของช่วง
+// ✏️ เพิ่ม/แก้แถวเพื่อเปิดแคมเปญใหม่ (YYYY-MM-DD ตามเวลาไทย) — แคมเปญวันเดียวใช้ start = end
+const GAME_VOUCHER_CAMPAIGNS = [
+  { start: "2026-08-06", end: "2026-08-06", event: "แคมเปญ LINE @jiacpr" }, // ยิงแอด LINE OA 6 ส.ค. — คูปองใช้ได้วันเดียว
+  { start: "2026-10-01", end: "2026-10-31", event: "งาน TCAS Fair" },
+];
+const activeGameVoucherCampaign = () => { const t = todayISOTH(); return GAME_VOUCHER_CAMPAIGNS.find(c => t >= c.start && t <= c.end) || null; };
 const todayISOTH = () => { const t = new Date(Date.now() + 7 * 3600 * 1000); return t.toISOString().slice(0, 10); }; // วันนี้เวลาไทย (UTC+7)
 const thaiShortDate = (iso) => { try { const [y, m, d] = iso.split("-").map(Number); const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; return `${d} ${months[m - 1]} ${(y + 543) % 100}`; } catch (e) { return iso; } };
 const genLeadCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = PROMO_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
@@ -4003,17 +4005,22 @@ export default function App() {
   // (กันเข้าใจผิดเรื่องส่วนลด/เงินคืน — กฎเดียวกับหน้าใบประกาศ/สมัคร)
   const issueGameVoucher = useCallback(() => {
     if (isPreCourseStudent()) return null;
-    // เฉพาะช่วงงานเท่านั้น — นอกช่วงนี้ไม่ออกคูปอง (เกมยังเล่นได้ปกติ แค่ไม่มีรางวัลคูปอง)
-    const today = todayISOTH();
-    if (today < GAME_VOUCHER_START || today > GAME_VOUCHER_END) return null;
-    const note = `ใช้เป็นส่วนลดภายใน ${thaiShortDate(GAME_VOUCHER_END)} · เฉพาะงาน ${GAME_VOUCHER_EVENT}`;
+    // เฉพาะช่วงแคมเปญเท่านั้น — นอกช่วงไม่ออกคูปอง (เกมยังเล่นได้ปกติ แค่ไม่มีรางวัลคูปอง)
+    const camp = activeGameVoucherCampaign();
+    if (!camp) return null;
+    const note = camp.start === camp.end
+      ? `ใช้ได้เฉพาะวันที่ ${thaiShortDate(camp.end)} วันเดียว · ${camp.event}`
+      : `ใช้เป็นส่วนลดภายใน ${thaiShortDate(camp.end)} · เฉพาะ${camp.event}`;
+    // รียูสคูปองเดิมเฉพาะใบที่ยังไม่หมดอายุ (ไม่มีวันหมดอายุ = คูปองสมัคร ใช้ได้ตลอด)
+    // ใบจากแคมเปญก่อนที่หมดอายุแล้ว → ออกใบใหม่ของแคมเปญนี้แทน
     const existing = load("coupon", null);
-    if (existing) return { code: existing, note };
+    const existingExp = load("coupon_expires", null);
+    if (existing && (!existingExp || todayISOTH() <= existingExp)) return { code: existing, note };
     const c = genCoupon();
     save("coupon", c);
-    save("coupon_expires", GAME_VOUCHER_END); // เก็บวันหมดอายุไว้ (หน้าจอง/เซลล์ใช้อ้างอิงได้)
+    save("coupon_expires", camp.end); // เก็บวันหมดอายุไว้ (หน้าจอง/เซลล์ใช้อ้างอิงได้)
     // ใส่วันหมดอายุใน staff_name ให้เซลล์เห็นในระบบ (promo_codes ไม่มีคอลัมน์ expires_at)
-    try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: `game·exp ${GAME_VOUCHER_END}` }); } catch (e) {}
+    try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: `game·exp ${camp.end}` }); } catch (e) {}
     return { code: c, note };
   }, []);
   // เข้าคอร์ส: ขึ้นกับตัวแปรด่าน (A/B) — before-course เด้งสมัครก่อน, soft = แอด LINE แบบข้ามได้, after-lesson-1 = เข้าเลย (ด่านไปโผล่หลังจบบท 1)

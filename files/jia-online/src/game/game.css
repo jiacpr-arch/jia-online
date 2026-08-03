@@ -654,6 +654,28 @@
 .cbs-voucher-note { font-size: 12px; line-height: 1.7; color: var(--cbs-dim); }
 .cbs-voucher-cta { margin-top: 12px; width: 100%; }
 
+/* ปุ่มทัก LINE (สีแบรนด์ LINE) — ใช้ทั้งในกล่องคูปองและกล่องชวนเรียน */
+.cbs-btn-line {
+  display: block; width: 100%; margin-top: 10px; text-decoration: none; text-align: center;
+  border: 3px solid #fff; border-radius: 6px; cursor: pointer;
+  background: linear-gradient(180deg, #06C755, #04A548);
+  color: #fff; font-family: inherit; font-size: 16px; font-weight: 900;
+  padding: 14px; letter-spacing: .02em;
+  box-shadow: 0 5px 0 #037A36, 0 12px 24px rgba(6, 199, 85, .28);
+  transition: transform .08s ease, box-shadow .08s ease;
+}
+.cbs-btn-line:active { transform: translateY(3px); box-shadow: 0 2px 0 #037A36; }
+
+/* กล่องชวนไปคอร์สปฏิบัติหลังจบเกม (เคสไม่มีคูปอง: แพ้ / ชนะนอกช่วงแคมเปญ) */
+.cbs-invite {
+  width: 100%; margin: 4px 0 6px; padding: 16px 14px; text-align: center;
+  border: 2px solid #33406E; border-radius: 14px;
+  background: linear-gradient(180deg, rgba(88, 196, 220, .12), rgba(10, 16, 36, .55));
+}
+.cbs-invite-title { font-size: 15px; font-weight: 800; color: var(--cbs-ink); }
+.cbs-invite-sub { font-size: 12px; line-height: 1.7; color: var(--cbs-dim); margin-top: 6px; }
+.cbs-invite-ghost { margin-top: 8px; width: 100%; }
+
 /* เผยรางวัลใหม่ในหน้า debrief */
 .cbs-award-reveal {
   width: 100%; margin: 4px 0 14px; padding: 12px;
