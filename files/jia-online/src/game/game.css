@@ -288,8 +288,9 @@
 }
 
 .cbs-sprite {
-  position: relative; z-index: 2;
-  width: min(64vw, 275px);
+  position: relative; z-index: 2; flex-shrink: 0;
+  /* ขนาดเดียวกับ Code Blue Sim (acls.morroo.com) — ตัวละครใหญ่เกือบเต็มความกว้างจอมือถือ */
+  width: min(105vw, 445px);
 }
 .cbs-sprite.cbs-pop { animation: cbs-pop .22s ease; }
 .cbs-sprite svg, .cbs-sprite-img {
