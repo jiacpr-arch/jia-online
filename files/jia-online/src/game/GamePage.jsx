@@ -871,7 +871,18 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
 
           {speaker && (
             <div className={`cbs-sprite ${reducedMotion ? '' : 'cbs-pop'}`} key={`sp-${speaker.popN}`}>
-              <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
+              {char?.phoneFrame ? (
+                /* ตัวละครที่คุยผ่านสาย — ใส่กรอบวิดีโอคอล: ขอบกรอบครอปข้างลำตัว
+                   ที่โดนตัดจากภาพต้นฉบับ ให้ดูเป็นเฟรมสายด่วนที่ตั้งใจ */
+                <div className="cbs-phoneframe">
+                  <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
+                  <div className="cbs-phoneframe-head">
+                    <span className="cbs-phoneframe-dot" />{char.phoneFrame}
+                  </div>
+                </div>
+              ) : (
+                <CharacterSprite charId={speaker.who} pose={speaker.pose} talking={typing} imgV={imgV} />
+              )}
             </div>
           )}
 

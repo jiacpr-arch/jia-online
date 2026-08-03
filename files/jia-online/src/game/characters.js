@@ -136,6 +136,7 @@ export const CHARACTERS = {
     name: 'หมอพร้อม · 1669',
     role: 'ศูนย์สั่งการฉุกเฉิน',
     plate: ['#D9542B', '#96320F'],
+    phoneFrame: 'สายด่วน 1669', // คุยผ่านสาย — แสดงในกรอบวิดีโอคอล (ซ่อนขอบแขนที่โดนตัดจากภาพต้นฉบับ)
     placeholder(pose) {
       const skin = '#F6CDA8', uni = '#D9542B', uniD = '#A53A12', hair = '#2A2233';
       return `<svg viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg">
