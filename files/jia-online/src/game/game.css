@@ -146,6 +146,14 @@
 }
 .cbs-hint b { color: var(--cbs-gold); font-family: var(--cbs-mono); }
 .cbs-choice-dim { opacity: .5; }
+/* ข้อที่ตอบผิดไปแล้ว — ขีดฆ่าคาไว้ให้เห็นว่าตัดข้อไหนไปแล้ว และกดซ้ำไม่ได้ */
+.cbs-choice-tried {
+  opacity: .45;
+  text-decoration: line-through;
+  text-decoration-thickness: 2.5px;
+  text-decoration-color: var(--cbs-red);
+  pointer-events: none;
+}
 .cbs-choice-hint { border-color: var(--cbs-gold); box-shadow: 0 5px 0 #0B1130, 0 0 16px rgba(242, 193, 78, .5); }
 
 /* ============ CASE SELECT ============ */
