@@ -25,6 +25,12 @@ import './game.css';
 const GAME_NAME = 'CPR HERO';
 const GAME_EYEBROW = 'ภารกิจพลเมืองดี';
 
+// ชวนต่อไปคอร์สปฏิบัติหลังจบเกม — deep link เปิดแชต OA พร้อมข้อความที่พิมพ์ให้แล้ว
+// (คนจากแอด LINE เป็นเพื่อน OA อยู่แล้ว แตะเดียวถึงแชต + เซลล์เห็นข้อความก็รู้ว่า lead มาจากเกม)
+const LINE_OA_ID = '@jiacpr';
+const lineChatUrl = (text) =>
+  `https://line.me/R/oaMessage/${encodeURIComponent(LINE_OA_ID)}/?${encodeURIComponent(text)}`;
+
 const HISCORE_PREFIX = 'cprhero_hiscore';
 const MUTE_KEY = 'cprhero_muted';
 const DIFF_KEY = 'cprhero_difficulty';
@@ -764,6 +770,43 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
                   onClick={() => { track('game_voucher_cta', { scenario_id: sc.id }); onGoBooking(); }}
                 >
                   จองคอร์ส On-site ใช้ส่วนลดนี้ →
+                </button>
+              )}
+              <a
+                className="cbs-btn-line"
+                href={lineChatUrl(`สนใจคอร์สปฏิบัติ CPR ค่ะ/ครับ — มาจากเกม ${GAME_NAME} มีคูปองส่วนลด ฿100 โค้ด ${voucher.code}`)}
+                target="_blank" rel="noopener noreferrer"
+                onClick={() => track('game_line_cta', { scenario_id: sc.id, won: true, voucher: true })}
+              >
+                💬 ทัก LINE {LINE_OA_ID} ใช้ส่วนลด/สอบถาม
+              </a>
+            </div>
+          )}
+          {/* ชวนไปคอร์สปฏิบัติ — โชว์ทุกครั้งที่จบเกมแบบไม่มีคูปอง (แพ้ / ชนะนอกช่วงแคมเปญ)
+              จังหวะแพ้คือจังหวะขายที่แรงที่สุด: เกมเพิ่งสอนเองว่าของจริงไม่มีปุ่มเริ่มใหม่ */}
+          {!(result.won && voucher) && (
+            <div className="cbs-invite">
+              <div className="cbs-invite-title">
+                {result.won ? '🫀 เก่งในเกมแล้ว — ลองฝึกกับหุ่นจริงไหม?' : '🫀 ในเกมแก้มือได้ แต่ชีวิตจริงไม่มีปุ่มเริ่มใหม่'}
+              </div>
+              <div className="cbs-invite-sub">
+                คอร์สปฏิบัติ CPR: ฝึกปั๊มหัวใจ + ใช้ AED กับหุ่นจริง ครูจริง — จบแล้วช่วยคนตรงหน้าได้จริง
+              </div>
+              <a
+                className="cbs-btn-line"
+                href={lineChatUrl(`สนใจคอร์สปฏิบัติ CPR ค่ะ/ครับ — มาจากเกม ${GAME_NAME}`)}
+                target="_blank" rel="noopener noreferrer"
+                onClick={() => track('game_line_cta', { scenario_id: sc.id, won: result.won, voucher: false })}
+              >
+                💬 ทัก LINE {LINE_OA_ID} คุยกับทีมงาน
+              </a>
+              {onGoBooking && (
+                <button
+                  type="button"
+                  className="cbs-btn-ghost cbs-invite-ghost"
+                  onClick={() => { track('game_invite_booking', { scenario_id: sc.id, won: result.won }); onGoBooking(); }}
+                >
+                  ดูรอบคอร์สปฏิบัติ →
                 </button>
               )}
             </div>
