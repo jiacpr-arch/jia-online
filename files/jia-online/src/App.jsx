@@ -165,8 +165,10 @@ const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = 
 // แคมเปญคูปองจากเกม — แจกเฉพาะช่วงแคมเปญเท่านั้น (นอกช่วง ชนะเกมจะไม่ออกคูปอง) + คูปองหมดอายุวันสุดท้ายของช่วง
 // ✏️ เพิ่ม/แก้แถวเพื่อเปิดแคมเปญใหม่ (YYYY-MM-DD ตามเวลาไทย) — แคมเปญวันเดียวใช้ start = end
 // key = ลิงก์เฉพาะกิจ: คูปองออกเฉพาะคนที่เข้าผ่าน ?camp=<key> เท่านั้น (คนเข้าเว็บเองไม่ได้) — ไม่ใส่ key = ได้ทุกคนในช่วงวัน
+// unlockCourse = เข้าผ่านลิงก์ในวันแคมเปญ → ปลดคอร์สออนไลน์ครบทุกบท (สิทธิ์ติดเครื่องถาวร เรียนต่อ/สอบ/
+// รับใบประกาศวันหลังได้ — รับสิทธิ์ได้เฉพาะวันแคมเปญเท่านั้น; ด่านสมัคร+ดูวิดีโอ+สอบ ยังบังคับตามปกติ)
 const GAME_VOUCHER_CAMPAIGNS = [
-  { start: "2026-08-06", end: "2026-08-06", event: "แคมเปญ LINE @jiacpr", key: "line0806" }, // auto-reply แอด LINE OA 6 ส.ค. — วันเดียว + ผ่านลิงก์เท่านั้น
+  { start: "2026-08-06", end: "2026-08-06", event: "แคมเปญ LINE @jiacpr", key: "line0806", unlockCourse: true }, // auto-reply แอด LINE OA 6 ส.ค. — วันเดียว + ผ่านลิงก์เท่านั้น
   { start: "2026-10-01", end: "2026-10-31", event: "งาน TCAS Fair" },
 ];
 const activeGameVoucherCampaign = () => {
@@ -399,7 +401,10 @@ const CERT_DECO = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="
 // ========== PURCHASE HELPERS ==========
 const getPurchased = () => {
   const stored = load("purchased", null);
-  const promoUnlocked = load("promo_unlocked", []);
+  // สิทธิ์ปลดทุกบทจากแคมเปญวันเดียว (camp_course_unlock เช่น LINE OA 6 ส.ค.) — รวมกับบทที่ปลดจากโค้ด
+  const promoUnlocked = load("camp_course_unlock", false)
+    ? [1, 2, 3, 4, 5, 6, 7]
+    : load("promo_unlocked", []);
   if (stored && stored.length) return promoUnlocked.length ? [...new Set([...stored, ...promoUnlocked])] : stored;
   if (load("grandfathered", false)) return [1,2,3,4,5,6,7];
   // grandfather: เฉพาะ user ที่เข้าใช้งานจริงในช่วง FREE_LAUNCH เท่านั้น จึงคงสิทธิ์เรียนฟรีทุกบท
@@ -2058,6 +2063,12 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
       );
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+      {/* สิทธิ์ปลดทุกบทจากแคมเปญวันเดียว — บอกนักเรียนชัดๆ ว่าเรียนครบ+สอบผ่านแล้วได้ใบประกาศเลย */}
+      {load("camp_course_unlock", false) && (
+        <div style={{ width: "100%", marginBottom: 12, padding: "12px 14px", background: `${B.gold}15`, border: `1.5px dashed ${B.gold}`, borderRadius: 12, fontSize: 13, lineHeight: 1.6, color: B.black }}>
+          🎉 <b>สิทธิ์พิเศษแคมเปญ LINE:</b> ปลดคอร์สให้ครบทุกบทแล้ว — เรียนจบ + สอบผ่าน รับใบประกาศนียบัตรออนไลน์ได้เลย
+        </div>
+      )}
       {/* CPR HERO — เกมฝึกสถานการณ์จริง อิงเนื้อหาบทเรียน (เล่นฟรีทุกเคส) */}
       <button onClick={() => { safeTrack("game_banner_click", { from: "course" }); phCapture("game_banner_click", { from: "course" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", marginBottom: 12, background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 14, padding: "14px 16px", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🚨</div>
@@ -4079,6 +4090,13 @@ export default function App() {
     captureUTM();
     // ลิงก์เฉพาะกิจแคมเปญ (?camp=line0806) — จำ key ไว้ให้ issueGameVoucher เช็คสิทธิ์คูปอง
     try { const ck = new URLSearchParams(window.location.search).get("camp"); if (ck) save("game_camp", ck); } catch (e) {}
+    // แคมเปญที่เปิด unlockCourse: เข้าผ่านลิงก์ในวันแคมเปญ → ปลดคอร์สทุกบทให้เลย (จำสิทธิ์ถาวรในเครื่อง)
+    const camp = activeGameVoucherCampaign();
+    if (camp?.unlockCourse && !load("camp_course_unlock", false)) {
+      save("camp_course_unlock", true);
+      safeTrack("camp_course_unlock", { camp: camp.key || camp.event });
+      phCapture("camp_course_unlock", { camp: camp.key || camp.event });
+    }
     // เข้าจาก QR บูธ → บันทึก event พร้อม utm (เช่น utm_campaign=jia-niems-2026) ไว้วัดยอดสแกน
     if (gameParam) { const u = { ...getUTM(), mode: gameRandomParam ? "random" : "hub" }; safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
