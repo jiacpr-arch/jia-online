@@ -2182,11 +2182,11 @@ function Certificate({ user, go }) {
       <div style={{ width: CERT_W, height: CERT_H, transform: `scale(${scale})`, transformOrigin: "top left" }}>
         <div ref={certRef} style={{ position: "relative", width: CERT_W, height: CERT_H, boxSizing: "border-box", background: "#FFFDF7", overflow: "hidden" }}>
           <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: CERT_DECO }}/>
-          <div style={{ position: "absolute", top: 34, left: 0, right: 0, display: "flex", justifyContent: "center" }}><Logo size={200}/></div>
-          <div style={{ position: "absolute", top: 210, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>ใบประกาศนียบัตร</div>
-          <div style={{ position: "absolute", top: 260, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 13, fontWeight: 700, letterSpacing: 4, color: "#B8862F" }}>CERTIFICATE OF COMPLETION</div>
-          <div style={{ position: "absolute", top: 292, left: 0, right: 0, textAlign: "center", fontSize: 15, lineHeight: 1, color: B.dkGray }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
-          <div style={{ position: "absolute", top: 322, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>{user?.name || "ชื่อผู้เรียน"}</div>
+          <div style={{ position: "absolute", top: 36, left: 0, right: 0, display: "flex", justifyContent: "center" }}><Logo size={180}/></div>
+          <div style={{ position: "absolute", top: 196, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 44, fontWeight: 600, lineHeight: 1, letterSpacing: 1, color: "#0E1E3C" }}>ใบประกาศนียบัตร</div>
+          <div style={{ position: "absolute", top: 252, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 13, fontWeight: 700, letterSpacing: 5, color: "#B8862F" }}>CERTIFICATE OF COMPLETION</div>
+          <div style={{ position: "absolute", top: 288, left: 0, right: 0, textAlign: "center", fontSize: 15, lineHeight: 1, color: B.dkGray }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
+          <div style={{ position: "absolute", top: 318, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 46, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>{user?.name || "ชื่อผู้เรียน"}</div>
           <div style={{ position: "absolute", top: 392, left: 70, right: 70, textAlign: "center", fontSize: 14, color: B.dkGray }}>ได้ผ่านการอบรม <strong style={{ color: "#0E1E3C" }}>ภาคทฤษฎี (ออนไลน์)</strong></div>
           <div style={{ position: "absolute", top: 412, left: 70, right: 70, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>หลักสูตรการช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED · มาตรฐาน 2025</div>
           <div style={{ position: "absolute", top: 436, left: 0, right: 0, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: B.red }}>ขอเชิญฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
@@ -2196,15 +2196,15 @@ function Certificate({ user, go }) {
           </>) : (
             <div style={{ position: "absolute", top: 495, left: 0, right: 0, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#FFF9E8" }}>แสดงใบประกาศนี้กับเจ้าหน้าที่ในวันอบรมภาคปฏิบัติ</div>
           )}
-          <div style={{ position: "absolute", top: 540, left: 50, width: 220, textAlign: "center", background: "#FFFDF7", borderRadius: 8, padding: "6px 4px", boxSizing: "border-box" }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: B.black }}>{ds}</div>
-            <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
+          <div style={{ position: "absolute", top: 542, left: 64, width: 216, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "5px 6px", boxSizing: "border-box" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25, color: B.black }}>{ds}</div>
+            <div style={{ borderTop: "1.5px solid #C49A48", marginTop: 4, paddingTop: 4, fontSize: 11.5, lineHeight: 1.25, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
           </div>
-          <div style={{ position: "absolute", top: 540, right: 60, width: 220, textAlign: "center", background: "#FFFDF7", borderRadius: 8, padding: "6px 4px", boxSizing: "border-box" }}>
-            <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 600, color: "#0E1E3C" }}>JIA TRAINER CENTER</div>
-            <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
+          <div style={{ position: "absolute", top: 542, right: 64, width: 216, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "5px 6px", boxSizing: "border-box" }}>
+            <div style={{ fontFamily: SERIF, fontSize: 14, fontWeight: 600, lineHeight: 1.25, color: "#0E1E3C" }}>JIA TRAINER CENTER</div>
+            <div style={{ borderTop: "1.5px solid #C49A48", marginTop: 4, paddingTop: 4, fontSize: 11.5, lineHeight: 1.25, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
           </div>
-          <div style={{ position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 11, color: B.dkGray }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
+          <div style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 10.5, letterSpacing: .5, color: "#8A7A55" }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
         </div>
       </div>
     </div>
