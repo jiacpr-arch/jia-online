@@ -7,7 +7,7 @@
 <title>ตัวอย่างใบประกาศนียบัตร (ออนไลน์ + ส่วนลด ฿100) — JIA TRAINER CENTER</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800;900&family=Trirong:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800;900&family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Noto Sans Thai', -apple-system, sans-serif; background: #F5F5F5; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
@@ -17,9 +17,10 @@
   /* wrapper ย่อ-ขยายใบเซอร์ตามหน้าจอ (สัดส่วนเดิม 900x636 เหมือนในแอป) */
   .cert-wrap { width: 100%; max-width: 900px; overflow: hidden; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
   .cert-scale { width: 900px; transform-origin: top left; }
-  .cert { position: relative; width: 900px; height: 636px; background: #FFFDF7; overflow: hidden; }
+  /* ฟอนต์ Sarabun ทั้งใบ — มาตรฐานเอกสารทางการไทย */
+  .cert { position: relative; width: 900px; height: 636px; background: #FFFDF7; overflow: hidden; font-family: 'Sarabun', 'Noto Sans Thai', sans-serif; }
   .cert .abs { position: absolute; left: 0; right: 0; text-align: center; }
-  .serif { font-family: 'Trirong', 'Noto Sans Thai', Georgia, serif; }
+  .serif { font-family: 'Sarabun', 'Noto Sans Thai', sans-serif; }
   /* ลายน้ำ "ตัวอย่าง" — กันเอาไปใช้จริง (เปิดหน้าด้วย ?clean=1 เพื่อซ่อน) */
   .watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
   .watermark span { font-size: 110px; font-weight: 900; color: #C8102E; opacity: .08; transform: rotate(-22deg); letter-spacing: 10px; white-space: nowrap; }
@@ -85,10 +86,10 @@
         </svg>
       </div>
       <div class="abs" style="top:36px;display:flex;justify-content:center"><img src="/logo.png" alt="JIA TRAINER CENTER" style="width:180px;height:auto" onerror="this.style.display='none'"/></div>
-      <div class="abs serif" style="top:196px;font-size:44px;font-weight:600;line-height:1;letter-spacing:1px;color:#0E1E3C">ใบประกาศนียบัตร</div>
+      <div class="abs serif" style="top:196px;font-size:44px;font-weight:700;line-height:1;letter-spacing:1px;color:#0E1E3C">ใบประกาศนียบัตร</div>
       <div class="abs serif" style="top:252px;font-size:13px;font-weight:700;letter-spacing:5px;color:#B8862F">CERTIFICATE OF COMPLETION</div>
       <div class="abs" style="top:288px;font-size:15px;line-height:1;color:#666">ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
-      <div class="abs serif" style="top:318px;font-size:46px;font-weight:600;line-height:1;color:#0E1E3C">สมชาย ใจดี</div>
+      <div class="abs serif" style="top:318px;font-size:46px;font-weight:700;line-height:1;color:#0E1E3C">สมชาย ใจดี</div>
       <div class="abs" style="top:392px;left:70px;right:70px;font-size:14px;color:#666">ได้ผ่านการอบรม <strong style="color:#0E1E3C">ภาคทฤษฎี (ออนไลน์)</strong></div>
       <div class="abs" style="top:412px;left:70px;right:70px;font-size:14px;font-weight:700;color:#1A1A1A">หลักสูตรการช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED · มาตรฐาน 2025</div>
       <div class="abs" style="top:436px;font-size:12.5px;font-weight:600;color:#C8102E">ขอเชิญฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
