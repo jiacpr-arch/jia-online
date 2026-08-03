@@ -374,7 +374,7 @@ const CERT_DECO = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="
 <path d="M62,606 h-34 v-34"/><path d="M55,598 h-22 v-22" stroke-width="1"/>
 </g>
 <g fill="url(#cg)" stroke="url(#cg)">
-<line x1="305" y1="376" x2="438" y2="376" stroke-width="1.4"/><line x1="462" y1="376" x2="595" y2="376" stroke-width="1.4"/>
+<line x1="305" y1="376" x2="438" y2="376" stroke="#B8862F" stroke-width="1.4"/><line x1="462" y1="376" x2="595" y2="376" stroke="#B8862F" stroke-width="1.4"/>
 <rect x="445" y="371" width="10" height="10" transform="rotate(45 450 376)"/>
 <circle cx="305" cy="376" r="2.2" stroke="none"/><circle cx="595" cy="376" r="2.2" stroke="none"/>
 </g>
@@ -2182,7 +2182,7 @@ function Certificate({ user, go }) {
       <div style={{ width: CERT_W, height: CERT_H, transform: `scale(${scale})`, transformOrigin: "top left" }}>
         <div ref={certRef} style={{ position: "relative", width: CERT_W, height: CERT_H, boxSizing: "border-box", background: "#FFFDF7", overflow: "hidden" }}>
           <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: CERT_DECO }}/>
-          <div style={{ position: "absolute", top: 22, left: 0, right: 0, display: "flex", justifyContent: "center" }}><Logo size={240}/></div>
+          <div style={{ position: "absolute", top: 34, left: 0, right: 0, display: "flex", justifyContent: "center" }}><Logo size={200}/></div>
           <div style={{ position: "absolute", top: 210, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>ใบประกาศนียบัตร</div>
           <div style={{ position: "absolute", top: 260, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 13, fontWeight: 700, letterSpacing: 4, color: "#B8862F" }}>CERTIFICATE OF COMPLETION</div>
           <div style={{ position: "absolute", top: 292, left: 0, right: 0, textAlign: "center", fontSize: 15, lineHeight: 1, color: B.dkGray }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
@@ -2196,11 +2196,11 @@ function Certificate({ user, go }) {
           </>) : (
             <div style={{ position: "absolute", top: 495, left: 0, right: 0, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#FFF9E8" }}>แสดงใบประกาศนี้กับเจ้าหน้าที่ในวันอบรมภาคปฏิบัติ</div>
           )}
-          <div style={{ position: "absolute", top: 548, left: 50, width: 220, textAlign: "center" }}>
+          <div style={{ position: "absolute", top: 540, left: 50, width: 220, textAlign: "center", background: "#FFFDF7", borderRadius: 8, padding: "6px 4px", boxSizing: "border-box" }}>
             <div style={{ fontSize: 16, fontWeight: 600, color: B.black }}>{ds}</div>
             <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
           </div>
-          <div style={{ position: "absolute", top: 548, right: 50, width: 220, textAlign: "center" }}>
+          <div style={{ position: "absolute", top: 540, right: 60, width: 220, textAlign: "center", background: "#FFFDF7", borderRadius: 8, padding: "6px 4px", boxSizing: "border-box" }}>
             <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 600, color: "#0E1E3C" }}>JIA TRAINER CENTER</div>
             <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
           </div>
