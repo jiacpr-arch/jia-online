@@ -6,7 +6,7 @@ import { shuffled } from "./game/storyEngine";
 
 // ==================== BRAND ====================
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
-const SERIF = "'Sarabun', 'Noto Sans Thai', sans-serif"; // ฟอนต์ใบประกาศ (หัวข้อ + ชื่อผู้เรียน) — Sarabun มาตรฐานเอกสารทางการไทย
+const SERIF = "'Bai Jamjuree', 'Noto Sans Thai', sans-serif"; // ฟอนต์ใบประกาศ (หัวข้อ + ชื่อผู้เรียน)
 
 // ========== CONFIG ==========
 const FREE_LAUNCH = false; // cutover แล้ว (ก.ค. 2569) — บทที่ 1 ฟรี บทที่เหลือเก็บเงินตาม PRICING, Claim CTA เปิดใช้งาน
