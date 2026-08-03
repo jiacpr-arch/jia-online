@@ -809,9 +809,13 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   return (
     <div className={`cbs-app ${shaking ? 'cbs-shake' : ''}`}>
       <section className="cbs-game">
+        {/* พื้นที่แตะ = ทั้งเวที ไม่ใช่แค่กล่องบทพูด — คนมักแตะกลางจอ ซึ่งเดิม
+            ไม่มีผลอะไรเลยจนคิดว่าเกมค้าง (onDialogTap กันไว้อยู่แล้วเมื่อกำลัง
+            แสดงตัวเลือก จึงไม่ชนกับปุ่มตอบ) */}
         <div
           className={`cbs-stage ${drama === 'red' ? 'cbs-drama-red' : drama === 'white' ? 'cbs-drama' : ''}`}
           style={backgroundUrl(sc) ? { '--cbs-stage-bg': `url('${backgroundUrl(sc)}')` } : undefined}
+          onClick={onDialogTap}
         >
           <div className="cbs-hud">
             <div className="cbs-hud-monitor">
@@ -852,7 +856,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
             <button
               type="button"
               className="cbs-menu-btn"
-              onClick={() => setQuitMenu(true)}
+              onClick={(e) => { e.stopPropagation(); setQuitMenu(true); }}
               aria-label="เมนู"
             >
               ☰
