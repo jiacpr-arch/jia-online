@@ -147,6 +147,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   const [awaitTap, setAwaitTap] = useState(false);
   const currentChoiceRef = useRef(null);
   const retryChoiceRef = useRef(null);
+  // ข้อที่ตอบผิดไปแล้วของคำถามปัจจุบัน — ขีดฆ่า + ปิดไม่ให้เลือกซ้ำตอนตอบใหม่
+  const wrongPicksRef = useRef(new Set());
   const decisionLeftRef = useRef(0);
   const comboBreakN = useRef(0);
   const hintUsedRef = useRef(false);
@@ -340,6 +342,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   }
 
   function showChoice(c) {
+    if (currentChoiceRef.current !== c) wrongPicksRef.current = new Set();
     currentChoiceRef.current = c;
     setDrama('white');
     const diff = getDifficulty(S.current.difficulty);
@@ -347,7 +350,8 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     const hintTgt = diff.hints && hintUsedRef.current
       ? (c.options.find((o) => o.ok)?.tgt || null)
       : null;
-    setChoice({ q: c.q, options: shuffled(c.options), hintTgt });
+    // snapshot ชุดข้อผิดเข้า state — อ่าน ref ระหว่าง render ไม่ได้ (react-hooks/refs)
+    setChoice({ q: c.q, options: shuffled(c.options), hintTgt, tried: new Set(wrongPicksRef.current) });
     sfx(playChoiceAppear); // มีคำถามเด้งขึ้น — เรียกสมาธิ
     setDecisionLeft(diff.decisionTime);
     decisionLeftRef.current = diff.decisionTime;
@@ -475,6 +479,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     }
     recordWrong(st, option);
     pushEtco2(st);
+    if (option.label) wrongPicksRef.current.add(option.label); // timeout ไม่มี label — ไม่ต้องขีด
     hintUsedRef.current = true;
     vibrate([60, 40, 60]);
     // เสียงผิดต่ำ / ถ้าสตรีคขาดใช้เสียงไล่โน้ตลงแทน ให้เจ็บกว่า
@@ -506,7 +511,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     retryChoiceRef.current = currentChoiceRef.current;
     setAwaitTap(true);
     typeText(
-      `<span class="cbs-em">ช้าก่อน!</span>${whyText}${option.worsen ? ' — ผู้ป่วยแย่ลง สีหน้าคล้ำขึ้น!' : ''}`,
+      `<span class="cbs-em">ช้าก่อน!</span>${whyText}${option.worsen ? ' — ผู้ป่วยแย่ลง สีหน้าคล้ำขึ้น!' : ''} แตะจอเพื่อ<span class="cbs-em">ตอบใหม่</span> (ข้อที่ผิดถูกขีดฆ่าไว้แล้ว)`,
     );
   }
 
@@ -536,6 +541,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     setAwaitTap(false);
     currentChoiceRef.current = null;
     retryChoiceRef.current = null;
+    wrongPicksRef.current = new Set();
     hintUsedRef.current = false;
     setResult(null);
     setComboBreak(null);
@@ -809,9 +815,13 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   return (
     <div className={`cbs-app ${shaking ? 'cbs-shake' : ''}`}>
       <section className="cbs-game">
+        {/* พื้นที่แตะ = ทั้งเวที ไม่ใช่แค่กล่องบทพูด — คนมักแตะกลางจอ ซึ่งเดิม
+            ไม่มีผลอะไรเลยจนคิดว่าเกมค้าง (onDialogTap กันไว้อยู่แล้วเมื่อกำลัง
+            แสดงตัวเลือก จึงไม่ชนกับปุ่มตอบ) */}
         <div
           className={`cbs-stage ${drama === 'red' ? 'cbs-drama-red' : drama === 'white' ? 'cbs-drama' : ''}`}
           style={backgroundUrl(sc) ? { '--cbs-stage-bg': `url('${backgroundUrl(sc)}')` } : undefined}
+          onClick={onDialogTap}
         >
           <div className="cbs-hud">
             <div className="cbs-hud-monitor">
@@ -852,7 +862,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
             <button
               type="button"
               className="cbs-menu-btn"
-              onClick={() => setQuitMenu(true)}
+              onClick={(e) => { e.stopPropagation(); setQuitMenu(true); }}
               aria-label="เมนู"
             >
               ☰
@@ -872,13 +882,15 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
                 <div className="cbs-hint">💡 ลองมองหมวด <b>{choice.hintTgt}</b> ดูสิ</div>
               )}
               {choice.options.map((o, i) => {
-                const dim = choice.hintTgt && o.tgt !== choice.hintTgt;
+                const tried = choice.tried && choice.tried.has(o.label);
+                const dim = !tried && choice.hintTgt && o.tgt !== choice.hintTgt;
                 const glow = choice.hintTgt && o.tgt === choice.hintTgt;
                 return (
                   <button
                     key={i}
                     type="button"
-                    className={`cbs-choice ${dim ? 'cbs-choice-dim' : ''} ${glow ? 'cbs-choice-hint' : ''}`}
+                    disabled={tried}
+                    className={`cbs-choice ${tried ? 'cbs-choice-tried' : ''} ${dim ? 'cbs-choice-dim' : ''} ${glow ? 'cbs-choice-hint' : ''}`}
                     onClick={() => pick(o)}
                   >
                     <span className="cbs-choice-tgt">▸ {o.tgt}</span>
