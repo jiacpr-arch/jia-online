@@ -68,6 +68,9 @@ export const CHARACTERS = {
     name: 'ป้าแก้ว',
     role: 'คนเห็นเหตุการณ์',
     plate: ['#C86FA0', '#8E3D6C'],
+    // ท่า panic ของป้าแก้ว: ไม่ใช้รูป panic.webp — ให้ไปหยิบรูปท่า talk มาแสดงแทน
+    // (ท่าตะโกนเหมือนกัน) engine ยังส่ง pose 'panic' ตามเดิม เอฟเฟกต์จอแดงจึงยังทำงาน
+    poseImage: { panic: 'talk' },
     placeholder(pose) {
       const skin = '#F6CDA8', dress = '#C86FA0', dressD = '#9A4A78', hair = '#4A3A3F';
       return `<svg viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg">
@@ -186,8 +189,14 @@ export function registerCustomImages(map) {
 }
 
 // URL รูปจริง — ลำดับ: รูปที่แอดมินอัปโหลด > ไฟล์ใน public/images/characters/ > SVG placeholder
+// ตัวละครที่ตั้ง poseImage ไว้ จะสลับไปใช้ไฟล์ของอีกท่าหนึ่ง — แต่ถ้าแอดมินอัปโหลดรูป
+// ของท่านั้นมาเองแล้ว ให้รูปที่อัปโหลดชนะเสมอ (ตั้งใจอัปมาก็ต้องได้ใช้)
 export function characterImageUrl(charId, pose, talking = false) {
-  const key = `${charId}/${pose}${talking ? '_talk' : ''}`;
-  if (customImages[key]) return customImages[key];
-  return `/images/characters/${charId}/${pose}${talking ? '_talk' : ''}.webp`;
+  const suffix = talking ? '_talk' : '';
+  if (customImages[`${charId}/${pose}${suffix}`]) return customImages[`${charId}/${pose}${suffix}`];
+  const file = CHARACTERS[charId]?.poseImage?.[pose] || pose;
+  if (file !== pose && customImages[`${charId}/${file}${suffix}`]) {
+    return customImages[`${charId}/${file}${suffix}`];
+  }
+  return `/images/characters/${charId}/${file}${suffix}.webp`;
 }
