@@ -68,9 +68,6 @@ export const CHARACTERS = {
     name: 'ป้าแก้ว',
     role: 'คนเห็นเหตุการณ์',
     plate: ['#C86FA0', '#8E3D6C'],
-    // ท่า panic ของป้าแก้ว: ไม่ใช้รูป panic.webp — ให้ไปหยิบรูปท่า talk มาแสดงแทน
-    // (ท่าตะโกนเหมือนกัน) engine ยังส่ง pose 'panic' ตามเดิม เอฟเฟกต์จอแดงจึงยังทำงาน
-    poseImage: { panic: 'talk' },
     placeholder(pose) {
       const skin = '#F6CDA8', dress = '#C86FA0', dressD = '#9A4A78', hair = '#4A3A3F';
       return `<svg viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg">
