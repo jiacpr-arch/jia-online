@@ -1,0 +1,14 @@
+
+# Local recovery: keep generated output and credentials off GitLab
+node_modules/
+dist/
+.next/
+.vercel/
+.wrangler/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+*.tsbuildinfo
+src.tar.gz
