@@ -72,7 +72,9 @@ const AUTH_GATE_ENABLED = true;          // เปิดด่านบังค
 const LIFF_ID = "2010458255-JAxIKawy";     // LIFF ID จาก LINE Developers (PUBLIC) — channel "JIA CPR Online" / provider JiaTrainingcenter
 const GOOGLE_LOGIN_ENABLED = true;        // ต้องเปิด Google provider ใน Supabase Auth ก่อนใช้จริง
 const EMAIL_OTP_ENABLED = true;           // ต้องเปิด Email (OTP) provider ใน Supabase Auth
-const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY || "";  // PUBLIC PostHog project key (ตั้งผ่าน env ใน Vercel). ว่าง = ไม่ส่ง event เข้า PostHog
+// PUBLIC PostHog project key (override ได้ผ่าน env ใน Vercel) — hardcode ไว้เพราะก่อนหน้านี้ env ไม่ได้ตั้ง
+// ทำให้ PostHog เงียบสนิท วัดผลโฆษณาไม่ได้ (โปรเจกต์ "Default project" org JiaLucksa, us.posthog.com)
+const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY || "phc_zYMrFeM7HEGEBUdgeyixzNw24pt5XUom38QAAJfAwgLr";
 const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com";
 const GATE_VARIANT_DEFAULT = "soft"; // soft (แอด LINE แบบข้ามได้ ลด drop) | before-course (ควิซเกริ่นนำ→สมัคร→เข้าคอร์ส) | after-lesson-1
 const FN_URL = (n) => `${SUPABASE_URL}/functions/v1/${n}`;
@@ -218,7 +220,8 @@ const getPosthog = async () => {
   if (_phTried) return _ph;
   _phTried = true;
   if (!POSTHOG_KEY) return null;
-  try { const mod = await import("posthog-js"); const posthog = mod.default || mod; posthog.init(POSTHOG_KEY, { api_host: POSTHOG_HOST, capture_pageview: false }); _ph = posthog; return posthog; }
+  // capture_pageview: true → ได้ $pageview พร้อม utm_* /fbclid อัตโนมัติทุกครั้งที่เปิด (ไว้วัดผลโฆษณา)
+  try { const mod = await import("posthog-js"); const posthog = mod.default || mod; posthog.init(POSTHOG_KEY, { api_host: POSTHOG_HOST, capture_pageview: true }); _ph = posthog; return posthog; }
   catch (e) { return null; }
 };
 const phCapture = (name, props) => { getPosthog().then(ph => { try { ph && ph.capture(name, props); } catch(e){} }); };
@@ -4028,9 +4031,13 @@ export default function App() {
   // เปิดเกม CPR HERO ทันที ไม่ผ่านด่านสมัคร/หน้าที่ค้างไว้:
   //   ?game=1      → QR บูธ/อีเวนต์ (เช่น JIA-NIEMS-2026) เข้าหน้าเลือกเคส (hub)
   //   ?game=random → ลิงก์แบนเนอร์ "ท้าดวลกู้ชีพ" สุ่มโจทย์ให้นักเรียนเล่นทันที → ชนะรับคูปองส่วนลด
-  const gameValue = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("game") : null;
-  const gameRandomParam = gameValue === "random";
-  const gameParam = gameValue === "1" || gameRandomParam;
+  //   /game?random=play → ฟอร์แมตเดียวกับ firstaid.morroo.com (ใช้ยิงแอด) — เต็มจอสุ่มโจทย์ทันที
+  //   /game (ไม่มี random) → หน้าเลือกเคส · query อื่น (utm_*, fbclid, camp) คงอยู่ครบ ไม่มี redirect
+  const gameSearch = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const gameValue = gameSearch ? gameSearch.get("game") : null;
+  const gamePathParam = typeof window !== "undefined" && /^\/game\/?$/.test(window.location.pathname);
+  const gameRandomParam = gameValue === "random" || (gamePathParam && gameSearch && gameSearch.get("random") === "play");
+  const gameParam = gameValue === "1" || gamePathParam || gameRandomParam;
   // ต้องมี session_id (Stripe แทนค่าให้ตอน redirect กลับ) ถึงจะเข้าสู่หน้าตรวจสอบการจ่ายเงิน
   // ได้ — กัน exploit เดิมที่พิมพ์ ?stripe=success&modules=... เองแล้วปลดล็อกฟรีทันที
   const stripeSessionId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("session_id") : null;
@@ -4186,7 +4193,8 @@ export default function App() {
 
   return (
     <>
-      <InAppNotice />
+      {/* หน้าเกมจากลิงก์แอดต้องเต็มจอทันที — ซ่อนแบนเนอร์ in-app browser (แบนเนอร์นี้มีไว้ช่วย flow แอด LINE ซึ่งไม่เกี่ยวกับหน้าเกม) */}
+      {page !== "game" && <InAppNotice />}
       {(() => {
         switch (page) {
           case "stripe-verify": return <StripeVerify status={stripeVerify} go={go}/>;

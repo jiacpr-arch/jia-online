@@ -1,66 +1,78 @@
-# JIA TRAINER CENTER — Online CPR & AED Course
+# JIA TRAINER CENTER — คอร์ส CPR & AED ออนไลน์ (cpr.morroo.com)
 
-แพลตฟอร์มเรียน CPR & AED ออนไลน์ ราคา ฿100
+แอป React (Vite) หน้าเดียว สำหรับคอร์ส CPR & AED ออนไลน์ + เกม CPR HERO + หน้าแอดมิน
+Backend ทั้งหมดอยู่บน Supabase โปรเจกต์ `tpoiyykbgsgnrdwzgzvn` (DB `jia-unified` ใช้ร่วมกับแอปอื่นของ JIA)
 
-## Features
-- 5 บทเรียน + Final Exam
-- ดูวิดีโอ → ทำ Quiz → ผ่าน 80% ไปบทถัดไป
-- ใบประกาศนียบัตรอัตโนมัติ
-- ส่วนลด ฿100 สำหรับคอร์ส On-site
-- ชำระเงินผ่าน QR PromptPay + แอดมินอนุมัติ
+## โครงสร้าง repo
 
-## Deploy บน Vercel (ฟรี)
+```
+files/jia-online/            ← Root Directory ของโปรเจกต์ Vercel (ตั้งใน dashboard ไม่ใช่ใน repo)
+  src/App.jsx                ← เกือบทั้งแอป: landing, คอร์ส, ควิซ, ชำระเงิน, ใบประกาศ, จอง On-site, admin
+  src/game/                  ← เกม CPR HERO (GamePage, storyEngine, scenarios, EcgStrip, sound, characters)
+  public/                    ← รูปตัวละคร/ฉากเกม, โลโก้, หน้า static (exam-prep-*.html), รูปแอด
+  supabase/functions/        ← Edge Functions (deploy ด้วย supabase CLI, verify_jwt=false ทุกตัว)
+  supabase/migrations/       ← SQL ที่ apply บน production แล้ว (เก็บไว้เป็นประวัติ + ใช้ rerun ได้)
+  docs/                      ← SECURITY_FOLLOWUP (งาน security ค้าง), AUTH_GATE_SETUP, CPR_HERO_GAME_PLAN
+.github/workflows/mirror-to-gitlab.yml  ← ทุก push/delete บน GitHub → mirror ไป gitlab.com/jiacpr/jia-online
+```
 
-### ขั้นตอนที่ 1: เตรียม GitHub Repo
+## รันในเครื่อง
+
 ```bash
-# สร้าง repo ใหม่บน GitHub ชื่อ jia-online
-# จากนั้น push โค้ดขึ้นไป:
-cd jia-online
-git init
-git add .
-git commit -m "Initial: JIA Online Course"
-git branch -M main
-git remote add origin https://github.com/jiacpr-arch/jia-online.git
-git push -u origin main
+cd files/jia-online
+npm ci
+npm run dev      # http://localhost:5173
+npm run build    # ต้องผ่านก่อนเปิด PR (ไม่มี lint/test script)
 ```
 
-### ขั้นตอนที่ 2: Deploy บน Vercel
-1. ไปที่ https://vercel.com → Sign up ด้วย GitHub
-2. กด "New Project" → Import จาก GitHub repo "jia-online"
-3. Vercel จะ detect Vite อัตโนมัติ → กด Deploy
-4. รอ 1-2 นาที → ได้ URL เช่น `jia-online.vercel.app`
+## Deploy
 
-### ขั้นตอนที่ 3: Redirect จาก jiacpr.com/online
-ที่ MakeWebEasy:
-1. สร้างหน้าใหม่ชื่อ "online"
-2. ใส่ HTML embed:
-```html
-<script>window.location.href = "https://jia-online.vercel.app";</script>
-```
-หรือ ใส่ iframe:
-```html
-<iframe src="https://jia-online.vercel.app" 
-  style="width:100%;height:100vh;border:none;" 
-  allow="fullscreen">
-</iframe>
-```
+- **หน้าเว็บ**: push เข้า `main` → Vercel deploy production อัตโนมัติ (`cpr.morroo.com`)
+  ทุก branch/PR ได้ preview URL เอง
+- **Edge Functions**: `supabase functions deploy <name> --project-ref tpoiyykbgsgnrdwzgzvn`
+  (ทุกตัว `--no-verify-jwt`) — deploy ก่อน merge โค้ดหน้าเว็บที่เรียกใช้
+- **Migrations**: apply ด้วย Supabase MCP / SQL editor แล้ว commit ไฟล์ไว้ใน `supabase/migrations/`
 
-## สิ่งที่ต้องเพิ่มก่อนเปิดจริง
-- [ ] แทนที่ QR Code placeholder ด้วย QR PromptPay จริง (ใน Payment component)
-- [ ] เพิ่ม YouTube embed URLs สำหรับวิดีโอแต่ละบท
-- [ ] ปรับคำถาม Quiz ให้ตรงกับเนื้อหาวิดีโอจริง
-- [ ] เพิ่ม Google Analytics / Facebook Pixel tracking
-- [ ] ตั้ง Custom Domain (ถ้าต้องการ) ที่ Vercel Settings → Domains
+### Edge Functions ใน repo นี้
 
-## Tech Stack
-- React 18 + Vite
-- No external CSS framework (inline styles)
-- localStorage สำหรับ save progress
-- Responsive mobile-first design
+| ฟังก์ชัน | หน้าที่ |
+|---|---|
+| `admin-api` | หน้า admin ทั้งหมด — ตรวจ `x-admin-key` ฝั่ง server แล้วใช้ service_role |
+| `grade-quiz` | ตรวจข้อสอบท้ายบท + Final Exam ฝั่ง server (เฉลยไม่อยู่ในบันเดิล) |
+| `stripe-checkout` / `stripe-webhook` | ซื้อบทเรียนผ่าน Stripe, บันทึกสิทธิ์ลง `online_purchases` |
+| `account-progress` / `auth-line-link` / `signup-push` | บัญชีผู้เรียน, ผูก LINE, แจ้งเตือนสมัคร |
+| `line-webhook` | รับ webhook จาก LINE OA @jiacpr เก็บ user_id ลูกค้า |
+| `notify-new-student` | แจ้งทีมทาง LINE เมื่อมีนักเรียนใหม่ (trigger บน `online_students`) |
+| `notify-new-booking` | แจ้งทีมทาง LINE เมื่อมีการจอง On-site (trigger บน `bookings`) + งาน cron เตือนสลิปค้าง/รอบเรียนใกล้ถึง |
+| `customer-followup-drip` | ส่งข้อความติดตามลูกค้าตามลำดับ (pg_cron รายวัน) |
 
-## Contact
-JIA TRAINER CENTER
-- โทร: 088-558-8078
-- LINE: @jiacpr
-- Email: jiacpr@gmail.com
-- Web: jiacpr.com
+ฟังก์ชันอื่นในโปรเจกต์ Supabase เดียวกันแต่เป็นของแอปอื่น (source อยู่ repo อื่น):
+`bcpr-api` (class.morroo.com), `jiaroo-line-webhook` / `online-course-broadcast` (jiaroo CRM),
+`learning-api` / `learning-source-bridge` (learning hub)
+
+### Secrets / env ที่ต้องมี (ชื่อเท่านั้น ค่าอยู่ใน Supabase / Vercel)
+
+- Supabase function secrets: `ADMIN_API_KEY`, `NOTIFY_WEBHOOK_SECRET`, `CRON_KEY`, `LINE_CHANNEL_ACCESS_TOKEN`,
+  `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+- ตาราง `jiaroo_secrets` (tenant `jiaroo`): `NOTIFY_WEBHOOK_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN` — trigger/cron ใช้แนบ header
+- Vercel env (ไม่บังคับ): `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST` — ถ้าไม่ตั้งจะใช้ public key ที่ฝังในโค้ด
+
+## ลิงก์พิเศษของแอป
+
+| URL | ผล |
+|---|---|
+| `/game` หรือ `/?game=1` | เข้าหน้าเลือกเคสเกม CPR HERO ทันที (QR บูธ/อีเวนต์) |
+| `/game?random=play` หรือ `/?game=random` | สุ่มเคสเล่นทันทีเต็มจอ (ลิงก์ยิงแอด รูปแบบเดียวกับ firstaid.morroo.com) |
+| `/admin` | หน้าแอดมิน (ต้องมี admin key) |
+| `/cert-example.html` | ตัวอย่างใบประกาศสำหรับทีมขาย (ถ้า merge PR #80) |
+| `?camp=<code>` | แคมเปญ LINE OA (คูปอง/ปลดล็อกคอร์ส ตามที่กำหนดใน `CAMPAIGNS`) |
+
+## เอกสารที่ควรอ่านก่อนแก้
+
+- `docs/SECURITY_FOLLOWUP.md` — สถานะงาน security และสิ่งที่ยังค้าง (PII, paywall, RLS)
+- `docs/AUTH_GATE_SETUP.md` — ด่านสมัคร/ล็อกอิน (LINE LIFF, Google, Email OTP)
+- `docs/CPR_HERO_GAME_PLAN.md` — โครงเกม CPR HERO
+
+## ติดต่อ
+
+JIA TRAINER CENTER · โทร 088-558-8078 · LINE @jiacpr · jiacpr@gmail.com · jiacpr.com
