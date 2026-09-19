@@ -109,6 +109,20 @@ const LEAD_SOURCES = [
   { value: "other",     label: "อื่นๆ (โปรดระบุ)" },
 ];
 
+// ========== PARTNER COUPON (QR ใบละ 1 สิทธิ์ — ธุรกิจพันธมิตรแจกให้ลูกค้าเรียนคอร์สเต็มฟรี) ==========
+const SITE_URL = "https://cpr.morroo.com";
+const PARTNER_SOURCE = "partner_coupon";
+const genPartnerCode = (prefix) => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = (prefix || "JIA") + "-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+// LINE ID พาร์ทเนอร์ → ลิงก์เปิดแชต: ใส่ลิงก์เต็มมาก็ใช้ตรงๆ, "@..." = LINE OA, อื่นๆ = LINE ส่วนตัว (เลข ID)
+const partnerLineUrl = (v) => {
+  const s = (v || "").trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("@")) return `https://line.me/R/ti/p/${encodeURIComponent(s)}`;
+  return `https://line.me/ti/p/~${encodeURIComponent(s)}`;
+};
+const getPartnerSponsor = () => load("partner_sponsor", null);
+
 const supaRest = async (table, method = "GET", body = null, filters = "") => {
   const url = `${SUPABASE_URL}/rest/v1/${table}${filters}`;
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" };
@@ -575,6 +589,7 @@ const icons = {
   save: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
   replay: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>,
   warn: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2L1 21h22L12 2zm0 15a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm-1-2h2V10h-2v5z"/></svg>,
+  phone: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.57a1 1 0 01-.25 1.02l-2.2 2.2z"/></svg>,
 };
 const I = ({ name, size = 20, color = B.black }) => icons[name]?.(size, color) || null;
 
@@ -624,6 +639,34 @@ function MorrooAdBanner() {
         </div>
       </div>
     </a>
+  );
+}
+
+// ==================== PARTNER CONTACT CARD ====================
+// การ์ดแสดง LINE + เบอร์โทรของ "พาร์ทเนอร์" ผู้มอบคูปองเรียนฟรี (ไม่ใช่ของ JIA)
+// ใช้ 3 จุด: หลัง redeem คูปองพาร์ทเนอร์ / แบนเนอร์ในหน้าคอร์ส / หน้าใบประกาศหลังเรียนจบ
+function PartnerContactCard({ sponsor, where, title, compact }) {
+  if (!sponsor) return null;
+  const lineHref = partnerLineUrl(sponsor.line);
+  const telHref = sponsor.phone ? `tel:${sponsor.phone.replace(/[^0-9+]/g, "")}` : null;
+  const track = (channel) => { safeTrack("partner_contact_click", { company: sponsor.company, channel, where }); phCapture("partner_contact_click", { company: sponsor.company, channel, where }); };
+  if (!lineHref && !telHref) return null;
+  return (
+    <div style={{ background: `${B.gold}0F`, border: `1.5px dashed ${B.gold}`, borderRadius: 14, padding: compact ? "12px 14px" : 18, textAlign: "center" }}>
+      <div style={{ fontSize: compact ? 13 : 15, fontWeight: 800, color: B.black, marginBottom: compact ? 8 : 10 }}>
+        {title || `🎁 คอร์สนี้มอบให้ฟรีโดย ${sponsor.company}`}
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+        {lineHref && <a href={lineHref} target="_blank" rel="noopener noreferrer" onClick={() => track("line")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#06C755", color: B.white, borderRadius: 10, padding: compact ? "9px 16px" : "12px 20px", textDecoration: "none", fontWeight: 700, fontSize: compact ? 13 : 14 }}>
+          <I name="line" size={18} color={B.white}/> ทัก LINE {sponsor.company}
+        </a>}
+        {telHref && <a href={telHref} onClick={() => track("phone")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, background: B.white, color: B.black, border: `1px solid ${B.ltGray}`, borderRadius: 10, padding: compact ? "9px 16px" : "12px 20px", textDecoration: "none", fontWeight: 700, fontSize: compact ? 13 : 14 }}>
+          <I name="phone" size={16} color={B.black}/> โทร {sponsor.phone}
+        </a>}
+      </div>
+    </div>
   );
 }
 
@@ -1447,13 +1490,30 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
     const exp = load("promo_expires", null);
     return code && exp ? { code, expires_at: exp, modules: load("promo_unlocked", []).length ? load("promo_unlocked", []) : PROMO_FREE_MODULES, name: u0?.name || "" } : null;
   });
-  const [redeemCode, setRedeemCode] = useState(initialCode || "");
+  const [redeemCode, setRedeemCode] = useState(initialCode || load("partner_coupon_pending", ""));
   const [redeemErr, setRedeemErr] = useState("");
   const [copied, setCopied] = useState(false);
   // ต้องรู้ว่าใครใช้โค้ด (ชื่อ+เบอร์) ก่อน redeem เสมอ — ผูก online_students ให้ค้นหา/ดูคะแนนย้อนหลังได้
   // (ถ้าเคยกรอกไว้แล้ว เช่นจากฟอร์มขอโค้ดฟรี หรือเคยสมัครมาก่อน ใช้ค่าเดิมได้เลยไม่ต้องกรอกซ้ำ)
   const [redeemName, setRedeemName] = useState(u0?.name || "");
   const [redeemPhone, setRedeemPhone] = useState(u0?.phone || "");
+  // ===== คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — เช็คก่อนว่าโค้ดนี้เป็นคูปองพาร์ทเนอร์ไหม เพื่อโชว์แบนเนอร์ "เรียนฟรีจาก..." =====
+  const [partner, setPartner] = useState(null); // null | { status: valid|redeemed|expired, company, sponsor_line, sponsor_phone, sponsor_value, expires_at }
+  useEffect(() => {
+    const code = (initialCode || "").trim().toUpperCase();
+    if (!code) return;
+    // สแกนซ้ำจากเครื่องที่เคย redeem โค้ดนี้ไปแล้ว — เข้าเรียนต่อได้เลย ไม่ต้องกรอกซ้ำ
+    if (load("promo_redeemed", false) && load("promo_code", null) === code) { go("course"); return; }
+    (async () => {
+      const r = await supaRpc("get_partner_coupon", { p_code: code });
+      const row = Array.isArray(r) && r.length ? r[0] : null;
+      if (!row) return; // ไม่ใช่คูปองพาร์ทเนอร์ (โค้ด LEAD-/VCH-/โค้ดกลางทั่วไป) — flow เดิมทำงานตามปกติ
+      setPartner(row);
+      if (row.status === "valid") { save("claim_start_redeem", true); save("partner_coupon_pending", code); }
+      safeTrack("partner_coupon_open", { company: row.company, status: row.status }); phCapture("partner_coupon_open", { company: row.company, status: row.status });
+      supaRest("lead_capture_events", "POST", { code, event_type: "partner_coupon_open", metadata: { status: row.status } });
+    })();
+  }, []);
 
   const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(e => ({ ...e, [k]: undefined })); };
 
@@ -1601,6 +1661,13 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       // (fallback ระหว่างที่ RPC เวอร์ชันเก่ายังไม่คืน source: โค้ดกลาง multi_use คือ pre-course เสมอ)
       const preCourseStudent = row.source != null ? row.source === "pre_course" : !!row.multi_use;
       save("pre_course_student", preCourseStudent);
+      // คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — จำช่องทางติดต่อพาร์ทเนอร์ไว้โชว์หลัง redeem/ในหน้าคอร์ส/ใบประกาศ
+      // (ยังได้คูปองส่วนลด ฿100 on-site ของ JIA ตามปกติ เพราะ preCourseStudent = false เสมอสำหรับ source นี้)
+      if (row.source === PARTNER_SOURCE) {
+        save("partner_sponsor", { company: row.company, line: row.sponsor_line, phone: row.sponsor_phone, value: row.sponsor_value || partner?.sponsor_value || PRICING.full, code });
+        save("partner_coupon_pending", null);
+        safeTrack("partner_coupon_redeemed", { company: row.company }); phCapture("partner_coupon_redeemed", { company: row.company });
+      }
 
       // ผูกกับ online_students เสมอ (ไม่ว่าจะเคยสมัครมาก่อนหรือไม่) เพื่อให้พนักงานค้นหาคะแนนย้อนหลังได้
       const u = load("user", null);
@@ -1769,13 +1836,24 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
   // ===== Step: redeem =====
   if (step === "redeem") return (
     <div style={css.page}>
-      <div style={css.header(B.red)}><button onClick={() => setStep(claimed ? "reveal" : "form")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ใช้รหัสส่วนลด</div></div>
+      <div style={css.header(B.red)}><button onClick={() => setStep(claimed ? "reveal" : "form")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>{partner ? "รับสิทธิ์เรียนฟรี" : "ใช้รหัสส่วนลด"}</div></div>
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        {partner && (
+          <div style={{ background: `linear-gradient(135deg, ${B.gold} 0%, #E08800 100%)`, color: B.white, borderRadius: 16, padding: 18, marginBottom: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, opacity: .9, letterSpacing: 1, textTransform: "uppercase" }}>คูปองเรียนฟรี</div>
+            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>จาก {partner.company}</div>
+            <div style={{ fontSize: 13, marginTop: 6, opacity: .95 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 8 }}>มูลค่า ฿{partner.sponsor_value || PRICING.full}</div>
+            <div style={{ fontSize: 11, marginTop: 8, opacity: .85 }}>ใช้ได้ถึง {thaiShortDate((partner.expires_at || "").slice(0, 10))}</div>
+            {partner.status === "redeemed" && <div style={{ marginTop: 10, background: "rgba(0,0,0,.18)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 700 }}>คูปองใบนี้ถูกใช้ไปแล้ว</div>}
+            {partner.status === "expired" && <div style={{ marginTop: 10, background: "rgba(0,0,0,.18)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 700 }}>คูปองใบนี้หมดอายุแล้ว</div>}
+          </div>
+        )}
         <div style={css.card}>
-          <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>กรอกรหัสส่วนลด</h3>
-          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX, VCH-XXXXXX หรือโค้ดที่ได้รับจากเจ้าหน้าที่ (เช่น JIA-STUDENT)</p>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>{partner ? "กรอกชื่อ-เบอร์เพื่อรับสิทธิ์" : "กรอกรหัสส่วนลด"}</h3>
+          {!partner && <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX, VCH-XXXXXX หรือโค้ดที่ได้รับจากเจ้าหน้าที่ (เช่น JIA-STUDENT)</p>}
           <input type="text" value={redeemCode} onChange={e => { setRedeemCode(e.target.value.toUpperCase()); setRedeemErr(""); }} placeholder="LEAD-XXXXXX" autoCapitalize="characters"
-            style={{ width: "100%", padding: "14px 16px", border: `2px solid ${redeemErr ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 18, outline: "none", boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 2, textAlign: "center", textTransform: "uppercase" }}/>
+            style={{ width: "100%", padding: "14px 16px", border: `2px solid ${redeemErr ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 18, outline: "none", boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 2, textAlign: "center", textTransform: "uppercase", marginTop: partner ? 8 : 0 }}/>
           {redeemErr && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{redeemErr}</div>}
         </div>
         <div style={{ ...css.card, marginTop: 12 }}>
@@ -1791,18 +1869,18 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
               style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
           </div>
         </div>
-        <button onClick={redeem} disabled={validating || !redeemCode} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: (validating || !redeemCode) ? .5 : 1 }}>{validating ? "กำลังตรวจสอบ..." : "ปลดล็อกบทเรียน →"}</button>
-        {!claimed && <button onClick={() => setStep("form")} style={{ ...css.btn(B.white, B.dkGray, true), border: `1px solid ${B.ltGray}`, marginTop: 10, fontSize: 13 }}>ยังไม่มีโค้ด? รับฟรีที่นี่ →</button>}
+        <button onClick={redeem} disabled={validating || !redeemCode} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: (validating || !redeemCode) ? .5 : 1 }}>{validating ? "กำลังตรวจสอบ..." : partner ? "รับสิทธิ์เรียนฟรี →" : "ปลดล็อกบทเรียน →"}</button>
+        {!claimed && !partner && <button onClick={() => setStep("form")} style={{ ...css.btn(B.white, B.dkGray, true), border: `1px solid ${B.ltGray}`, marginTop: 10, fontSize: 13 }}>ยังไม่มีโค้ด? รับฟรีที่นี่ →</button>}
       </div>
     </div>
   );
 
   // ===== Step: redeemed =====
-  if (step === "redeemed" && claimed) return (
+  if (step === "redeemed" && claimed) { const sp = getPartnerSponsor(); return (
     <div style={css.page}>
       <div style={{ ...css.wrap, paddingTop: 60, textAlign: "center", paddingBottom: 40 }}>
         <div style={{ width: 80, height: 80, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}><I name="check" size={40} color={B.green}/></div>
-        <h2 style={{ fontSize: 24, fontWeight: 800, margin: "0 0 8px" }}>ปลดล็อกสำเร็จ!</h2>
+        <h2 style={{ fontSize: 24, fontWeight: 800, margin: "0 0 8px" }}>{sp ? `รับสิทธิ์เรียนฟรีจาก ${sp.company} แล้ว!` : "ปลดล็อกสำเร็จ!"}</h2>
         <p style={{ fontSize: 14, color: B.dkGray, marginBottom: 24 }}>โค้ด {claimed.code} ใช้แล้ว</p>
 
         <div style={{ ...css.card, textAlign: "left", marginBottom: 20 }}>
@@ -1818,10 +1896,12 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
           })}
         </div>
 
+        {sp && <div style={{ marginBottom: 20 }}><PartnerContactCard sponsor={sp} where="redeemed"/></div>}
+
         <button onClick={() => go("course")} style={{ ...css.btn(B.red, B.white, true), fontSize: 16, padding: "16px 32px" }}>เข้าเรียนเลย →</button>
       </div>
     </div>
-  );
+  ); }
 
   // fallback
   return (
@@ -2069,6 +2149,8 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
           🎉 <b>สิทธิ์พิเศษแคมเปญ LINE:</b> ปลดคอร์สให้ครบทุกบทแล้ว — เรียนจบ + สอบผ่าน รับใบประกาศนียบัตรออนไลน์ได้เลย
         </div>
       )}
+      {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — เตือนตลอดว่าใครมอบสิทธิ์เรียนฟรีนี้ให้ + ปุ่มติดต่อกลับ */}
+      {getPartnerSponsor() && <div style={{ marginBottom: 12 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="course" compact/></div>}
       {/* CPR HERO — เกมฝึกสถานการณ์จริง อิงเนื้อหาบทเรียน (เล่นฟรีทุกเคส) */}
       <button onClick={() => { safeTrack("game_banner_click", { from: "course" }); phCapture("game_banner_click", { from: "course" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", marginBottom: 12, background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 14, padding: "14px 16px", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🚨</div>
@@ -2219,6 +2301,8 @@ function Certificate({ user, go }) {
         </div>
       </div>
     </div>
+    {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — ขอบคุณผู้มอบคอร์สนี้ + ให้ช่องทางติดต่อกลับ (ไม่แตะรูปใบประกาศ) */}
+    {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
     {/* ===== LINE invite (โปรโมชัน ไม่บล็อกการดาวน์โหลด) ===== */}
     {lineLinked ? (
       <div style={{ background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 16, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>
@@ -2477,6 +2561,7 @@ const TABS = [
   { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
   { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","company","unlock_modules","multi_use","created_at","expires_at","redeemed_at","email_sent_status"] },
   { key: "voucher_issue",   label: "ออก Voucher",      custom: true },
+  { key: "partner_coupons", label: "คูปองพาร์ทเนอร์ (QR)", custom: true },
   { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
   { key: "game_chars",      label: "รูปตัวละครเกม",   custom: true },
 ];
@@ -3507,6 +3592,296 @@ function StandingCodePanel() {
   );
 }
 
+// ==================== PARTNER COUPON (QR ใบละ 1 สิทธิ์ — ธุรกิจพันธมิตรแจกให้ลูกค้าเรียนคอร์สเต็มฟรี) ====================
+function PartnerCouponPanel({ onPrint }) {
+  const [groups, setGroups] = useState([]); // [{ company, rows: [...] }]
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null); // company ที่กำลังดูรายชื่อคนใช้
+  const [editing, setEditing] = useState(null); // company ที่กำลังแก้ไขช่องทางติดต่อ
+  const [editForm, setEditForm] = useState({ sponsor_line: "", sponsor_phone: "", sponsor_value: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const [form, setForm] = useState({ company: "", prefix: "", sponsor_line: "", sponsor_phone: "", sponsor_value: String(PRICING.full), count: "50", expires: "" });
+  const [creating, setCreating] = useState(false);
+  const [err, setErr] = useState("");
+  const [created, setCreated] = useState(null); // ชุดที่เพิ่งสร้าง { company, rows }
+
+  const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(""); };
+
+  const refresh = async () => {
+    setLoading(true);
+    const res = await adminRest("lead_promo_codes", "GET", null, "?source=eq.partner_coupon&select=code,company,name,redeemed_at,redeemed_phone,expires_at,created_at,sponsor_line,sponsor_phone,sponsor_value&order=created_at.desc&limit=5000");
+    const list = Array.isArray(res) ? res : [];
+    const byCompany = new Map();
+    for (const r of list) {
+      if (!byCompany.has(r.company)) byCompany.set(r.company, []);
+      byCompany.get(r.company).push(r);
+    }
+    setGroups([...byCompany.entries()].map(([company, rows]) => ({ company, rows })));
+    setLoading(false);
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const create = async () => {
+    setErr("");
+    const company = form.company.trim();
+    const prefix = form.prefix.trim().toUpperCase();
+    const n = parseInt(form.count, 10) || 0;
+    if (!company) { setErr("กรุณากรอกชื่อพาร์ทเนอร์"); return; }
+    if (!/^[A-Z0-9]{2,8}$/.test(prefix)) { setErr("รหัสย่อ 2-8 ตัว ใช้ A-Z, 0-9 เท่านั้น เช่น OMNOI"); return; }
+    if (n < 1 || n > 200) { setErr("จำนวนใบต้องอยู่ระหว่าง 1-200"); return; }
+    const sponsorValue = parseInt(form.sponsor_value, 10) || PRICING.full;
+    let expiresAt;
+    if (form.expires) {
+      const d = new Date(`${form.expires}T23:59:59`);
+      if (isNaN(d.getTime()) || d.getTime() < Date.now()) { setErr("วันหมดอายุไม่ถูกต้อง (ต้องเป็นวันในอนาคต)"); return; }
+      expiresAt = d.toISOString();
+    } else {
+      const d = new Date(); d.setFullYear(d.getFullYear() + 1);
+      expiresAt = d.toISOString();
+    }
+    setCreating(true);
+    const buildRows = () => {
+      const codes = new Set();
+      while (codes.size < n) codes.add(genPartnerCode(prefix));
+      return [...codes].map(code => ({
+        code, email: "", phone: `coupon:${code}`, name: `คูปองพาร์ทเนอร์ ${company}`,
+        source: PARTNER_SOURCE, company, unlock_modules: VOUCHER_ALL_MODULES,
+        expires_at: expiresAt, multi_use: false,
+        sponsor_line: form.sponsor_line.trim() || null,
+        sponsor_phone: form.sponsor_phone.trim() || null,
+        sponsor_value: sponsorValue,
+      }));
+    };
+    try {
+      // PostgREST insert หลายแถวเป็น atomic — ถ้าโค้ดชนกัน (ความน่าจะเป็นต่ำมาก) สุ่มชุดใหม่ลองอีกครั้งเดียว
+      let res = await adminRest("lead_promo_codes", "POST", buildRows());
+      if (!Array.isArray(res) || !res.length) res = await adminRest("lead_promo_codes", "POST", buildRows());
+      if (!Array.isArray(res) || !res.length) { setErr("สร้างคูปองไม่สำเร็จ กรุณาลองใหม่"); setCreating(false); return; }
+      setCreated({ company, rows: res });
+      await refresh();
+    } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
+    setCreating(false);
+  };
+
+  const startEdit = (g) => {
+    const latest = g.rows[0] || {};
+    setEditing(g.company);
+    setEditForm({ sponsor_line: latest.sponsor_line || "", sponsor_phone: latest.sponsor_phone || "", sponsor_value: String(latest.sponsor_value || PRICING.full) });
+  };
+  const saveEdit = async (company) => {
+    setSavingEdit(true);
+    await adminRest("lead_promo_codes", "PATCH", {
+      sponsor_line: editForm.sponsor_line.trim() || null,
+      sponsor_phone: editForm.sponsor_phone.trim() || null,
+      sponsor_value: parseInt(editForm.sponsor_value, 10) || PRICING.full,
+    }, `?source=eq.partner_coupon&company=eq.${encodeURIComponent(company)}`);
+    setSavingEdit(false);
+    setEditing(null);
+    refresh();
+  };
+
+  const printGroup = (g, onlyUnused) => {
+    const latest = g.rows[0] || {};
+    const rows = onlyUnused ? g.rows.filter(r => !r.redeemed_at && new Date(r.expires_at) > new Date()) : g.rows;
+    if (!rows.length) { alert("ไม่มีคูปองที่พิมพ์ได้ในเงื่อนไขนี้"); return; }
+    onPrint({ company: g.company, rows, sponsor: { line: latest.sponsor_line, phone: latest.sponsor_phone, value: latest.sponsor_value } });
+  };
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <div style={{ background: B.white, borderRadius: 14, padding: 20, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>สร้างคูปองพาร์ทเนอร์ (QR ใบละ 1 สิทธิ์)</h3>
+        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>ธุรกิจพันธมิตร (เช่น ออฟฟิศอ้อมน้อย) แจกคูปองให้ลูกค้า สแกนแล้วเรียนคอร์สเต็มฟรีทันที — คนละ 1 ใบ 1 สิทธิ์ หลังใช้จะเห็น LINE/เบอร์ที่กรอกไว้นี้บนหน้าเว็บ</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อพาร์ทเนอร์ *</label>
+            <input type="text" value={form.company} onChange={e => F("company", e.target.value)} placeholder="เช่น ออฟฟิศอ้อมน้อย" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>รหัสย่อ (ใช้ขึ้นต้นโค้ด) *</label>
+            <input type="text" value={form.prefix} onChange={e => F("prefix", e.target.value.toUpperCase())} placeholder="เช่น OMNOI" autoCapitalize="characters" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "monospace", textTransform: "uppercase" }}/>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>LINE (ID หรือลิงก์)</label>
+            <input type="text" value={form.sponsor_line} onChange={e => F("sponsor_line", e.target.value)} placeholder="เช่น @omnoi หรือลิงก์ line.me" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทร</label>
+            <input type="tel" value={form.sponsor_phone} onChange={e => F("sponsor_phone", e.target.value)} placeholder="เช่น 081-234-5678" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 4 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>มูลค่าที่โชว์ (฿)</label>
+            <input type="number" value={form.sponsor_value} onChange={e => F("sponsor_value", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>จำนวนใบ (1-200)</label>
+            <input type="number" value={form.count} onChange={e => F("count", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>วันหมดอายุ (เว้นว่าง = 1 ปี)</label>
+            <input type="date" value={form.expires} onChange={e => F("expires", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+        </div>
+        {err && <div style={{ color: B.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
+        <button onClick={create} disabled={creating} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: creating ? .6 : 1 }}>{creating ? "กำลังสร้าง..." : "สร้างชุดคูปอง →"}</button>
+      </div>
+
+      {created && (
+        <div style={{ background: `${B.gold}12`, border: `2px solid ${B.gold}`, borderRadius: 14, padding: 20, marginBottom: 16, textAlign: "center" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>สร้างคูปองพาร์ทเนอร์ {created.company} สำเร็จ {created.rows.length} ใบ</div>
+          <button onClick={() => printGroup({ company: created.company, rows: created.rows }, false)} style={{ ...css.btn(B.gold, B.black, true), fontSize: 14 }}>พิมพ์ชุดนี้ →</button>
+        </div>
+      )}
+
+      {loading ? <div style={{ fontSize: 13, color: B.dkGray }}>กำลังโหลด...</div> : groups.length === 0 ? (
+        <div style={{ fontSize: 13, color: B.dkGray }}>ยังไม่มีคูปองพาร์ทเนอร์ในระบบ</div>
+      ) : groups.map(g => {
+        const total = g.rows.length;
+        const used = g.rows.filter(r => r.redeemed_at).length;
+        const expired = g.rows.filter(r => !r.redeemed_at && new Date(r.expires_at) < new Date()).length;
+        const left = total - used - expired;
+        const latest = g.rows[0] || {};
+        return (
+          <div key={g.company} style={{ background: B.white, borderRadius: 14, padding: 18, marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>{g.company}</div>
+                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>
+                  ทั้งหมด {total} · ใช้แล้ว <strong style={{ color: B.green }}>{used}</strong> · เหลือ <strong style={{ color: B.gold }}>{left}</strong>{expired > 0 && <> · หมดอายุ {expired}</>}
+                </div>
+                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>LINE: {latest.sponsor_line || "—"} · โทร: {latest.sponsor_phone || "—"} · มูลค่า ฿{latest.sponsor_value || PRICING.full}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button onClick={() => printGroup(g, true)} style={{ ...css.btn(B.gold, B.black), fontSize: 12, padding: "8px 12px" }}>พิมพ์ใบที่ยังไม่ใช้</button>
+                <button onClick={() => printGroup(g, false)} style={{ ...css.btn(B.white, B.black), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>พิมพ์ทั้งหมด</button>
+                <button onClick={() => setExpanded(expanded === g.company ? null : g.company)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>{expanded === g.company ? "ซ่อนรายชื่อ" : "ดูรายชื่อคนใช้"}</button>
+                <button onClick={() => startEdit(g)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>แก้ไขช่องทางติดต่อ</button>
+              </div>
+            </div>
+
+            {editing === g.company && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${B.gray}` }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                  <input type="text" value={editForm.sponsor_line} onChange={e => setEditForm(p => ({ ...p, sponsor_line: e.target.value }))} placeholder="LINE" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+                  <input type="tel" value={editForm.sponsor_phone} onChange={e => setEditForm(p => ({ ...p, sponsor_phone: e.target.value }))} placeholder="เบอร์โทร" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+                  <input type="number" value={editForm.sponsor_value} onChange={e => setEditForm(p => ({ ...p, sponsor_value: e.target.value }))} placeholder="มูลค่า ฿" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+                </div>
+                <button onClick={() => saveEdit(g.company)} disabled={savingEdit} style={{ ...css.btn(B.red, B.white), fontSize: 12, padding: "8px 16px" }}>{savingEdit ? "กำลังบันทึก..." : "บันทึก"}</button>
+                <button onClick={() => setEditing(null)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 16px", marginLeft: 8 }}>ยกเลิก</button>
+                <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6 }}>ใช้กับคูปองทุกใบของพาร์ทเนอร์นี้ (คูปองที่พิมพ์ไปแล้วไม่ต้องพิมพ์ใหม่ — QR เดิมยังใช้ได้ แค่หน้าเว็บจะโชว์ข้อมูลใหม่)</div>
+              </div>
+            )}
+
+            {expanded === g.company && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${B.gray}` }}>
+                {g.rows.filter(r => r.redeemed_at).length === 0 ? (
+                  <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีใครใช้คูปองนี้</div>
+                ) : g.rows.filter(r => r.redeemed_at).map(r => (
+                  <div key={r.code} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${B.gray}`, fontSize: 12.5 }}>
+                    <span>{r.name} · {r.redeemed_phone}</span>
+                    <span style={{ color: B.dkGray }}>{new Date(r.redeemed_at).toLocaleString("th-TH")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ==================== PARTNER COUPON CARD (การ์ดคูปอง 1 ใบ — ใช้ทั้งพิมพ์และบันทึกรูป) ====================
+function PartnerCouponCard({ row, svg, cardRef }) {
+  const expiryTh = row.expires_at ? thaiShortDate(String(row.expires_at).slice(0, 10)) : "-";
+  return (
+    <div ref={cardRef} style={{ width: "90mm", height: "62mm", boxSizing: "border-box", border: "1px dashed #999", borderRadius: "3mm", padding: "3mm", background: "#FFFDF7", display: "flex", gap: "3mm", breakInside: "avoid", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", fontFamily: "'Noto Sans Thai', sans-serif" }}>
+      <div style={{ width: "30mm", flexShrink: 0, textAlign: "center" }}>
+        <div style={{ width: "30mm", height: "30mm" }} dangerouslySetInnerHTML={{ __html: svg || "" }}/>
+        <div style={{ fontFamily: "monospace", fontSize: "7.5pt", fontWeight: 700, letterSpacing: ".5px", marginTop: "1mm", wordBreak: "break-all" }}>{row.code}</div>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "1.5mm" }}><Logo size={34}/><div style={{ fontSize: "10pt", fontWeight: 800, color: "#C8102E" }}>คูปองเรียนฟรี</div></div>
+        <div style={{ fontSize: "7.5pt", color: "#333", marginTop: "1mm", lineHeight: 1.3 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
+        <div style={{ fontSize: "12pt", fontWeight: 800, color: "#C8102E", marginTop: "1mm" }}>มูลค่า ฿{row.sponsor_value || PRICING.full}</div>
+        <div style={{ fontSize: "7.5pt", fontWeight: 700, marginTop: "1mm" }}>มอบโดย {row.company}</div>
+        <div style={{ fontSize: "6.5pt", color: "#666", marginTop: "0.5mm" }}>ใช้ได้ถึง {expiryTh} · 1 คูปอง/1 คน</div>
+        <div style={{ fontSize: "6.5pt", color: "#666", marginTop: "1.5mm", lineHeight: 1.4 }}>1) สแกน QR &nbsp; 2) กรอกชื่อ+เบอร์ &nbsp; 3) เรียนได้ทันที</div>
+        <div style={{ fontSize: "6.5pt", color: "#333", marginTop: "1.5mm", fontWeight: 600 }}>ติดต่อ {row.company}{row.sponsor_line ? ` · LINE ${row.sponsor_line}` : ""}{row.sponsor_phone ? ` · โทร ${row.sponsor_phone}` : ""}</div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== PARTNER COUPON PRINT SHEET (แทนที่หน้าแอดมินทั้งหน้าตอนพิมพ์ — ไม่ใช้ window.open) ====================
+function PartnerCouponPrintSheet({ job, onClose }) {
+  const [svgs, setSvgs] = useState({}); // code -> svg string
+  const [ready, setReady] = useState(false);
+  const cardRefs = useRef({});
+  const [savingCode, setSavingCode] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const mod = await import("qrcode");
+      const QR = mod.default || mod;
+      const entries = await Promise.all(job.rows.map(async (r) => {
+        const url = `${SITE_URL}/?promo=${r.code}&utm_source=partner&utm_medium=qr&utm_campaign=${encodeURIComponent((r.code.split("-")[0] || "").toLowerCase())}`;
+        const s = await QR.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M" });
+        return [r.code, s];
+      }));
+      if (!cancelled) { setSvgs(Object.fromEntries(entries)); setReady(true); }
+    })();
+    return () => { cancelled = true; };
+  }, [job]);
+
+  const saveImage = async (row) => {
+    const el = cardRefs.current[row.code];
+    if (!el || savingCode) return;
+    setSavingCode(row.code);
+    try {
+      const dataUrl = await captureNodeToPng(el);
+      await deliverBlob(await dataUrlToBlob(dataUrl), `coupon_${row.code}.png`, "image/png");
+    } catch (e) { alert("บันทึกรูปไม่สำเร็จ"); }
+    setSavingCode(null);
+  };
+
+  const PER_PAGE = 8;
+  const pages = [];
+  for (let i = 0; i < job.rows.length; i += PER_PAGE) pages.push(job.rows.slice(i, i + PER_PAGE));
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#E5E5E5" }}>
+      <style>{`@page { size: A4 portrait; margin: 10mm } @media print { .no-print { display: none !important } body { background: #fff } }`}</style>
+      <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 10, background: B.black, color: B.white, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button onClick={onClose} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={22} color={B.white}/></button>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>พิมพ์คูปองพาร์ทเนอร์ — {job.company} ({job.rows.length} ใบ)</div>
+        <button onClick={() => window.print()} disabled={!ready} style={{ ...css.btn(B.gold, B.black), fontSize: 13, padding: "8px 18px", opacity: ready ? 1 : .5, marginLeft: "auto" }}>{ready ? "พิมพ์" : "กำลังสร้าง QR..."}</button>
+      </div>
+      {pages.map((pageRows, pi) => (
+        <div key={pi} style={{ background: "#fff", width: "210mm", minHeight: "277mm", margin: "10mm auto", padding: "10mm", boxSizing: "border-box", breakAfter: "page" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "90mm 90mm", gap: "6mm", justifyContent: "center" }}>
+            {pageRows.map(row => (
+              <div key={row.code} style={{ position: "relative" }}>
+                <PartnerCouponCard row={row} svg={svgs[row.code]} cardRef={el => { cardRefs.current[row.code] = el; }}/>
+                <button className="no-print" onClick={() => saveImage(row)} disabled={savingCode === row.code}
+                  style={{ position: "absolute", top: 2, right: 2, background: B.white, border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 10, padding: "3px 6px", cursor: "pointer" }}>
+                  {savingCode === row.code ? "..." : "บันทึกรูป"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ==================== COMPANY SCORE REPORT (สำหรับ HR ดูคะแนน pre-course) ====================
 function CompanyReport() {
   const [rows, setRows] = useState([]);
@@ -3730,6 +4105,8 @@ function Admin() {
   const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, line_linked: 0, bookings: 0, new_24h: 0, new_7d: 0 });
   // "เห็นแล้วล่าสุด" — ใช้ไฮไลต์นักเรียนที่สมัครหลังจากครั้งที่เปิดดูรอบก่อน
   const [studentsSeenAt, setStudentsSeenAt] = useState(() => load("admin_students_seen_at", null));
+  // คูปองพาร์ทเนอร์ที่กำลังเปิดพิมพ์ — โชว์แผ่นพิมพ์แทนที่หน้าแอดมินทั้งหน้า (ไม่ใช้ window.open/print trick)
+  const [printJob, setPrintJob] = useState(null);
 
   const currentTab = TABS.find(t => t.key === tab);
   const isCustomTab = !!currentTab?.custom;
@@ -3773,6 +4150,7 @@ function Admin() {
   useEffect(() => { if (authed) { fetchStats(); } }, [authed, fetchStats]);
 
   if (!authed) return <AdminLogin onAuth={() => setAuthed(true)}/>;
+  if (printJob) return <PartnerCouponPrintSheet job={printJob} onClose={() => setPrintJob(null)}/>;
 
   const logout = () => {
     sessionStorage.removeItem(ADMIN_SESSION_KEY);
@@ -3890,6 +4268,7 @@ function Admin() {
         {tab === "dashboard" && <Dashboard/>}
         {tab === "team" && <TeamManager/>}
         {tab === "voucher_issue" && <><VoucherIssuePanel/><StandingCodePanel/></>}
+        {tab === "partner_coupons" && <PartnerCouponPanel onPrint={setPrintJob}/>}
         {tab === "company_report" && <CompanyReport/>}
         {tab === "game_chars" && <GameCharacterImages/>}
 
@@ -4105,6 +4484,9 @@ export default function App() {
   // สั้นๆ ก่อนค่อยฟันธงว่าล้มเหลว
   const [stripeVerify, setStripeVerify] = useState(null); // null | "ok" | "pending" | "failed"
   useEffect(() => {
+    // เก็บ UTM ก่อนเสมอ — เผื่อลิงก์มี ?promo=...&utm_source=... (เช่น QR คูปองพาร์ทเนอร์) เพราะ
+    // ด้านล่างจะ replaceState ตัด query ทิ้งก่อน effect เก็บ UTM หลักจะได้รัน (captureUTM idempotent)
+    captureUTM();
     const params = new URLSearchParams(window.location.search);
     if (params.get("stripe") === "success") {
       const sessionId = params.get("session_id");
