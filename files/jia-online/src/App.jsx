@@ -3797,22 +3797,47 @@ function PartnerCouponPanel({ onPrint }) {
 }
 
 // ==================== PARTNER COUPON CARD (การ์ดคูปอง 1 ใบ — ใช้ทั้งพิมพ์และบันทึกรูป) ====================
+// ขั้นตอนใช้คูปอง — โชว์เป็นวงกลมเลข 1-2-3 พร้อม label สั้นใต้แต่ละวง (อ่านง่ายกว่าข้อความยาว)
+const PARTNER_COUPON_STEPS = ["สแกน QR", "กรอกชื่อ-เบอร์", "เรียนได้ทันที"];
+
 function PartnerCouponCard({ row, svg, cardRef }) {
   const expiryTh = row.expires_at ? thaiShortDate(String(row.expires_at).slice(0, 10)) : "-";
+  const value = row.sponsor_value || PRICING.full;
   return (
-    <div ref={cardRef} style={{ width: "90mm", height: "62mm", boxSizing: "border-box", border: "1px dashed #999", borderRadius: "3mm", padding: "3mm", background: "#FFFDF7", display: "flex", gap: "3mm", breakInside: "avoid", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", fontFamily: "'Noto Sans Thai', sans-serif" }}>
-      <div style={{ width: "30mm", flexShrink: 0, textAlign: "center" }}>
-        <div style={{ width: "30mm", height: "30mm" }} dangerouslySetInnerHTML={{ __html: svg || "" }}/>
-        <div style={{ fontFamily: "monospace", fontSize: "7.5pt", fontWeight: 700, letterSpacing: ".5px", marginTop: "1mm", wordBreak: "break-all" }}>{row.code}</div>
+    <div ref={cardRef} style={{ width: "90mm", height: "62mm", boxSizing: "border-box", border: "1px dashed #B8862F", borderRadius: "3mm", background: "#FFFDF7", display: "flex", overflow: "hidden", position: "relative", breakInside: "avoid", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", fontFamily: "'Noto Sans Thai', sans-serif" }}>
+      {/* แผงซ้าย: QR เด่นชัดในกรอบขาวขอบทอง + คำกำกับ "สแกนรับสิทธิ์ฟรี" ใต้ QR โดยตรง */}
+      <div style={{ width: "34mm", flexShrink: 0, background: "#FDF3E7", borderRight: "0.6mm solid #F3DB8E", boxSizing: "border-box", padding: "2.4mm", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1mm" }}>
+        <div className="partner-coupon-qr" style={{ width: "30mm", height: "30mm", background: "#fff", border: "0.35mm solid #F3DB8E", borderRadius: "1.5mm", boxSizing: "border-box", padding: "0.8mm", boxShadow: "0 0.4mm 1mm rgba(0,0,0,.08)" }} dangerouslySetInnerHTML={{ __html: svg || "" }}/>
+        <div style={{ fontSize: "6.8pt", fontWeight: 800, color: "#C8102E", textAlign: "center", lineHeight: 1.15 }}>สแกนรับสิทธิ์ฟรี</div>
+        <div style={{ fontFamily: "monospace", fontSize: "6pt", fontWeight: 600, letterSpacing: ".3px", wordBreak: "break-all", color: "#8a6d1a", textAlign: "center" }}>{row.code}</div>
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "1.5mm" }}><Logo size={34}/><div style={{ fontSize: "10pt", fontWeight: 800, color: "#C8102E" }}>คูปองเรียนฟรี</div></div>
-        <div style={{ fontSize: "7.5pt", color: "#333", marginTop: "1mm", lineHeight: 1.3 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
-        <div style={{ fontSize: "12pt", fontWeight: 800, color: "#C8102E", marginTop: "1mm" }}>มูลค่า ฿{row.sponsor_value || PRICING.full}</div>
-        <div style={{ fontSize: "7.5pt", fontWeight: 700, marginTop: "1mm" }}>มอบโดย {row.company}</div>
-        <div style={{ fontSize: "6.5pt", color: "#666", marginTop: "0.5mm" }}>ใช้ได้ถึง {expiryTh} · 1 คูปอง/1 คน</div>
-        <div style={{ fontSize: "6.5pt", color: "#666", marginTop: "1.5mm", lineHeight: 1.4 }}>1) สแกน QR &nbsp; 2) กรอกชื่อ+เบอร์ &nbsp; 3) เรียนได้ทันที</div>
-        <div style={{ fontSize: "6.5pt", color: "#333", marginTop: "1.5mm", fontWeight: 600 }}>ติดต่อ {row.company}{row.sponsor_line ? ` · LINE ${row.sponsor_line}` : ""}{row.sponsor_phone ? ` · โทร ${row.sponsor_phone}` : ""}</div>
+      {/* แผงขวา: หัวเรื่อง+ป้ายมูลค่า, รายละเอียดคอร์ส, ขั้นตอน, ติดต่อ */}
+      <div style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "2.6mm 3mm", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: "0.8mm", columnGap: "1.5mm" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "1.3mm" }}>
+            <Logo size={24}/>
+            <div style={{ fontSize: "10.5pt", fontWeight: 900, color: "#C8102E", whiteSpace: "nowrap" }}>คูปองเรียนฟรี</div>
+          </div>
+          <div style={{ background: "#F59E0B", color: "#1A1A1A", borderRadius: 999, padding: "0.6mm 2.4mm", textAlign: "center", flexShrink: 0 }}>
+            <div style={{ fontSize: "4.6pt", fontWeight: 700, letterSpacing: ".3px", lineHeight: 1 }}>มูลค่า</div>
+            <div style={{ fontSize: "8.2pt", fontWeight: 900, lineHeight: 1.1 }}>฿{value}</div>
+          </div>
+        </div>
+        <div style={{ height: "0.4mm", background: "#F3DB8E", margin: "1.3mm 0" }}/>
+        <div style={{ fontSize: "7.6pt", color: "#333", lineHeight: 1.3 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
+        <div style={{ fontSize: "7.8pt", fontWeight: 700, color: "#1A1A1A", marginTop: "1.2mm" }}>มอบโดย {row.company}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.8mm", gap: "1mm" }}>
+          {PARTNER_COUPON_STEPS.map((label, i) => (
+            <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5mm", flex: 1, minWidth: 0 }}>
+              <div style={{ width: "3.4mm", height: "3.4mm", borderRadius: "50%", background: "#C8102E", color: "#fff", fontSize: "4.2pt", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
+              <div style={{ fontSize: "5.6pt", color: "#555", textAlign: "center", lineHeight: 1.15 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: "auto", paddingTop: "1.5mm" }}>
+          <div style={{ fontSize: "6.3pt", color: "#666" }}>ใช้ได้ถึง {expiryTh} · 1 คูปอง/1 คน</div>
+          <div style={{ fontSize: "6.5pt", color: "#333", fontWeight: 600, marginTop: "0.8mm" }}>ติดต่อ {row.company}{row.sponsor_line ? ` · LINE ${row.sponsor_line}` : ""}{row.sponsor_phone ? ` · โทร ${row.sponsor_phone}` : ""}</div>
+        </div>
       </div>
     </div>
   );
@@ -3857,7 +3882,7 @@ function PartnerCouponPrintSheet({ job, onClose }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#E5E5E5" }}>
-      <style>{`@page { size: A4 portrait; margin: 10mm } @media print { .no-print { display: none !important } body { background: #fff } }`}</style>
+      <style>{`@page { size: A4 portrait; margin: 10mm } @media print { .no-print { display: none !important } body { background: #fff } } .partner-coupon-qr svg { display: block; width: 100%; height: 100%; }`}</style>
       <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 10, background: B.black, color: B.white, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button onClick={onClose} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={22} color={B.white}/></button>
         <div style={{ fontSize: 14, fontWeight: 700 }}>พิมพ์คูปองพาร์ทเนอร์ — {job.company} ({job.rows.length} ใบ)</div>
@@ -3870,7 +3895,7 @@ function PartnerCouponPrintSheet({ job, onClose }) {
               <div key={row.code} style={{ position: "relative" }}>
                 <PartnerCouponCard row={row} svg={svgs[row.code]} cardRef={el => { cardRefs.current[row.code] = el; }}/>
                 <button className="no-print" onClick={() => saveImage(row)} disabled={savingCode === row.code}
-                  style={{ position: "absolute", top: 2, right: 2, background: B.white, border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 10, padding: "3px 6px", cursor: "pointer" }}>
+                  style={{ position: "absolute", top: -22, right: 0, background: B.white, border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 10, padding: "3px 6px", cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,.15)" }}>
                   {savingCode === row.code ? "..." : "บันทึกรูป"}
                 </button>
               </div>
