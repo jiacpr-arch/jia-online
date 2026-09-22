@@ -70,12 +70,16 @@ const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
 // ========== AUTH GATE (บังคับสมัครหลังจบบท 1) ==========
 const AUTH_GATE_ENABLED = true;          // เปิดด่านบังคับสมัคร (false = กลับไป flow เดิม)
 const LIFF_ID = "2010458255-JAxIKawy";     // LIFF ID จาก LINE Developers (PUBLIC) — channel "JIA CPR Online" / provider JiaTrainingcenter
-const GOOGLE_LOGIN_ENABLED = true;        // ต้องเปิด Google provider ใน Supabase Auth ก่อนใช้จริง
-const EMAIL_OTP_ENABLED = true;           // ต้องเปิด Email (OTP) provider ใน Supabase Auth
 const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY || "";  // PUBLIC PostHog project key (ตั้งผ่าน env ใน Vercel). ว่าง = ไม่ส่ง event เข้า PostHog
 const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com";
 const GATE_VARIANT_DEFAULT = "soft"; // soft (แอด LINE แบบข้ามได้ ลด drop) | before-course (ควิซเกริ่นนำ→สมัคร→เข้าคอร์ส) | after-lesson-1
 const FN_URL = (n) => `${SUPABASE_URL}/functions/v1/${n}`;
+// LINE เป็นล็อกอินหลักของทั้ง cpr.morroo.com และ class.jiacpr.com (คนละเว็บ บัญชีเดียวกัน) —
+// เรียก edge function "line-auth" ของ Hub (repo jia-learning-hub) ตรง ๆ จากเบราว์เซอร์ ไม่ใช่ของเว็บนี้เอง
+const HUB_LINE_AUTH_URL = FN_URL("line-auth");
+// ห้ามใส่ Authorization ตรงนี้ — line-auth ตีความ header Bearer ว่าเป็นโหมด "เชื่อมบัญชีที่ล็อกอินอยู่แล้ว"
+// (link mode) ถ้าส่ง publishable key ไปจะถูกตีความเป็น token ผู้ใช้ปลอม แล้วโดนปฏิเสธด้วย 401
+const LINE_AUTH_HEADERS = { "Content-Type": "application/json", apikey: SUPABASE_KEY };
 
 // ========== PRICING ==========
 const PRICING = {
@@ -264,64 +268,105 @@ const mergeProgressLocal = (a, b) => {
 const FN_HEADERS = { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
 
 // บันทึก progress ขึ้น account (เรียนต่อข้ามเครื่อง) — เรียกหลัง save("progress") ทุกครั้งถ้า signedUp
+// มี auth_user_id (ล็อกอิน LINE แล้ว) → ใช้ access token สดจาก supabase-js เสมอ (auto-refresh เอง)
+// แทนที่จะใช้ line_id_token ที่เก็บไว้ตอนล็อกอินซึ่งหมดอายุใน ~1 ชม. แล้ว sync เงียบ ๆ ใช้ไม่ได้อีก
 const syncProgressRemote = async (np) => {
   try {
     const u = load("user", null); if (!u) return;
+    if (u.auth_user_id) {
+      const supa = await getSupabase();
+      const { data: { session } } = await supa.auth.getSession();
+      if (session?.access_token) {
+        await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress: np }) });
+        return;
+      }
+    }
     if (u.line_user_id) { const idt = load("line_id_token", null); if (idt) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", id_token: idt, progress: np }) }); }
-    else if (u.auth_user_id) { const at = load("sb_access_token", null); if (at) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: at, progress: np }) }); }
   } catch (e) {}
 };
 
-// ทำ LINE signup ให้เสร็จ (เรียกหลัง LIFF login redirect กลับมา / หรือกรณี login อยู่แล้ว)
-const finishLineSignup = async () => {
+// เข้าสู่ระบบด้วย LINE — ล็อกอินหลักของทั้ง cpr.morroo.com และ class.jiacpr.com (บัญชีเดียวกัน)
+// ลำดับ: LIFF login (ถ้ายังไม่ได้ล็อกอิน จะนำทางออกจากหน้าแล้วกลับมาทำต่อตอน mount) → line-auth ของ Hub
+// (ยืนยัน id_token กับ LINE จริง คืน token_hash ใช้ครั้งเดียว ไม่ใช่ session ตรง ๆ) → แลกเป็น Supabase
+// session ด้วย verifyOtp ฝั่งเบราว์เซอร์เอง → ผูกลูกค้าเดิม (ถ้าเคยกรอกชื่อ-เบอร์ไว้) เข้ากับบัญชีนี้ก่อน
+// → auth-line-link (เดิม: upsert customers/course_progress + ออกคูปอง + ส่งข้อความต้อนรับ) → resolve
+// ให้ตรงกับ Hub ผ่าน jia_online_account('me') แล้วค่อยบันทึกลง localStorage
+// silent=true = เรียกจากเอฟเฟกต์ auto-link เงียบ ๆ ในแอป LINE — ถ้ายังไม่ได้ล็อกอิน LIFF จะไม่บังคับ redirect
+const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) => {
   const liff = await loadLiff();
-  if (!liff || !liff.isLoggedIn()) return null;
-  const pending = load("signup_pending", {}) || {};
+  if (!liff) return null;
+  if (!liff.isLoggedIn()) {
+    if (silent) return null;
+    save("line_login_pending", { phone, name, gate_variant: getGateVariant() });
+    liff.login({ redirectUri: window.location.href });
+    return null; // เบราว์เซอร์กำลังจะนำทางออกไปหน้า LINE login
+  }
   let idToken = null; try { idToken = liff.getIDToken(); } catch (e) {}
   if (!idToken) return null;
+
+  const callLineAuth = async () => {
+    const res = await fetch(HUB_LINE_AUTH_URL, { method: "POST", headers: LINE_AUTH_HEADERS, body: JSON.stringify({ idToken }) });
+    let data = {}; try { data = await res.json(); } catch (e) {}
+    return { ok: res.ok, data };
+  };
+  let result = await callLineAuth();
+  if (!result.ok) {
+    // id_token ที่ LIFF ถืออยู่หมดอายุ (~1 ชม.) หรือ LIFF ค้าง session เก่า — บังคับล็อกอินใหม่หนึ่งครั้ง
+    try { liff.logout(); } catch (e) {}
+    if (silent) return null;
+    save("line_login_pending", { phone, name, gate_variant: getGateVariant() });
+    liff.login({ redirectUri: window.location.href });
+    return null;
+  }
+  if (!result.data?.tokenHash) return null;
+
+  const supa = await getSupabase();
+  const { data: verified, error } = await supa.auth.verifyOtp({ token_hash: result.data.tokenHash, type: "magiclink" });
+  if (error || !verified?.session) return null;
+  const authUserId = verified.session.user.id;
+
+  // ผูกแถวลูกค้าเดิม (สมัครด้วยชื่อ+เบอร์แบบไม่ผ่าน LINE มาก่อน) เข้ากับบัญชี LINE ที่เพิ่งล็อกอิน
+  // ก่อนเรียก auth-line-link เสมอ — ไม่งั้น auth-line-link จะมองว่าเป็นคนละคน (จับคู่ด้วย line_user_id
+  // เท่านั้น โดยตั้งใจ กันคนอื่นยึดบัญชีด้วยการกรอกเบอร์ปลายทาง) แล้วสร้างแถวซ้ำ
+  const localUser = load("user", null);
+  if (localUser?.customer_id && !localUser?.auth_user_id && localUser?.phone) {
+    try { await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: localUser.customer_id, phone: localUser.phone } }); } catch (e) {}
+  }
+
+  save("line_id_token", idToken);
   let profile = {}; try { profile = await liff.getProfile(); } catch (e) {}
   let isFriend = true; try { const fs = await liff.getFriendship(); isFriend = !!fs?.friendFlag; } catch (e) {}
-  save("line_id_token", idToken);
-  const res = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
-    id_token: idToken, phone: pending.phone || "", pdpa: true, display_name: profile.displayName || "",
+  const usePhone = phone || localUser?.phone || "";
+  const useName = name || localUser?.name || profile.displayName || "";
+  const linkRes = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
+    id_token: idToken, phone: usePhone, pdpa: true, display_name: useName,
     utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
-    gate_variant: pending.gate_variant || getGateVariant(),
+    gate_variant: getGateVariant(),
     pre_course: isPreCourseStudent(), // ให้ server ข้ามการออกคูปอง ฿100 + ข้อความขายให้นักเรียน pre-course
   }) });
-  let data = {}; try { data = await res.json(); } catch (e) {}
-  if (!data?.ok) return null;
-  const u = { name: data.name || profile.displayName || pending.name || "", phone: pending.phone || "", line_user_id: data.line_user_id, customer_id: data.customer_id };
-  save("user", u); save("signed_up", true); save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
-  if (data.progress) save("progress", data.progress);
-  if (data.coupon && !isPreCourseStudent()) save("coupon", data.coupon);
-  save("signup_pending", null); save("line_login_pending", false); save("enrolled", true);
+  let linkData = {}; try { linkData = await linkRes.json(); } catch (e) {}
+
+  // ยืนยัน/เติมข้อมูลบัญชีให้ตรงกับที่ Hub เห็น (ผูก course_progress.auth_user_id ที่ auth-line-link
+  // ยังไม่ทันเซ็ตด้วย เผื่อแถว course_progress มาจากรอบก่อนที่ migration cross-site ยังไม่ backfill)
+  let meData = {}; try { const { data } = await supa.rpc("jia_online_account", { action: "me" }); meData = data || {}; } catch (e) {}
+
+  const u = {
+    name: meData.name || linkData.name || useName,
+    phone: meData.phone || usePhone,
+    line_user_id: linkData.line_user_id || meData.lineUserId,
+    auth_user_id: authUserId,
+    customer_id: meData.customerId || linkData.customer_id,
+  };
+  save("user", u); save("signed_up", true); save("enrolled", true);
+  save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
+  let progress = linkData.progress || load("progress", { done: [], scores: {} });
+  if (meData.progress) progress = mergeProgressLocal(progress, meData.progress);
+  save("progress", progress);
+  if (linkData.coupon && !isPreCourseStudent()) save("coupon", linkData.coupon);
+  save("signup_pending", null); save("line_login_pending", null);
   safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
   phCapture("signup_complete", { provider: "line", variant: getGateVariant() });
-  return { user: u, progress: data.progress, isFriend };
-};
-
-// ทำ signup ให้เสร็จสำหรับ Google/Email (มี Supabase session แล้ว)
-const finalizeOAuthSignup = async (provider) => {
-  const supa = await getSupabase();
-  const { data: { session } } = await supa.auth.getSession();
-  if (!session) return null;
-  const pending = load("signup_pending", {}) || {};
-  const authUserId = session.user.id;
-  const email = session.user.email || "";
-  const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || "";
-  save("sb_access_token", session.access_token);
-  const fields = { auth_provider: provider, auth_user_id: authUserId, oauth_sub: authUserId, email, name: name || undefined, display_name: name || undefined, tel: pending.phone || undefined, pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), source: "online-course", gate_variant: pending.gate_variant || getGateVariant(), landing_url: load("landing_url", null), ...getUTM() };
-  const existing = await supaRest("customers", "GET", null, `?auth_user_id=eq.${authUserId}&select=id&limit=1`);
-  let customerId;
-  if (Array.isArray(existing) && existing[0]) { customerId = existing[0].id; await supaRest("customers", "PATCH", fields, `?id=eq.${customerId}`); }
-  else { customerId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6); await supaRest("customers", "POST", { id: customerId, ...fields }); await supaRest("online_students", "POST", { customer_id: customerId, name: name || "", phone: pending.phone || "", email, status: "กำลังเรียน" }); }
-  let progress = load("progress", { done: [], scores: {} });
-  try { const r = await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress }) }); const d = await r.json(); if (d?.progress) progress = mergeProgressLocal(progress, d.progress); } catch (e) {}
-  const u = { name: name || "", phone: pending.phone || "", email, auth_user_id: authUserId, customer_id: customerId };
-  save("user", u); save("signed_up", true); save("progress", progress); save("signup_pending", null); save("oauth_pending", false); save("enrolled", true);
-  safeTrack("signup_complete", { provider });
-  phCapture("signup_complete", { provider, variant: getGateVariant() });
-  return { user: u, progress };
+  return { user: u, progress, isFriend };
 };
 
 // ========== CERTIFICATE EXPORT HELPERS (PDF / รูปภาพ) ==========
@@ -1377,12 +1422,33 @@ function SignupGate({ go, setUser }) {
   const [pdpa, setPdpa] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fallback, setFallback] = useState(false); // "ไม่มี LINE?" — เผยฟอร์มชื่อ+เบอร์สำรอง (ไม่ล็อกอิน LINE)
   useEffect(() => { safeTrack("signup_gate_view", { variant: getGateVariant() }); phCapture("gate_shown", { variant: getGateVariant() }); }, []);
 
-  const submit = () => {
+  const validate = () => {
+    if (phone.replace(/\D/g, "").length < 9) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return false; }
+    if (!pdpa) { setErr("กรุณายินยอม PDPA ก่อนสมัคร"); return false; }
+    return true;
+  };
+
+  // เข้าสู่ระบบด้วย LINE — ทางหลัก บัญชีเดียวกับ class.jiacpr.com
+  const submitLine = async () => {
+    if (fallback && !name.trim()) { setErr("กรุณากรอกชื่อ-นามสกุล"); return; }
+    if (!validate()) return;
+    setErr(""); setBusy(true);
+    try {
+      const result = await signInWithLine({ phone: phone.replace(/\D/g, ""), name: name.trim() });
+      if (result) { setUser(result.user); go("lineprompt"); }
+      // ไม่มี result: กำลังนำทางไปหน้า LINE login (ปกติ) หรือเชื่อมต่อไม่สำเร็จแบบเงียบ
+      else setErr("เข้าสู่ระบบด้วย LINE ไม่สำเร็จ กรุณาลองใหม่ หรือใช้ชื่อ-เบอร์แทน");
+    } catch (e) { setErr("เชื่อมต่อ LINE ไม่สำเร็จ กรุณาลองใหม่"); }
+    setBusy(false);
+  };
+
+  // ไม่มี LINE — ทางสำรอง: กรอกชื่อ+เบอร์ ปลดคอร์สแบบไม่ผูกบัญชี (เชื่อม LINE ทีหลังได้จากหน้าคอร์ส)
+  const submitFallback = () => {
     if (!name.trim()) { setErr("กรุณากรอกชื่อ-นามสกุล"); return; }
-    if (phone.replace(/\D/g, "").length < 9) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return; }
-    if (!pdpa) { setErr("กรุณายินยอม PDPA ก่อนสมัคร"); return; }
+    if (!validate()) return;
     setErr(""); setBusy(true);
     const cleanPhone = phone.replace(/\D/g, "");
     const userData = { name: name.trim(), phone: cleanPhone };
@@ -1407,11 +1473,11 @@ function SignupGate({ go, setUser }) {
         <div style={{ ...css.card, textAlign: "center" }}>
           <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#06C75518", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><I name="line" size={36} color="#06C755"/></div>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 6px" }}>อีกขั้นเดียว! 🎉</h2>
-          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>กรอกข้อมูลเพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong></p>
-          <div style={{ marginBottom: 12, textAlign: "left" }}>
+          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>เข้าสู่ระบบด้วย LINE เพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong> บัญชีเดียวกับที่ใช้จองคอร์ส on-site ได้เลย</p>
+          {fallback && <div style={{ marginBottom: 12, textAlign: "left" }}>
             <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อ-นามสกุล *</label>
             <input type="text" placeholder="เช่น สมชาย ใจดี" value={name} onChange={e => { setName(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
-          </div>
+          </div>}
           <div style={{ marginBottom: 12, textAlign: "left" }}>
             <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทรศัพท์ *</label>
             <input type="tel" placeholder="เช่น 081-234-5678" value={phone} onChange={e => { setPhone(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
@@ -1421,9 +1487,17 @@ function SignupGate({ go, setUser }) {
             <span style={{ fontSize: 11, color: B.dkGray, lineHeight: 1.5 }}>ข้าพเจ้ายินยอมให้ JIA TRAINER CENTER เก็บและใช้ข้อมูลส่วนบุคคล (ชื่อ, เบอร์โทร) เพื่อจัดการหลักสูตร ออกใบประกาศนียบัตร และแจ้งข้อมูลหลักสูตร</span>
           </label>
           {err && <div style={{ color: B.red, fontSize: 12, marginBottom: 12 }}>{err}</div>}
-          <button onClick={submit} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 }}>
-            <I name="line" size={22} color={B.white}/> {busy ? "กำลังสมัคร..." : "สมัคร & เพิ่ม LINE @jiacpr →"}
-          </button>
+          {!fallback ? <>
+            <button onClick={submitLine} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 }}>
+              <I name="line" size={22} color={B.white}/> {busy ? "กำลังเชื่อมต่อ..." : "เข้าสู่ระบบด้วย LINE →"}
+            </button>
+            <button onClick={() => { setFallback(true); setErr(""); }} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "8px 4px", cursor: "pointer", textDecoration: "underline" }}>ไม่มี LINE? กรอกชื่อ-เบอร์แทน</button>
+          </> : <>
+            <button onClick={submitFallback} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: B.red, borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 }}>
+              {busy ? "กำลังสมัคร..." : "สมัครด้วยชื่อ-เบอร์ →"}
+            </button>
+            <button onClick={() => { setFallback(false); setErr(""); }} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "8px 4px", cursor: "pointer", textDecoration: "underline" }}>← กลับไปเข้าสู่ระบบด้วย LINE</button>
+          </>}
           <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 10, background: "none", border: `1px solid ${B.red}`, borderRadius: 12, color: B.red, fontWeight: 700, fontSize: 14, padding: "11px 16px", cursor: "pointer" }}>🎟️ มีโค้ดแล้ว? ใส่โค้ดเข้าเรียนเลย →</button>
         </div>
       </div>
@@ -4532,29 +4606,42 @@ export default function App() {
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
   }, []);
 
-  // Auto-link LINE: ถ้าเปิดในแอป LINE (LIFF) และเป็นนักเรียนที่สมัครแล้วแต่ยังไม่ผูก line_user_id
-  // → ผูกเงียบๆ ผ่าน auth-line-link (ดึง line_user_id + กู้ progress กลับมา) โดยไม่ต้องให้ลูกค้าพิมพ์โค้ด
+  // กลับจากหน้า LINE login (signInWithLine เคย liff.login() นำทางออกไปตอนกดปุ่มเข้าสู่ระบบ) → เก็บ
+  // phone/name ที่กรอกไว้ตอนนั้นใน line_login_pending แล้วทำ signInWithLine ต่อให้จบตอนหน้ากลับมาโหลด
+  useEffect(() => {
+    const pending = load("line_login_pending", null);
+    if (!pending) return;
+    (async () => {
+      const result = await signInWithLine(pending);
+      if (result) { setUser(result.user); if (result.progress) setProgress(result.progress); }
+    })();
+  }, []);
+
+  // เคยล็อกอิน LINE แล้ว (มี auth_user_id) แต่ Supabase session หายไปจริง (ล้างข้อมูลเบราว์เซอร์บางส่วน ฯลฯ)
+  // → เคลียร์ auth_user_id ทิ้งแทนที่จะค้างสถานะ "ล็อกอินแล้ว" ทั้งที่ sync ข้อมูลกับบัญชีจริงไม่ได้อีก
   useEffect(() => {
     const u = load("user", null);
-    if (!u?.phone || u?.line_user_id) return;
+    if (!u?.auth_user_id) return;
+    (async () => {
+      try {
+        const supa = await getSupabase();
+        const { data: { session } } = await supa.auth.getSession();
+        if (!session) { const nu = { ...u, auth_user_id: undefined }; setUser(nu); save("user", nu); }
+      } catch (e) {}
+    })();
+  }, []);
+
+  // Auto-link LINE: เปิดในแอป LINE (LIFF) และเป็นนักเรียนที่สมัครแล้วแต่ยังไม่ล็อกอิน LINE จริง (ยังไม่มี
+  // auth_user_id) → เข้าสู่ระบบ LINE ให้เงียบ ๆ (silent: ไม่บังคับ redirect ถ้ายังไม่ได้ล็อกอิน LIFF)
+  useEffect(() => {
+    const u = load("user", null);
+    if (!u?.phone || u?.auth_user_id || load("line_login_pending", null)) return;
     (async () => {
       try {
         const liff = await loadLiff();
         if (!liff || typeof liff.isInClient !== "function" || !liff.isInClient()) return;
-        if (!liff.isLoggedIn()) return;
-        let idToken = null; try { idToken = liff.getIDToken(); } catch (e) {}
-        if (!idToken) return;
-        const res = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
-          id_token: idToken, phone: u.phone, pdpa: true, display_name: u.name || "",
-          utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
-          gate_variant: getGateVariant(),
-        }) });
-        const data = await res.json().catch(() => ({}));
-        if (data?.ok) {
-          const nu = { ...u, line_user_id: data.line_user_id, customer_id: data.customer_id || u.customer_id };
-          setUser(nu); save("user", nu); save("line_added", true);
-          if (data.progress) { setProgress(data.progress); save("progress", data.progress); }
-        }
+        const result = await signInWithLine({ phone: u.phone, name: u.name || "", silent: true });
+        if (result) { setUser(result.user); if (result.progress) setProgress(result.progress); }
       } catch (e) {}
     })();
   }, []);
