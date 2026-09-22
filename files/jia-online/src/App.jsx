@@ -180,6 +180,18 @@ const adminPing = async (key) => {
 };
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
 
+// ออกคูปอง ฿100 ผ่าน RPC ฝั่งเซิร์ฟเวอร์ (class.jiacpr.com's public.issue_online_coupon) แทนการสุ่มโค้ด
+// เองแล้ว POST เข้า promo_codes ตรงจาก client แบบเดิม (Hub ปิด anon insert บนตารางนี้แล้ว — ช่องโหว่เดิม)
+// เซิร์ฟเวอร์ตรวจสิทธิ์จาก customer_id + เบอร์โทรที่ตรงกับ public.customers และต้องมี
+// online_students.completed_at ของ customer นั้นตั้งไว้แล้วจึงจะออกโค้ดให้ (เรียกซ้ำปลอดภัย คืนโค้ดเดิม)
+// คืน null ถ้าออกไม่สำเร็จ (ยังไม่ผ่านเกณฑ์ / ไม่มี customer_id ฯลฯ) — ผู้เรียกต้องรับมือกรณีนี้เอง
+const issueOnlineCoupon = async (customerId, phone) => {
+  const cleanPhone = (phone || "").replace(/\D/g, "");
+  if (!customerId || cleanPhone.length < 9) return null;
+  const res = await supaRpc("issue_online_coupon", { p_customer_id: customerId, p_phone: cleanPhone });
+  return res && res.issued && res.code ? res.code : null;
+};
+
 // แคมเปญคูปองจากเกม — แจกเฉพาะช่วงแคมเปญเท่านั้น (นอกช่วง ชนะเกมจะไม่ออกคูปอง) + คูปองหมดอายุวันสุดท้ายของช่วง
 // ✏️ เพิ่ม/แก้แถวเพื่อเปิดแคมเปญใหม่ (YYYY-MM-DD ตามเวลาไทย) — แคมเปญวันเดียวใช้ start = end
 // key = ลิงก์เฉพาะกิจ: คูปองออกเฉพาะคนที่เข้าผ่าน ?camp=<key> เท่านั้น (คนเข้าเว็บเองไม่ได้) — ไม่ใส่ key = ได้ทุกคนในช่วงวัน
@@ -1224,11 +1236,17 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
   const linkCode = getLinkCode();
   const deepLink = lineLinkDeepLink(linkCode);
   const preCourse = variant === "pre-course";
-  // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ (ออก/บันทึกถ้ายังไม่มี — ครอบคลุมทั้ง LINE/Google/Email)
+  // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ — ปกติออกให้แล้วตอนสมัคร/จบคอร์ส (Register/submitQuiz) ที่นี่ดึงจาก
+  // local storage เป็นหลัก แล้วเผื่อกรณียังไม่มี (เช่น ผู้เรียนเก่าที่ยังไม่เคยผ่าน flow ใหม่) ค่อยออกผ่าน RPC
   // ยกเว้นนักเรียน pre-course ที่จ่ายค่าคอร์ส on-site แล้ว — ไม่มีสิทธิ์คูปอง กันเข้าใจผิดเรื่องส่วนลด/เงินคืน
-  const coupon = (!preCourse && !isPreCourseStudent() && isSignedUp())
-    ? (load("coupon", null) || (() => { const c = genCoupon(); save("coupon", c); try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {} return c; })())
-    : null;
+  const showCoupon = !preCourse && !isPreCourseStudent() && isSignedUp();
+  const [coupon, setCoupon] = useState(() => (showCoupon ? load("coupon", null) : null));
+  useEffect(() => {
+    if (!showCoupon || coupon) return;
+    const u = user || load("user", null);
+    if (!u?.customer_id) return;
+    issueOnlineCoupon(u.customer_id, u.phone).then(c => { if (c) { save("coupon", c); setCoupon(c); } });
+  }, [showCoupon, coupon]);
   // gate ก่อนเรียน = ข้ามได้ (strong-soft) แต่จด line_skipped_at ไว้เพื่อไม่เด้งซ้ำ + ให้แบนเนอร์ในคอร์สตามต่อ
   useEffect(() => { safeTrack("line_gate_view", { variant }); phCapture("line_gate_view", { variant }); }, [variant]);
   const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); phCapture("line_oa_confirm_added", { variant }); go("course"); };
@@ -1508,24 +1526,27 @@ function SignupGate({ go, setUser }) {
 // ==================== REGISTER (+ PDPA) ====================
 function Register({ go, setUser }) {
   const [f, setF] = useState({ name: "", phone: "", email: "" }); const [err, setErr] = useState({}); const [pdpa, setPdpa] = useState(false);
-  const submit = () => {
+  const submit = async () => {
     const e = {}; if (!f.name.trim()) e.name = "กรุณากรอกชื่อ-นามสกุล"; if (!f.phone.trim() || f.phone.replace(/\D/g, "").length < 9) e.phone = "กรุณากรอกเบอร์โทรที่ถูกต้อง"; if (!pdpa) e.pdpa = "กรุณายินยอม PDPA ก่อนลงทะเบียน"; if (Object.keys(e).length) return setErr(e);
     const cleanPhone = f.phone.replace(/\D/g, "");
-    const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email };
-    setUser(userData); save("user", userData);
     const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    // เก็บ customer_id ไว้ใน user ด้วย (ของเดิมไม่เก็บ) — จุดอื่นที่อ่าน load("user") ต่อ (จบคอร์สทีหลัง,
+    // หน้าใบประกาศ) ต้องใช้ค่านี้เรียก issue_online_coupon
+    const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email, customer_id: custId };
+    setUser(userData); save("user", userData);
     const linkCode = genLinkCode(); save("line_link_code", linkCode);
     const finalProgress = load("progress", { done: [], scores: {} });
     const finalModId = COURSE.modules[COURSE.modules.length - 1].id;
     const completed = finalProgress.done.includes(finalModId);
-    const coupon = load("coupon", null) || (completed && !isPreCourseStudent() ? (() => { const c = genCoupon(); save("coupon", c); return c; })() : null);
     const finalScore = finalProgress.scores[finalModId] || null;
-    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course", line_link_code: linkCode });
+    await supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course", line_link_code: linkCode });
+    let coupon = load("coupon", null);
     if (completed) {
       const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
-      supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: finalScore, coupon_code: coupon, renew_date: renew.toISOString().split("T")[0], pre_course: isPreCourseStudent() });
+      // ต้องบันทึก completed_at ก่อน แล้วค่อยออกคูปอง — issue_online_coupon เช็กว่าเรียนจบแล้วจริงจากแถวนี้
+      await supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: finalScore, renew_date: renew.toISOString().split("T")[0], pre_course: isPreCourseStudent() });
+      if (!coupon && !isPreCourseStudent()) { coupon = await issueOnlineCoupon(custId, cleanPhone); if (coupon) save("coupon", coupon); }
       if (!isPreCourseStudent()) supaRest("sales_tracking", "POST", { name: userData.name, phone: cleanPhone, completed_date: new Date().toISOString(), score: finalScore, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
-      if (coupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
     } else {
       supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน", pre_course: isPreCourseStudent() });
     }
@@ -2134,15 +2155,14 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
         // ใช้คูปองเดิมที่เคยออกให้ (ตอนสมัคร) เป็นหลัก — อย่าสร้างทับ ไม่งั้นโค้ดที่ผู้เรียนจดไว้จะใช้ไม่ได้
         // นักเรียน pre-course (จ่ายค่า on-site แล้ว) ไม่ออกคูปอง ฿100 — กันใบประกาศ/ทีมขายโชว์ส่วนลดที่ไม่มีจริง
         const existingCoupon = load("coupon", null);
-        const coupon = existingCoupon || (isPreCourseStudent() ? null : genCoupon());
-        if (coupon) save("coupon", coupon);
         if (u) {
           const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
-          supaRest("online_students", "PATCH", { status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: score, coupon_code: coupon, renew_date: renew.toISOString().split("T")[0] }, `?phone=ilike.*${u.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(u.name)}`);
+          // ต้องบันทึก completed_at ก่อน แล้วค่อยออกคูปอง — issue_online_coupon เช็กว่าเรียนจบแล้วจริงจากแถวนี้
+          await supaRest("online_students", "PATCH", { status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: score, renew_date: renew.toISOString().split("T")[0] }, `?phone=ilike.*${u.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(u.name)}`);
+          const coupon = existingCoupon || (isPreCourseStudent() || !u.customer_id ? null : await issueOnlineCoupon(u.customer_id, u.phone));
+          if (coupon && !existingCoupon) save("coupon", coupon);
           // pre-course ไม่ต้องเข้าคิวติดตามขาย (จ่ายและจองคลาสแล้ว)
           if (!isPreCourseStudent()) supaRest("sales_tracking", "POST", { name: u.name, phone: u.phone.replace(/\D/g,""), completed_date: new Date().toISOString(), score, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
-          // POST เข้า promo_codes เฉพาะเมื่อเป็นโค้ดที่เพิ่งสร้าง (โค้ดเดิมถูกบันทึกไปแล้วตอนสมัคร) กันแถวซ้ำ
-          if (coupon && !existingCoupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
         }
       }
     }
@@ -2265,13 +2285,15 @@ function Certificate({ user, go }) {
   // นักเรียน pre-course จ่ายค่าคอร์ส on-site เต็มราคาแล้ว — ใบประกาศต้องไม่โชว์ "ส่วนลด ฿100"
   // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน)
   const preCourseStudent = isPreCourseStudent();
-  // ปกติควรมีคูปองจากตอนสมัคร/จบคอร์สอยู่แล้ว — ถ้าต้อง fallback สร้างใหม่ ต้อง POST เข้า promo_codes ด้วย
-  // ไม่งั้นใบเซอร์จะโชว์โค้ดที่พนักงาน validate ไม่ได้ (ไม่มีในฐานข้อมูล)
-  const coupon = preCourseStudent ? null : (load("coupon", null) || (() => {
-    const c = genCoupon(); save("coupon", c);
-    try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {}
-    return c;
-  })());
+  // ปกติควรมีคูปองจากตอนสมัคร/จบคอร์สอยู่แล้ว (Register/submitQuiz) — ถ้ายังไม่มี ออกผ่าน RPC ฝั่งเซิร์ฟเวอร์
+  // แทนการสุ่มโค้ดฝั่ง client เอง ไม่งั้นใบเซอร์จะโชว์โค้ดที่พนักงาน validate ไม่ได้ (ไม่มีในฐานข้อมูลจริง)
+  const [coupon, setCoupon] = useState(() => (preCourseStudent ? null : load("coupon", null)));
+  useEffect(() => {
+    if (preCourseStudent || coupon) return;
+    const u = user || load("user", null);
+    if (!u?.customer_id) return;
+    issueOnlineCoupon(u.customer_id, u.phone).then(c => { if (c) { save("coupon", c); setCoupon(c); } });
+  }, [preCourseStudent, coupon]);
   const certRef = useRef(null);
   const [gen, setGen] = useState(null); // null | "img" | "pdf"
   const fileBase = `JIA_Certificate_${sanitizeFileName(user?.name)}`;
@@ -4536,6 +4558,10 @@ export default function App() {
     save("coupon", c);
     save("coupon_expires", camp.end); // เก็บวันหมดอายุไว้ (หน้าจอง/เซลล์ใช้อ้างอิงได้)
     // ใส่วันหมดอายุใน staff_name ให้เซลล์เห็นในระบบ (promo_codes ไม่มีคอลัมน์ expires_at)
+    // ⚠️ TODO: Hub ปิด anon insert บน promo_codes แล้ว (เหลือแค่ public.issue_online_coupon ซึ่งกำหนด
+    // สิทธิ์จาก "เรียนจบคอร์สออนไลน์แล้ว" — ไม่ตรงกับกติกาคูปองแคมเปญเกมนี้ที่ให้ตามการชนะเกม) การเขียนแถวนี้จึง
+    // ใช้ไม่ได้แล้ว โค้ดที่โชว์บนจอจะไม่ถูกบันทึกจริง ต้องตัดสินใจ: ออก RPC ใหม่สำหรับคูปองแคมเปญโดยเฉพาะ หรือ
+    // เปลี่ยนกติกา issue_online_coupon ให้ครอบคลุมกรณีนี้ด้วย
     try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: `game·exp ${camp.end}` }); } catch (e) {}
     return { code: c, note };
   }, []);

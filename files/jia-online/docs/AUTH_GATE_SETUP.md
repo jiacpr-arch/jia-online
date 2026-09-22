@@ -23,6 +23,16 @@ Login channel "JIA CPR Online" (Channel ID `2010458255`) อยู่ใต้ p
 **วิธีรับมือ (ทำไว้แล้วในโค้ด):** หลังสมัคร → ไปหน้า `LineAddPrompt` เสมอ → **โชว์คูปอง ฿100 บนจอ** (บันทึก
 `promo_codes` ใช้หน้าร้านได้) + ให้แอด @jiacpr ผ่าน QR/deep link เอง
 
+**การออกคูปอง ฿100 (คอร์สจบแล้ว):** เส้นทาง LINE ล็อกอิน (ส่วนใหญ่) ออกให้ที่ edge function
+`signup-push` (service role, ไม่ผ่าน client) เส้นทางสำรองชื่อ+เบอร์ (`Register`, `submitQuiz` จบคอร์สทีหลัง,
+`LineAddPrompt`/`Certificate` ที่ต้อง fallback) เรียก `issueOnlineCoupon()` (`src/App.jsx`) ซึ่งไปที่
+`public.issue_online_coupon` บน Hub (`class.jiacpr.com`) — RPC นี้ตรวจ `customer_id`+เบอร์ที่ตรงกับ
+`public.customers` และต้องมี `online_students.completed_at` ของ customer นั้นแล้วจึงออกโค้ดให้ (เรียกซ้ำ
+ปลอดภัย คืนโค้ดเดิม) Hub **ปิด anon INSERT บน `promo_codes` แล้ว** — ห้าม insert ตรงจาก client อีก
+(ใช้ไม่ได้แล้วจริง ๆ) ยกเว้น **คูปองแคมเปญเกม** (`genCampaignCoupon`, ให้ตามชนะเกม ไม่ใช่ตามเรียนจบคอร์ส)
+ที่ยังค้าง insert ตรงแบบเดิมอยู่ (ดู `⚠️ TODO` ในโค้ด) — ต้องตัดสินใจว่าจะออก RPC ใหม่เฉพาะกรณีนี้ หรือปรับ
+`issue_online_coupon` ให้ครอบคลุม
+
 ### A/B ตำแหน่งด่าน (`gate_placement` ใน PostHog)
 `before-course` = ควิซเกริ่นนำหน้าแรก · `after-lesson-1` = ให้ดูบท 1 ฟรีก่อนแล้วค่อยกั้น · `soft` (ค่าเริ่มต้น
 ปัจจุบัน) = แอด LINE แบบข้ามได้ ลด drop
