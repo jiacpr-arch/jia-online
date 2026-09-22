@@ -2501,33 +2501,33 @@ function Booking({ go }) {
   const [submitting, setSubmitting] = useState(false);
   const [bookingRef, setBookingRef] = useState(null);
 
-  // รอบเรียน B-CPR ที่เปิดจองจริงจากระบบจองกลาง class.morroo.com (Supabase โปรเจกต์เดียวกัน
-  // เรียกผ่าน edge fn bcpr-api เพื่อได้ seats_left) — โชว์เป็นข้อมูล + ลิงก์ไปจองพร้อมจ่ายที่ hub
+  // รอบเรียน B-CPR ที่เปิดจองจริง — class.jiacpr.com (Hub) เป็นระบบจองกลางแล้ว (แทน class.morroo.com เดิม)
+  // ดึงผ่าน public catalog API (ไม่ต้องใช้ key, เปิด CORS ให้ทุกโดเมน) — โชว์เป็นข้อมูล + ลิงก์ไปจองพร้อมจ่ายที่ hub
   // ดึงไม่ได้/ไม่มีรอบว่าง = ไม่โชว์บล็อกนี้ lead form เดิมทำงานตามปกติ
-  const [hubClasses, setHubClasses] = useState(null);
+  const [hubRounds, setHubRounds] = useState(null);
   useEffect(() => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4000);
-    fetch(`${SUPABASE_URL}/functions/v1/bcpr-api`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
-      body: JSON.stringify({ action: "list_upcoming" }),
-      signal: ctrl.signal,
-    }).then(r => r.json()).then(d => {
-      if (d?.ok && Array.isArray(d.classes)) {
-        const open = d.classes.filter(c => c.course_key === "B-CPR" && c.seats_left > 0).slice(0, 3);
-        if (open.length) setHubClasses(open);
-      }
-    }).catch(() => {}).finally(() => clearTimeout(timer));
+    fetch("https://class.jiacpr.com/api/public/catalog", { signal: ctrl.signal })
+      .then(r => r.json()).then(d => {
+        if (Array.isArray(d?.rounds)) {
+          const open = d.rounds.filter(r => r.courseId === "bcpr" && r.seatsLeft > 0).slice(0, 3);
+          if (open.length) setHubRounds(open);
+        }
+      }).catch(() => {}).finally(() => clearTimeout(timer));
     return () => { ctrl.abort(); clearTimeout(timer); };
   }, []);
-  // 2026-08-22 → "22 ส.ค. 69"
-  const thShortDate = (iso) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
-    if (!m) return String(iso || "");
+  // ISO datetime (UTC) → "22 ส.ค. 69 · 09:00 น." เวลาไทย (UTC+7) — คำนวณ offset เองแบบเดียวกับ todayISOTH()
+  // แทนที่จะพึ่ง timezone ของเบราว์เซอร์ผู้ใช้
+  const thRoundTime = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso || "");
+    const t = new Date(d.getTime() + 7 * 3600 * 1000);
     const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-    return `${Number(m[3])} ${months[Number(m[2]) - 1]} ${(Number(m[1]) + 543) % 100}`;
+    const hh = String(t.getUTCHours()).padStart(2, "0"); const mm = String(t.getUTCMinutes()).padStart(2, "0");
+    return `${t.getUTCDate()} ${months[t.getUTCMonth()]} ${(t.getUTCFullYear() + 543) % 100} · ${hh}:${mm} น.`;
   };
+  const bcprBookingUrl = `https://class.jiacpr.com/courses/bcpr?${coupon ? `coupon=${encodeURIComponent(coupon)}&` : ""}utm_source=cpr-online`;
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inp = { width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${B.ltGray}`, fontSize: 15, boxSizing: "border-box", outline: "none" };
   const lbl = { fontSize: 13, fontWeight: 600, color: B.black, marginBottom: 6, display: "block" };
@@ -2600,23 +2600,23 @@ function Booking({ go }) {
         <I name="check" size={20} color={B.green}/><div><div style={{ fontSize: 13, fontWeight: 700, color: B.green }}>คูปองส่วนลด ฿100 ถูกใช้แล้ว!</div><div style={{ fontSize: 12, color: B.dkGray }}>รหัส: {coupon} • ราคาจาก ฿500 เหลือ ฿400</div></div>
       </div>}
 
-      {/* รอบที่เปิดรับจริงจากระบบจองกลาง — จองออนไลน์พร้อมชำระเงินได้เลยที่ class.morroo.com */}
-      {hubClasses && <div style={{ background: B.white, borderRadius: 16, padding: 16, marginBottom: 20, boxShadow: "0 2px 12px rgba(0,0,0,.06)" }}>
+      {/* รอบที่เปิดรับจริงจากระบบจองกลาง — จองออนไลน์พร้อมชำระเงินได้เลยที่ class.jiacpr.com (คูปองใช้ได้ตรงที่หน้าจองเลย) */}
+      {hubRounds && <div style={{ background: B.white, borderRadius: 16, padding: 16, marginBottom: 20, boxShadow: "0 2px 12px rgba(0,0,0,.06)" }}>
         <div style={{ fontSize: 14, fontWeight: 800 }}>📅 รอบเรียนที่เปิดรับตอนนี้</div>
         <div style={{ fontSize: 12, color: B.dkGray, marginTop: 2, marginBottom: 8 }}>อยากล็อกวันเลยไม่ต้องรอติดต่อกลับ — จองออนไลน์พร้อมชำระเงินได้ทันที</div>
-        {hubClasses.map(c => (
-          <div key={c.class_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${B.ltGray}`, fontSize: 13 }}>
-            <span><strong>{thShortDate(c.date)}</strong> · {c.time_slot} น.</span>
-            <span style={{ color: B.green, fontWeight: 700 }}>เหลือ {c.seats_left} ที่</span>
+        {hubRounds.map(r => (
+          <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${B.ltGray}`, fontSize: 13 }}>
+            <span><strong>{thRoundTime(r.startsAt)}</strong></span>
+            <span style={{ color: B.green, fontWeight: 700 }}>เหลือ {r.seatsLeft} ที่</span>
           </div>
         ))}
-        <a href="https://class.morroo.com/booking.html?course=B-CPR&utm_source=cpr-online" target="_blank" rel="noopener noreferrer"
+        <a href={bcprBookingUrl} target="_blank" rel="noopener noreferrer"
           onClick={() => track("booking_hub_click", { source: "cpr-online" })}
           style={{ display: "block", textAlign: "center", marginTop: 10, background: B.red, color: B.white, borderRadius: 10, padding: "13px 12px", textDecoration: "none", fontWeight: 700, fontSize: 14 }}>
           จองรอบเรียนพร้อมชำระเงินเลย →
         </a>
         {coupon && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6, textAlign: "center" }}>
-          หมายเหตุ: หน้าเว็บจองเป็นราคาเต็ม — ถ้าจะใช้คูปองส่วนลด ฿100 ให้ส่งฟอร์มด้านล่างหรือทักไลน์ให้ทีมงานนัดวันแทน
+          ลิงก์ด้านบนใส่คูปองส่วนลด ฿100 ให้อัตโนมัติแล้ว
         </div>}
       </div>}
 
