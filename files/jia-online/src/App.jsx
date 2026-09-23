@@ -297,12 +297,30 @@ const syncProgressRemote = async (np) => {
   } catch (e) {}
 };
 
+// ผูกโปรไฟล์กลางที่ Hub (learning_hub.people ผ่าน RPC public.jia_identity) — เรียกตรงจากเบราว์เซอร์ได้เลย
+// เพราะเว็บนี้อยู่ Supabase โปรเจกต์เดียวกับ class.jiacpr.com (tpoiyykbgsgnrdwzgzvn) ไม่ต้องผ่าน /sso หรือ
+// บัตรผ่านแบบที่แอปข้ามโปรเจกต์ (bls/acls) ต้องใช้ — แค่มี Supabase session ของโปรเจกต์นี้ (จาก LINE หรือ
+// อีเมล) ก็เรียก RPC นี้ได้ทันที ให้ชื่อที่ยืนยันแล้ว/บัตรนักเรียนเป็นชุดเดียวกับ Hub และแอปอื่นในเครือ
+// best-effort เสมอ (ไม่มีชื่อให้บันทึกก็แค่คืนโปรไฟล์เปล่า) — พังไม่กระทบ flow ล็อกอินเดิม
+const syncHubIdentity = async (supa, { nameTh = "", phone = "" } = {}) => {
+  try {
+    const { data: me } = await supa.rpc("jia_identity", { action: "me" });
+    if (!me) return null;
+    if (!me.profileComplete && nameTh && nameTh.trim().length >= 2) {
+      const { data: saved } = await supa.rpc("jia_identity", { action: "saveProfile", payload: { nameTh: nameTh.trim(), phone: phone || "", pdpaConsent: true } });
+      return saved || me;
+    }
+    return me;
+  } catch (e) { return null; }
+};
+const pickHub = (p) => (p ? { nameTh: p.nameTh, cardNo: p.cardNo, cardToken: p.cardToken, verifyLevel: p.verifyLevel, nameLocked: p.nameLocked } : undefined);
+
 // เข้าสู่ระบบด้วย LINE — ล็อกอินหลักของทั้ง cpr.morroo.com และ class.jiacpr.com (บัญชีเดียวกัน)
 // ลำดับ: LIFF login (ถ้ายังไม่ได้ล็อกอิน จะนำทางออกจากหน้าแล้วกลับมาทำต่อตอน mount) → line-auth ของ Hub
 // (ยืนยัน id_token กับ LINE จริง คืน token_hash ใช้ครั้งเดียว ไม่ใช่ session ตรง ๆ) → แลกเป็น Supabase
 // session ด้วย verifyOtp ฝั่งเบราว์เซอร์เอง → ผูกลูกค้าเดิม (ถ้าเคยกรอกชื่อ-เบอร์ไว้) เข้ากับบัญชีนี้ก่อน
 // → auth-line-link (เดิม: upsert customers/course_progress + ออกคูปอง + ส่งข้อความต้อนรับ) → resolve
-// ให้ตรงกับ Hub ผ่าน jia_online_account('me') แล้วค่อยบันทึกลง localStorage
+// ให้ตรงกับ Hub ผ่าน jia_online_account('me') แล้วค่อยบันทึกลง localStorage → sync โปรไฟล์กลาง (บัตรนักเรียน)
 // silent=true = เรียกจากเอฟเฟกต์ auto-link เงียบ ๆ ในแอป LINE — ถ้ายังไม่ได้ล็อกอิน LIFF จะไม่บังคับ redirect
 const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) => {
   const liff = await loadLiff();
@@ -361,6 +379,7 @@ const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) =>
   // ยืนยัน/เติมข้อมูลบัญชีให้ตรงกับที่ Hub เห็น (ผูก course_progress.auth_user_id ที่ auth-line-link
   // ยังไม่ทันเซ็ตด้วย เผื่อแถว course_progress มาจากรอบก่อนที่ migration cross-site ยังไม่ backfill)
   let meData = {}; try { const { data } = await supa.rpc("jia_online_account", { action: "me" }); meData = data || {}; } catch (e) {}
+  const hubProfile = await syncHubIdentity(supa, { nameTh: meData.name || linkData.name || useName, phone: meData.phone || usePhone });
 
   const u = {
     name: meData.name || linkData.name || useName,
@@ -368,6 +387,7 @@ const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) =>
     line_user_id: linkData.line_user_id || meData.lineUserId,
     auth_user_id: authUserId,
     customer_id: meData.customerId || linkData.customer_id,
+    hub: pickHub(hubProfile),
   };
   save("user", u); save("signed_up", true); save("enrolled", true);
   save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
@@ -379,6 +399,43 @@ const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) =>
   safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
   phCapture("signup_complete", { provider: "line", variant: getGateVariant() });
   return { user: u, progress, isFriend };
+};
+
+// ========== EMAIL IDENTITY (ทางเลือกสำรอง — LINE เป็นหลัก อีเมลเป็นรอง) ==========
+// ไม่สร้างลูกค้าใหม่/ไม่แทนที่ flow สมัครเดิม — ใช้ "ผูก" (attachLocal) เข้ากับแถวลูกค้าที่มีอยู่แล้ว
+// จากการสมัครด้วยชื่อ-เบอร์ (SignupGate/Register/Claim ทุกทาง) เข้ากับ Supabase session จริงที่ยืนยัน
+// อีเมลแล้ว — เหมือนกับที่ signInWithLine ทำก่อนเรียก auth-line-link ทุกอย่าง เพียงแต่ไม่มี auth-line-link
+// ให้เรียก (ฟังก์ชันนั้นผูกกับ id_token ของ LINE เท่านั้น) จึงไม่แตะ customers/online_students/coupon เลย
+// ปลอดภัยกับทุก entry point ที่มีอยู่แล้วโดยไม่ต้องแก้ตรรกะการสร้างลูกค้า/คอร์สที่มีความเสี่ยงสูงกว่า
+const requestEmailIdentityOtp = async (email) => {
+  const supa = await getSupabase();
+  const { error } = await supa.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  if (error) throw Error(error.message || "ส่งรหัส OTP ไม่สำเร็จ กรุณาลองใหม่");
+};
+const verifyEmailIdentityOtp = async ({ email, token }) => {
+  const supa = await getSupabase();
+  const { data, error } = await supa.auth.verifyOtp({ email, token, type: "email" });
+  if (error || !data?.session) throw Error("รหัส OTP ไม่ถูกต้องหรือหมดอายุ");
+  const authUserId = data.session.user.id;
+  const localUser = load("user", null);
+  if (localUser?.customer_id && !localUser?.auth_user_id && localUser?.phone) {
+    try { await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: localUser.customer_id, phone: localUser.phone } }); } catch (e) {}
+  }
+  let meData = {}; try { const { data: d } = await supa.rpc("jia_online_account", { action: "me" }); meData = d || {}; } catch (e) {}
+  const hubProfile = await syncHubIdentity(supa, { nameTh: localUser?.name || meData.name || "", phone: localUser?.phone || meData.phone || "" });
+  const u = {
+    ...(localUser || {}),
+    name: meData.name || localUser?.name || "",
+    phone: meData.phone || localUser?.phone || "",
+    customer_id: meData.customerId || localUser?.customer_id,
+    auth_user_id: authUserId,
+    hub: pickHub(hubProfile) || localUser?.hub,
+  };
+  save("user", u); save("signup_pending", null);
+  let progress = load("progress", { done: [], scores: {} });
+  if (meData.progress) { progress = mergeProgressLocal(progress, meData.progress); save("progress", progress); }
+  safeTrack("identity_verified", { provider: "email" }); phCapture("identity_verified", { provider: "email" });
+  return { user: u, progress };
 };
 
 // ========== CERTIFICATE EXPORT HELPERS (PDF / รูปภาพ) ==========
@@ -1231,8 +1288,54 @@ function Store({ go, setUser }) {
   </div>);
 }
 
+// ยืนยันตัวตนด้วยอีเมล — ทางเลือกสำรอง (LINE เป็นหลัก) ให้คนที่ไม่ใช้ LINE ยังมีบัญชีจริงที่รู้ได้ว่าเป็น
+// ใคร ใช้เรียนต่อข้ามเครื่องได้ และมีบัตรนักเรียน/ชื่อชุดเดียวกับ Hub — ไม่บังคับ ข้ามได้เสมอ
+function EmailIdentityCard({ user, setUser }) {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState(false);
+  if (user?.auth_user_id || done) return done ? (
+    <div style={{ background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 12, textAlign: "center", fontSize: 13, fontWeight: 700, color: B.black }}>
+      ✓ ยืนยันตัวตนด้วยอีเมลเรียบร้อย
+    </div>
+  ) : null;
+  const submit = async (e) => {
+    e.preventDefault(); setErr(""); setBusy(true);
+    try {
+      if (!sent) {
+        if (!/^\S+@\S+\.\S+$/.test(email)) throw Error("กรุณากรอกอีเมลให้ถูกต้อง");
+        await requestEmailIdentityOtp(email.trim());
+        setSent(true);
+      } else {
+        const result = await verifyEmailIdentityOtp({ email: email.trim(), token: code.trim() });
+        setUser && setUser(result.user);
+        setDone(true);
+      }
+    } catch (e2) { setErr(e2.message || "ดำเนินการไม่สำเร็จ กรุณาลองใหม่"); }
+    setBusy(false);
+  };
+  return (
+    <div style={{ background: B.gray, borderRadius: 12, padding: 14, marginTop: 12, textAlign: "left" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>ไม่ใช้ LINE? ยืนยันตัวตนด้วยอีเมลแทน (ไม่บังคับ)</div>
+      <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 10, lineHeight: 1.5 }}>เผื่อเปลี่ยนเครื่อง/ไม่มี LINE — บัญชีเดียวกับ class.jiacpr.com เหมือนล็อกอิน LINE</div>
+      <form onSubmit={submit}>
+        {!sent ? (
+          <input required type="email" placeholder="อีเมลของคุณ" value={email} onChange={e => setEmail(e.target.value)} style={{ width: "100%", padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 8 }}/>
+        ) : (
+          <input required inputMode="numeric" pattern="[0-9]{6,10}" placeholder="รหัส OTP จากอีเมล" value={code} onChange={e => setCode(e.target.value)} style={{ width: "100%", padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 8 }}/>
+        )}
+        {err && <div style={{ color: B.red, fontSize: 12, marginBottom: 8 }}>{err}</div>}
+        <button type="submit" disabled={busy} style={{ ...css.btn(B.black, B.white, true), padding: "10px 16px", fontSize: 13, width: "auto" }}>{busy ? "กำลังดำเนินการ..." : sent ? "ยืนยันรหัส OTP" : "ส่งรหัส OTP"}</button>
+      </form>
+    </div>
+  );
+}
+
 // ==================== LINE ADD PROMPT ====================
-function LineAddPrompt({ go, user, variant = "post-register" }) {
+function LineAddPrompt({ go, user, setUser, variant = "post-register" }) {
   const linkCode = getLinkCode();
   const deepLink = lineLinkDeepLink(linkCode);
   const preCourse = variant === "pre-course";
@@ -1254,6 +1357,21 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
   const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); phCapture("line_oa_clicked", { variant, has_link_code: true }); };
   // เข้าเรียนเลย (post-register) — ไม่ขวางก่อนได้คุณค่า; จด line_skipped_at กันเด้งซ้ำ ปล่อยให้แบนเนอร์ในคอร์ส + หน้าใบประกาศตามต่อ
   const onEnterCourse = () => { safeTrack("post_register_enter_course", { variant }); phCapture("post_register_enter_course", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
+  // เข้าสู่ระบบด้วย LINE จริง (ไม่ใช่แค่แอด OA เป็นเพื่อน) — ผูกบัญชีชื่อ-เบอร์ที่กรอกไว้แล้วเข้ากับบัญชี Hub
+  // จริง แสดงที่นี่เพราะทุกทางสมัคร (SignupGate/Register/Claim) ลงเอยที่หน้านี้ทั้งหมด รวมถึง gate variant
+  // "soft" (ค่า default) ที่ SignupGate ไม่ถูกเปิดใช้เลย — ที่นี่จึงเป็นจุดเดียวที่ทุกคนเจอปุ่มนี้แน่นอน
+  const [lineBusy, setLineBusy] = useState(false);
+  const [lineErr, setLineErr] = useState("");
+  const doLineLogin = async () => {
+    setLineErr(""); setLineBusy(true);
+    try {
+      const u = user || load("user", null);
+      const result = await signInWithLine({ phone: u?.phone || "", name: u?.name || "" });
+      if (result) setUser && setUser(result.user);
+      else setLineErr("เข้าสู่ระบบด้วย LINE ไม่สำเร็จ กรุณาลองใหม่");
+    } catch (e) { setLineErr("เชื่อมต่อ LINE ไม่สำเร็จ กรุณาลองใหม่"); }
+    setLineBusy(false);
+  };
 
   // ── post-register: หลังสมัครเสร็จ ดัน "เริ่มเรียนเลย" เป็นปุ่มหลัก, LINE เป็นตัวเลือกเบา ๆ (โปรโมตการแอดหนักไปไว้หน้าใบประกาศแทน) ──
   if (variant === "post-register") {
@@ -1287,6 +1405,13 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
               </div>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#06994A" }}>เพิ่ม →</span>
             </a>
+            {!(user || load("user", null))?.auth_user_id && <>
+              <button type="button" onClick={doLineLogin} disabled={lineBusy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "12px 20px", color: B.white, border: "none", fontWeight: 700, fontSize: 14, cursor: "pointer", marginTop: 10, opacity: lineBusy ? .6 : 1 }}>
+                <I name="line" size={20} color={B.white}/> {lineBusy ? "กำลังเชื่อมต่อ..." : "เข้าสู่ระบบด้วย LINE (ยืนยันตัวตนถาวร)"}
+              </button>
+              {lineErr && <div style={{ color: B.red, fontSize: 12, marginTop: 6 }}>{lineErr}</div>}
+            </>}
+            <EmailIdentityCard user={user} setUser={setUser}/>
           </div>
         </div>
       </div>
@@ -2399,6 +2524,11 @@ function Certificate({ user, go }) {
     </div>
     {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — ขอบคุณผู้มอบคอร์สนี้ + ให้ช่องทางติดต่อกลับ (ไม่แตะรูปใบประกาศ) */}
     {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
+    {/* บัตรนักเรียน JIA กลาง (class.jiacpr.com) — มีเมื่อล็อกอิน LINE/อีเมลจริงแล้วเท่านั้น ใบเก่ายังใช้ได้ปกติ */}
+    {user?.hub?.cardNo && <a href="https://class.jiacpr.com/card" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: B.gray, borderRadius: 12, padding: "12px 14px", marginTop: 12, textDecoration: "none", color: B.black }}>
+      <span style={{ fontSize: 12.5 }}>บัตรนักเรียน JIA: <strong style={{ fontFamily: "monospace" }}>{user.hub.cardNo}</strong>{user.hub.verifyLevel === "instructor" ? " · ยืนยันตัวตนแล้ว ✓" : ""}</span>
+      <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>ดูบัตร →</span>
+    </a>}
     {/* ===== LINE invite (โปรโมชัน ไม่บล็อกการดาวน์โหลด) ===== */}
     {lineLinked ? (
       <div style={{ background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 16, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>
@@ -4712,7 +4842,7 @@ export default function App() {
           case "stripe-verify": return <StripeVerify status={stripeVerify} go={go}/>;
           case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog} goGameRandom={goGameRandom}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-          case "lineprompt": return <LineAddPrompt go={go} user={user} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
+          case "lineprompt": return <LineAddPrompt go={go} user={user} setUser={u => { setUser(u); save("user", u); }} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
           case "teaserquiz": return <TeaserQuiz go={go}/>;
           case "signupgate": return <SignupGate go={go} setUser={u => { setUser(u); save("user", u); }} setProgress={p => { setProgress(p); save("progress", p); }}/>;
           case "payment": return <Payment go={go} user={user}/>;

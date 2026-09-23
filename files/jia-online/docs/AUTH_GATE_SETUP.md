@@ -110,3 +110,36 @@ payload = `before-course` | `after-lesson-1` | `soft` (ค่าเริ่ม�
 - ข้ามเว็บ: ล็อกอิน LINE ที่นี่ → เปิด `https://class.jiacpr.com/account` → กด LINE → เห็นเป็นบัญชีเดียวกัน
   (แผงคอร์สออนไลน์ใน `/account` แสดงสถานะ/คูปองตรงกัน)
 - ลูกค้าที่เคยกรอกชื่อ-เบอร์ไว้ก่อน (ทางสำรอง) แล้วมาล็อกอิน LINE ทีหลัง → `customers` ยังมีแถวเดียว (ไม่สร้างซ้ำ)
+
+## บัตรนักเรียนกลาง + ยืนยันตัวตนด้วยอีเมล (สำรอง) — ส่วนหนึ่งของ unified identity ทั้งเครือ JIA — 23 กันยายน 2026
+
+เว็บนี้อยู่ Supabase โปรเจกต์เดียวกับ Hub (`class.jiacpr.com`, `tpoiyykbgsgnrdwzgzvn`) จึงเรียก RPC
+`public.jia_identity` ของ Hub ตรงจากเบราว์เซอร์ได้เลยด้วย Supabase session ของเว็บนี้เอง — ไม่ต้องผ่าน
+`/sso` หรือบัตรผ่าน (JWT) แบบที่แอปข้ามโปรเจกต์ (bls-hcp-app/acls-emr) ต้องใช้ รายละเอียดฝั่ง Hub อยู่ที่
+repo `jia-learning-hub`, `docs/unified-identity.md`
+
+**เพิ่มในนี้ (ดู `syncHubIdentity`/`pickHub` ใน `src/App.jsx`):**
+- หลัง `signInWithLine()` แลก session สำเร็จ (ไม่แก้ mechanism เดิม) → เรียก `jia_identity('me')` แล้ว
+  `saveProfile` อัตโนมัติด้วยชื่อ-เบอร์ที่มีอยู่แล้วถ้ายังไม่มีโปรไฟล์กลาง (best-effort — พังไม่กระทบ login เดิม)
+  ผลลัพธ์ (`cardNo`/`nameTh`/`verifyLevel`) เก็บไว้ที่ `user.hub` แล้วโชว์เป็นลิงก์ "บัตรนักเรียน JIA" ที่หน้า
+  `Certificate` (ลิงก์ไป `class.jiacpr.com/card` — เอาไว้ให้ครูสแกน/ยืนยันตัวตนจริงที่คลาสได้)
+- ปุ่ม **"เข้าสู่ระบบด้วย LINE (ยืนยันตัวตนถาวร)"** จริง (เรียก `signInWithLine` ตัวเดิม ไม่ใช่แค่ "เพิ่ม OA
+  เป็นเพื่อน") ย้ายมาอยู่ที่หน้า `LineAddPrompt` variant `post-register` ด้วย — เดิมปุ่มนี้มีอยู่แค่ที่
+  `SignupGate` ซึ่งใน gate variant `soft` (**ค่า default ปัจจุบัน**) ไม่ถูกเปิดใช้เลย (`gateOn` ตรวจ
+  `variant !== "soft"`) ทำให้ผู้เรียนส่วนใหญ่ (ที่สมัครผ่าน `Register`/`Claim` ตอนเรียนจบ ไม่ใช่ก่อนเรียน)
+  ไม่มีทางเจอปุ่มล็อกอิน LINE จริงเลยมาก่อน — `LineAddPrompt` เป็นจุดเดียวที่ทุก entry point (SignupGate/
+  Register/Claim) ลงเอยเหมือนกันหมด จึงเป็นที่เดียวที่การันตีว่าทุกคนเจอ
+- **อีเมล (ทางเลือกสำรอง — LINE เป็นหลัก):** `EmailIdentityCard` component เดียวกันในหน้านั้น — OTP อีเมล
+  ตรงผ่าน `supabase.auth.signInWithOtp/verifyOtp` ของโปรเจกต์นี้เอง (ไม่ต้องมี server proxy เพิ่ม — เว็บนี้
+  เก็บ session ใน localStorage อยู่แล้วตามความเสี่ยงที่ยอมรับไว้ด้านบน) แล้ว `jia_online_account
+  ('attachLocal')` ผูกเข้ากับแถว `customers` ที่มีอยู่แล้ว (ต้องมี `customer_id`+`phone` ตรงกันเท่านั้น — ไม่
+  สร้างลูกค้าใหม่ ไม่แตะ `auth-line-link`/coupon/online_students เลย) จึงปลอดภัยกับทุก entry point โดยไม่
+  ต้องแก้ตรรกะสร้างลูกค้าที่มีความเสี่ยงสูงกว่า (ยังไม่รองรับ "สมัครใหม่ด้วยอีเมลอย่างเดียวตั้งแต่ต้น" — ต้อง
+  กรอกชื่อ-เบอร์ผ่านทางใดทางหนึ่งก่อนเสมอ แล้วค่อยยืนยันด้วยอีเมลทีหลังได้)
+
+**ไม่ได้แก้ในรอบนี้ (ตั้งใจ เพื่อจำกัดความเสี่ยง):** ชื่อบนใบประกาศยังอ่านจาก `user.name` (local) เหมือนเดิม
+ทุกไบต์ — การรวมใบประกาศ/ชื่อที่ล็อกแล้วให้ตรงกับ Hub เป็นงานเฟสถัดไป (`person_certificates`, ดู
+`jia-learning-hub` roadmap) ที่ต้องระมัดระวังเรื่อง evidence hash ของใบที่ออกไปแล้วเป็นพิเศษ
+
+**Deploy:** ไม่มีอะไรต้อง apply/deploy เพิ่มฝั่ง Hub — `jia_identity`/`jia_online_account` deploy อยู่แล้ว
+เว็บนี้แค่เรียกตรง build ปกติก็พร้อมใช้
