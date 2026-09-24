@@ -20,7 +20,9 @@ import './game.css';
 // CPR HERO — เกมตัดสินใจสไตล์ Code Blue Sim (จาก acls/bls.morroo.com) ฉบับประชาชน
 // เคสส่วนใหญ่เล่นฟรี ไม่ล็อก ยกเว้นเคสที่ requiresFinalExam (ล็อกจนสอบ Final Exam ผ่าน)
 // props: onExit() กลับหน้าเว็บ, onTrack(name, props) ส่ง event, finalExamPassed ปลดล็อกเคสโบนัส
-//   earnVoucher() -> คืนรหัสคูปองส่วนลด ฿100 (หรือ null) เมื่อชนะเคส — ออก/บันทึกฝั่ง App
+//   earnVoucher(phone) -> Promise<{code,note}|null> ออกคูปองส่วนลด ฿100 ผ่าน RPC เมื่อชนะเคส (ต้องมีเบอร์)
+//   voucherEligible() -> boolean เช็คแบบ sync ว่าตอนนี้อยู่ในช่วงแคมเปญ/มีสิทธิ์คูปองไหม (ก่อนถามเบอร์)
+//   voucherPhone -> เบอร์ที่เคยใช้ขอคูปองไปแล้ว (ถ้ามีจาก session ก่อน) กันไม่ต้องถามซ้ำ
 //   onGoBooking() ไปหน้าจองคอร์ส on-site (ใช้คูปองที่เพิ่งได้)
 const GAME_NAME = 'CPR HERO';
 const GAME_EYEBROW = 'ภารกิจพลเมืองดี';
@@ -104,7 +106,7 @@ const randomUnlockedScenario = (finalExamPassed) => {
 
 // fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
 // (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
-export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false }) {
+export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, voucherEligible, voucherPhone: initialVoucherPhone = null, onGoBooking, autoRandom = false }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -178,6 +180,15 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
   const [comboBreak, setComboBreak] = useState(null); // { n, k }
   const [result, setResult] = useState(null); // { won, grade, score, isHiscore }
   const [voucher, setVoucher] = useState(null); // รหัสคูปองส่วนลด ฿100 ที่ได้จากการชนะเกม (null = ยังไม่ได้/ไม่มีสิทธิ์)
+  // ออกคูปองแคมเปญตอนนี้เป็น async + ต้องมีเบอร์โทร (RPC ฝั่ง Hub ใช้เบอร์กันคนขอโค้ดไม่จำกัด)
+  // voucherPhone: เบอร์ที่ใช้ขอคูปองไปแล้ว (จาก session ก่อนถ้ามี ผ่าน prop, หรือจากฟอร์มในเซสชันนี้) —
+  // มีแล้วไม่ต้องถามซ้ำทุกครั้งที่ชนะเคสใหม่ในเซสชันเดียวกัน
+  const [voucherPhone, setVoucherPhone] = useState(initialVoucherPhone);
+  // needVoucherPhone = ชนะแล้ว มีสิทธิ์คูปอง แต่ยังไม่มีเบอร์ที่จำไว้ → โชว์ฟอร์มขอเบอร์ก่อนออกโค้ดจริง
+  const [needVoucherPhone, setNeedVoucherPhone] = useState(false);
+  const [voucherLoading, setVoucherLoading] = useState(false);
+  const [voucherPhoneInput, setVoucherPhoneInput] = useState('');
+  const [voucherPhoneError, setVoucherPhoneError] = useState('');
   const [hiscore, setHiscore] = useState(() => Number(localStorage.getItem(hiscoreKey(difficulty)) || 0));
 
   // สายด่วน 1669 — สถานะกรอบโทรศัพท์ (คุมแค่การแสดงผลของกรอบ ไม่แตะ flow เนื้อเรื่อง:
@@ -347,6 +358,34 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
     }
   }
 
+  // ออกคูปองแคมเปญจริง (async) เมื่อมีเบอร์แล้ว — เรียกทั้งจาก endCase (มีเบอร์จำไว้แล้ว) และจากฟอร์ม
+  // ขอเบอร์ด้านล่าง (เพิ่งกรอกครั้งแรก) จำเบอร์ไว้ใน state กันไม่ต้องถามซ้ำเคสถัดไปในเซสชันเดียวกัน
+  function tryIssueVoucher(phone) {
+    setVoucherLoading(true);
+    setVoucherPhoneError('');
+    const alreadyHad = !!voucher;
+    Promise.resolve(earnVoucher ? earnVoucher(phone) : null)
+      .then((v) => {
+        setVoucher(v);
+        if (v) {
+          setVoucherPhone(phone);
+          setNeedVoucherPhone(false);
+          if (!alreadyHad) track('game_voucher_earned', { scenario_id: sc.id, difficulty: S.current.difficulty });
+        } else {
+          setVoucherPhoneError('ออกคูปองไม่สำเร็จ กรุณาลองใหม่');
+        }
+      })
+      .catch(() => setVoucherPhoneError('ออกคูปองไม่สำเร็จ กรุณาลองใหม่'))
+      .finally(() => setVoucherLoading(false));
+  }
+
+  function submitVoucherPhone(e) {
+    e.preventDefault();
+    const clean = voucherPhoneInput.replace(/\D/g, '');
+    if (clean.length < 9) { setVoucherPhoneError('กรุณากรอกเบอร์โทรให้ครบ 9-10 หลัก'); return; }
+    tryIssueVoucher(voucherPhoneInput);
+  }
+
   function endCase(won) {
     clearAllTimers();
     const st = S.current;
@@ -362,24 +401,24 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
       isHiscore = score > 0;
     }
     // ชนะเคสใดก็ได้ → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (เกม = funnel ดึงคนมาเรียนจริง)
-    // earnVoucher() ฝั่ง App เป็นคนออก/บันทึกโค้ด (รียูสของเดิมถ้ามี, ยกเว้นนักเรียน pre-course → คืน null)
-    let earnedVoucher = null;
+    // earnVoucher(phone) ฝั่ง App เป็นคนออก/บันทึกโค้ดจริงผ่าน RPC (รียูสของเดิมถ้ามี, ยกเว้นนักเรียน
+    // pre-course → คืน null) — ตอนนี้เป็น async และต้องมีเบอร์โทร ถ้ายังไม่เคยขอไว้ในเครื่องนี้จะโชว์ฟอร์ม
+    // ขอเบอร์ก่อน (ดูส่วน debrief ด้านล่าง) แทนที่จะได้โค้ดทันทีเหมือนเดิม
+    const eligible = !!(voucherEligible && voucherEligible());
     if (won) {
       const nextCleared = new Set(cleared);
       nextCleared.add(sc.id);
       setCleared(nextCleared);
       localStorage.setItem(CLEARED_KEY, JSON.stringify([...nextCleared]));
-      const alreadyHad = !!voucher;
-      try { earnedVoucher = earnVoucher ? earnVoucher() : null; } catch (e) { earnedVoucher = null; }
-      setVoucher(earnedVoucher);
-      if (earnedVoucher && !alreadyHad) {
-        track('game_voucher_earned', { scenario_id: sc.id, difficulty: st.difficulty, grade });
+      if (eligible) {
+        if (voucherPhone) { setNeedVoucherPhone(false); tryIssueVoucher(voucherPhone); }
+        else setNeedVoucherPhone(true);
       }
     }
     track('game_completed', {
       scenario_id: sc.id, lesson: sc.lesson, difficulty: st.difficulty,
       won, grade, wrong: st.wrong, duration: Math.round(st.simTime),
-      voucher: !!earnedVoucher,
+      voucherEligible: eligible,
     });
     syncView();
     setResult({ won, grade, score, isHiscore, bonus, speed });
@@ -830,6 +869,30 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
               <Metric label="เวลาทั้งเคส" value={fmtTime(st.simTime)} tone="" />
             </div>
           </div>
+          {result.won && needVoucherPhone && !voucher && (
+            <div className="cbs-voucher cbs-voucher-ask">
+              <div className="cbs-voucher-eyebrow">🎁 รางวัลพลเมืองดี — เกือบได้แล้ว</div>
+              <div className="cbs-voucher-title">กรอกเบอร์โทรรับคูปองส่วนลด ฿100</div>
+              <div className="cbs-voucher-note cbs-voucher-ask-note">
+                ใช้เบอร์เดียวกับตอนจองคอร์สได้เลย — ระบบใช้เบอร์นี้กันไม่ให้ขอคูปองซ้ำหลายใบ
+              </div>
+              <form onSubmit={submitVoucherPhone} className="cbs-voucher-phone-form">
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  placeholder="08X-XXX-XXXX"
+                  value={voucherPhoneInput}
+                  onChange={(e) => setVoucherPhoneInput(e.target.value)}
+                  disabled={voucherLoading}
+                  className="cbs-voucher-phone-input"
+                />
+                <button type="submit" className="cbs-btn-main cbs-voucher-cta" disabled={voucherLoading}>
+                  {voucherLoading ? 'กำลังออกคูปอง...' : 'รับคูปอง ฿100 →'}
+                </button>
+              </form>
+              {voucherPhoneError && <div className="cbs-voucher-phone-error">{voucherPhoneError}</div>}
+            </div>
+          )}
           {result.won && voucher && (
             <div className="cbs-voucher">
               <div className="cbs-voucher-eyebrow">🎁 รางวัลพลเมืองดี — ปลดล็อกแล้ว</div>
@@ -859,9 +922,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
               </a>
             </div>
           )}
-          {/* ชวนไปคอร์สปฏิบัติ — โชว์ทุกครั้งที่จบเกมแบบไม่มีคูปอง (แพ้ / ชนะนอกช่วงแคมเปญ)
+          {/* ชวนไปคอร์สปฏิบัติ — โชว์ทุกครั้งที่จบเกมแบบไม่มีคูปอง (แพ้ / ชนะนอกช่วงแคมเปญ) และไม่ใช่ตอนที่
+              กำลังรอกรอกเบอร์เพื่อรับคูปองอยู่ (กันบล็อกซ้อนกันสองกล่อง)
               จังหวะแพ้คือจังหวะขายที่แรงที่สุด: เกมเพิ่งสอนเองว่าของจริงไม่มีปุ่มเริ่มใหม่ */}
-          {!(result.won && voucher) && (
+          {!(result.won && (voucher || needVoucherPhone)) && (
             <div className="cbs-invite">
               <div className="cbs-invite-title">
                 {result.won ? '🫀 เก่งในเกมแล้ว — ลองฝึกกับหุ่นจริงไหม?' : '🫀 ในเกมแก้มือได้ แต่ชีวิตจริงไม่มีปุ่มเริ่มใหม่'}
