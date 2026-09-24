@@ -111,8 +111,13 @@ Deno.serve(async (req: Request) => {
     customerId = existing.id;
     await supa.from("customers").update(baseFields).eq("id", customerId);
   } else {
+    // customers.name/tel are NOT NULL — baseFields deliberately omits them (via `|| undefined`)
+    // when blank so an UPDATE never clobbers an existing value with an empty one, but a first
+    // INSERT for a LINE-only signup (no phone yet, or LINE profile fetch failed) must still supply
+    // something or the row silently fails to insert and every later step (progress, coupon) writes
+    // against a customer_id that was never created.
     customerId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
-    await supa.from("customers").insert({ id: customerId, ...baseFields });
+    await supa.from("customers").insert({ id: customerId, ...baseFields, name: name || "", tel: cleanPhone || "" });
   }
 
   // 3) merge + เก็บ progress ผูกบัญชี

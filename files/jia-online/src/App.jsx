@@ -6,7 +6,7 @@ import { shuffled } from "./game/storyEngine";
 
 // ==================== BRAND ====================
 const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
-const SERIF = "'Trirong', 'Noto Sans Thai', Georgia, serif"; // ฟอนต์เซริฟไทยสำหรับใบประกาศ (หัวข้อ + ชื่อผู้เรียน)
+const SERIF = "'Bai Jamjuree', 'Noto Sans Thai', sans-serif"; // ฟอนต์ใบประกาศ (หัวข้อ + ชื่อผู้เรียน)
 
 // ========== CONFIG ==========
 const FREE_LAUNCH = false; // cutover แล้ว (ก.ค. 2569) — บทที่ 1 ฟรี บทที่เหลือเก็บเงินตาม PRICING, Claim CTA เปิดใช้งาน
@@ -70,14 +70,18 @@ const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
 // ========== AUTH GATE (บังคับสมัครหลังจบบท 1) ==========
 const AUTH_GATE_ENABLED = true;          // เปิดด่านบังคับสมัคร (false = กลับไป flow เดิม)
 const LIFF_ID = "2010458255-JAxIKawy";     // LIFF ID จาก LINE Developers (PUBLIC) — channel "JIA CPR Online" / provider JiaTrainingcenter
-const GOOGLE_LOGIN_ENABLED = true;        // ต้องเปิด Google provider ใน Supabase Auth ก่อนใช้จริง
-const EMAIL_OTP_ENABLED = true;           // ต้องเปิด Email (OTP) provider ใน Supabase Auth
 // PUBLIC PostHog project key (override ได้ผ่าน env ใน Vercel) — hardcode ไว้เพราะก่อนหน้านี้ env ไม่ได้ตั้ง
 // ทำให้ PostHog เงียบสนิท วัดผลโฆษณาไม่ได้ (โปรเจกต์ "Default project" org JiaLucksa, us.posthog.com)
 const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY || "phc_zYMrFeM7HEGEBUdgeyixzNw24pt5XUom38QAAJfAwgLr";
 const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com";
 const GATE_VARIANT_DEFAULT = "soft"; // soft (แอด LINE แบบข้ามได้ ลด drop) | before-course (ควิซเกริ่นนำ→สมัคร→เข้าคอร์ส) | after-lesson-1
 const FN_URL = (n) => `${SUPABASE_URL}/functions/v1/${n}`;
+// LINE เป็นล็อกอินหลักของทั้ง cpr.morroo.com และ class.jiacpr.com (คนละเว็บ บัญชีเดียวกัน) —
+// เรียก edge function "line-auth" ของ Hub (repo jia-learning-hub) ตรง ๆ จากเบราว์เซอร์ ไม่ใช่ของเว็บนี้เอง
+const HUB_LINE_AUTH_URL = FN_URL("line-auth");
+// ห้ามใส่ Authorization ตรงนี้ — line-auth ตีความ header Bearer ว่าเป็นโหมด "เชื่อมบัญชีที่ล็อกอินอยู่แล้ว"
+// (link mode) ถ้าส่ง publishable key ไปจะถูกตีความเป็น token ผู้ใช้ปลอม แล้วโดนปฏิเสธด้วย 401
+const LINE_AUTH_HEADERS = { "Content-Type": "application/json", apikey: SUPABASE_KEY };
 
 // ========== PRICING ==========
 const PRICING = {
@@ -110,6 +114,20 @@ const LEAD_SOURCES = [
   { value: "event",     label: "งาน/อีเวนต์ออฟไลน์" },
   { value: "other",     label: "อื่นๆ (โปรดระบุ)" },
 ];
+
+// ========== PARTNER COUPON (QR ใบละ 1 สิทธิ์ — ธุรกิจพันธมิตรแจกให้ลูกค้าเรียนคอร์สเต็มฟรี) ==========
+const SITE_URL = "https://cpr.morroo.com";
+const PARTNER_SOURCE = "partner_coupon";
+const genPartnerCode = (prefix) => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = (prefix || "JIA") + "-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+// LINE ID พาร์ทเนอร์ → ลิงก์เปิดแชต: ใส่ลิงก์เต็มมาก็ใช้ตรงๆ, "@..." = LINE OA, อื่นๆ = LINE ส่วนตัว (เลข ID)
+const partnerLineUrl = (v) => {
+  const s = (v || "").trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("@")) return `https://line.me/R/ti/p/${encodeURIComponent(s)}`;
+  return `https://line.me/ti/p/~${encodeURIComponent(s)}`;
+};
+const getPartnerSponsor = () => load("partner_sponsor", null);
 
 const supaRest = async (table, method = "GET", body = null, filters = "") => {
   const url = `${SUPABASE_URL}/rest/v1/${table}${filters}`;
@@ -163,6 +181,18 @@ const adminPing = async (key) => {
   } catch (e) { return false; }
 };
 const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+
+// ออกคูปอง ฿100 ผ่าน RPC ฝั่งเซิร์ฟเวอร์ (class.jiacpr.com's public.issue_online_coupon) แทนการสุ่มโค้ด
+// เองแล้ว POST เข้า promo_codes ตรงจาก client แบบเดิม (Hub ปิด anon insert บนตารางนี้แล้ว — ช่องโหว่เดิม)
+// เซิร์ฟเวอร์ตรวจสิทธิ์จาก customer_id + เบอร์โทรที่ตรงกับ public.customers และต้องมี
+// online_students.completed_at ของ customer นั้นตั้งไว้แล้วจึงจะออกโค้ดให้ (เรียกซ้ำปลอดภัย คืนโค้ดเดิม)
+// คืน null ถ้าออกไม่สำเร็จ (ยังไม่ผ่านเกณฑ์ / ไม่มี customer_id ฯลฯ) — ผู้เรียกต้องรับมือกรณีนี้เอง
+const issueOnlineCoupon = async (customerId, phone) => {
+  const cleanPhone = (phone || "").replace(/\D/g, "");
+  if (!customerId || cleanPhone.length < 9) return null;
+  const res = await supaRpc("issue_online_coupon", { p_customer_id: customerId, p_phone: cleanPhone });
+  return res && res.issued && res.code ? res.code : null;
+};
 
 // แคมเปญคูปองจากเกม — แจกเฉพาะช่วงแคมเปญเท่านั้น (นอกช่วง ชนะเกมจะไม่ออกคูปอง) + คูปองหมดอายุวันสุดท้ายของช่วง
 // ✏️ เพิ่ม/แก้แถวเพื่อเปิดแคมเปญใหม่ (YYYY-MM-DD ตามเวลาไทย) — แคมเปญวันเดียวใช้ start = end
@@ -253,64 +283,220 @@ const mergeProgressLocal = (a, b) => {
 const FN_HEADERS = { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
 
 // บันทึก progress ขึ้น account (เรียนต่อข้ามเครื่อง) — เรียกหลัง save("progress") ทุกครั้งถ้า signedUp
+// มี auth_user_id (ล็อกอิน LINE แล้ว) → ใช้ access token สดจาก supabase-js เสมอ (auto-refresh เอง)
+// แทนที่จะใช้ line_id_token ที่เก็บไว้ตอนล็อกอินซึ่งหมดอายุใน ~1 ชม. แล้ว sync เงียบ ๆ ใช้ไม่ได้อีก
 const syncProgressRemote = async (np) => {
   try {
     const u = load("user", null); if (!u) return;
+    if (u.auth_user_id) {
+      const supa = await getSupabase();
+      const { data: { session } } = await supa.auth.getSession();
+      if (session?.access_token) {
+        await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress: np }) });
+        return;
+      }
+    }
     if (u.line_user_id) { const idt = load("line_id_token", null); if (idt) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", id_token: idt, progress: np }) }); }
-    else if (u.auth_user_id) { const at = load("sb_access_token", null); if (at) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: at, progress: np }) }); }
   } catch (e) {}
 };
 
-// ทำ LINE signup ให้เสร็จ (เรียกหลัง LIFF login redirect กลับมา / หรือกรณี login อยู่แล้ว)
-const finishLineSignup = async () => {
+// ผูกโปรไฟล์กลางที่ Hub (learning_hub.people ผ่าน RPC public.jia_identity) — เรียกตรงจากเบราว์เซอร์ได้เลย
+// เพราะเว็บนี้อยู่ Supabase โปรเจกต์เดียวกับ class.jiacpr.com (tpoiyykbgsgnrdwzgzvn) ไม่ต้องผ่าน /sso หรือ
+// บัตรผ่านแบบที่แอปข้ามโปรเจกต์ (bls/acls) ต้องใช้ — แค่มี Supabase session ของโปรเจกต์นี้ (จาก LINE หรือ
+// อีเมล) ก็เรียก RPC นี้ได้ทันที ให้ชื่อที่ยืนยันแล้ว/บัตรนักเรียนเป็นชุดเดียวกับ Hub และแอปอื่นในเครือ
+// best-effort เสมอ (ไม่มีชื่อให้บันทึกก็แค่คืนโปรไฟล์เปล่า) — พังไม่กระทบ flow ล็อกอินเดิม
+const syncHubIdentity = async (supa, { nameTh = "", phone = "" } = {}) => {
+  try {
+    const { data: me } = await supa.rpc("jia_identity", { action: "me" });
+    if (!me) return null;
+    if (!me.profileComplete && nameTh && nameTh.trim().length >= 2) {
+      const { data: saved } = await supa.rpc("jia_identity", { action: "saveProfile", payload: { nameTh: nameTh.trim(), phone: phone || "", pdpaConsent: true } });
+      return saved || me;
+    }
+    return me;
+  } catch (e) { return null; }
+};
+const pickHub = (p) => (p ? { nameTh: p.nameTh, cardNo: p.cardNo, cardToken: p.cardToken, verifyLevel: p.verifyLevel, nameLocked: p.nameLocked } : undefined);
+
+// เข้าสู่ระบบด้วย LINE — ล็อกอินหลักของทั้ง cpr.morroo.com และ class.jiacpr.com (บัญชีเดียวกัน)
+// ลำดับ: LIFF login (ถ้ายังไม่ได้ล็อกอิน จะนำทางออกจากหน้าแล้วกลับมาทำต่อตอน mount) → line-auth ของ Hub
+// (ยืนยัน id_token กับ LINE จริง คืน token_hash ใช้ครั้งเดียว ไม่ใช่ session ตรง ๆ) → แลกเป็น Supabase
+// session ด้วย verifyOtp ฝั่งเบราว์เซอร์เอง → ผูกลูกค้าเดิม (ถ้าเคยกรอกชื่อ-เบอร์ไว้) เข้ากับบัญชีนี้ก่อน
+// → auth-line-link (เดิม: upsert customers/course_progress + ออกคูปอง + ส่งข้อความต้อนรับ) → resolve
+// ให้ตรงกับ Hub ผ่าน jia_online_account('me') แล้วค่อยบันทึกลง localStorage → sync โปรไฟล์กลาง (บัตรนักเรียน)
+// silent=true = เรียกจากเอฟเฟกต์ auto-link เงียบ ๆ ในแอป LINE — ถ้ายังไม่ได้ล็อกอิน LIFF จะไม่บังคับ redirect
+const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) => {
   const liff = await loadLiff();
-  if (!liff || !liff.isLoggedIn()) return null;
-  const pending = load("signup_pending", {}) || {};
+  if (!liff) return null;
+  if (!liff.isLoggedIn()) {
+    if (silent) return null;
+    save("line_login_pending", { phone, name, gate_variant: getGateVariant() });
+    liff.login({ redirectUri: window.location.href });
+    return null; // เบราว์เซอร์กำลังจะนำทางออกไปหน้า LINE login
+  }
   let idToken = null; try { idToken = liff.getIDToken(); } catch (e) {}
   if (!idToken) return null;
+
+  const callLineAuth = async () => {
+    const res = await fetch(HUB_LINE_AUTH_URL, { method: "POST", headers: LINE_AUTH_HEADERS, body: JSON.stringify({ idToken }) });
+    let data = {}; try { data = await res.json(); } catch (e) {}
+    return { ok: res.ok, data };
+  };
+  let result = await callLineAuth();
+  if (!result.ok) {
+    // id_token ที่ LIFF ถืออยู่หมดอายุ (~1 ชม.) หรือ LIFF ค้าง session เก่า — บังคับล็อกอินใหม่หนึ่งครั้ง
+    try { liff.logout(); } catch (e) {}
+    if (silent) return null;
+    save("line_login_pending", { phone, name, gate_variant: getGateVariant() });
+    liff.login({ redirectUri: window.location.href });
+    return null;
+  }
+  if (!result.data?.tokenHash) return null;
+
+  const supa = await getSupabase();
+  const { data: verified, error } = await supa.auth.verifyOtp({ token_hash: result.data.tokenHash, type: "magiclink" });
+  if (error || !verified?.session) return null;
+  const authUserId = verified.session.user.id;
+  const switchedAccount = forgetOtherAccount(authUserId);
+  if (switchedAccount) { phone = ""; name = ""; }
+
+  // ผูกแถวลูกค้าเดิม (สมัครด้วยชื่อ+เบอร์แบบไม่ผ่าน LINE มาก่อน) เข้ากับบัญชี LINE ที่เพิ่งล็อกอิน
+  // ก่อนเรียก auth-line-link เสมอ — ไม่งั้น auth-line-link จะมองว่าเป็นคนละคน (จับคู่ด้วย line_user_id
+  // เท่านั้น โดยตั้งใจ กันคนอื่นยึดบัญชีด้วยการกรอกเบอร์ปลายทาง) แล้วสร้างแถวซ้ำ
+  const localUser = load("user", null);
+  if (localUser?.customer_id && !localUser?.auth_user_id && localUser?.phone) {
+    try { await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: localUser.customer_id, phone: localUser.phone } }); } catch (e) {}
+  }
+
+  save("line_id_token", idToken);
   let profile = {}; try { profile = await liff.getProfile(); } catch (e) {}
   let isFriend = true; try { const fs = await liff.getFriendship(); isFriend = !!fs?.friendFlag; } catch (e) {}
-  save("line_id_token", idToken);
-  const res = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
-    id_token: idToken, phone: pending.phone || "", pdpa: true, display_name: profile.displayName || "",
+  const usePhone = phone || localUser?.phone || "";
+  const useName = name || localUser?.name || profile.displayName || "";
+  const linkRes = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
+    id_token: idToken, phone: usePhone, pdpa: true, display_name: useName,
     utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
-    gate_variant: pending.gate_variant || getGateVariant(),
+    gate_variant: getGateVariant(),
     pre_course: isPreCourseStudent(), // ให้ server ข้ามการออกคูปอง ฿100 + ข้อความขายให้นักเรียน pre-course
   }) });
-  let data = {}; try { data = await res.json(); } catch (e) {}
-  if (!data?.ok) return null;
-  const u = { name: data.name || profile.displayName || pending.name || "", phone: pending.phone || "", line_user_id: data.line_user_id, customer_id: data.customer_id };
-  save("user", u); save("signed_up", true); save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
-  if (data.progress) save("progress", data.progress);
-  if (data.coupon && !isPreCourseStudent()) save("coupon", data.coupon);
-  save("signup_pending", null); save("line_login_pending", false); save("enrolled", true);
+  let linkData = {}; try { linkData = await linkRes.json(); } catch (e) {}
+
+  // ยืนยัน/เติมข้อมูลบัญชีให้ตรงกับที่ Hub เห็น (ผูก course_progress.auth_user_id ที่ auth-line-link
+  // ยังไม่ทันเซ็ตด้วย เผื่อแถว course_progress มาจากรอบก่อนที่ migration cross-site ยังไม่ backfill)
+  let meData = {}; try { const { data } = await supa.rpc("jia_online_account", { action: "me" }); meData = data || {}; } catch (e) {}
+  const hubProfile = await syncHubIdentity(supa, { nameTh: meData.name || linkData.name || useName, phone: meData.phone || usePhone });
+
+  const u = {
+    name: meData.name || linkData.name || useName,
+    phone: meData.phone || usePhone,
+    line_user_id: linkData.line_user_id || meData.lineUserId,
+    auth_user_id: authUserId,
+    customer_id: meData.customerId || linkData.customer_id,
+    hub: pickHub(hubProfile),
+  };
+  save("user", u); save("signed_up", true); save("enrolled", true);
+  save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
+  let progress = linkData.progress || load("progress", { done: [], scores: {} });
+  if (meData.progress) progress = mergeProgressLocal(progress, meData.progress);
+  save("progress", progress);
+  if (linkData.coupon && !isPreCourseStudent()) save("coupon", linkData.coupon);
+  save("signup_pending", null); save("line_login_pending", null);
   safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
   phCapture("signup_complete", { provider: "line", variant: getGateVariant() });
-  return { user: u, progress: data.progress, isFriend };
+  if (switchedAccount) window.location.reload(); // หน้าจอยังถือความก้าวหน้า/ชื่อของบัญชีก่อนอยู่ในหน่วยความจำ
+  return { user: u, progress, isFriend };
 };
 
-// ทำ signup ให้เสร็จสำหรับ Google/Email (มี Supabase session แล้ว)
-const finalizeOAuthSignup = async (provider) => {
+// ========== EMAIL IDENTITY (ทางเลือกสำรอง — LINE เป็นหลัก อีเมลเป็นรอง) ==========
+// ไม่สร้างลูกค้าใหม่/ไม่แทนที่ flow สมัครเดิม — ใช้ "ผูก" (attachLocal) เข้ากับแถวลูกค้าที่มีอยู่แล้ว
+// จากการสมัครด้วยชื่อ-เบอร์ (SignupGate/Register/Claim ทุกทาง) เข้ากับ Supabase session จริงที่ยืนยัน
+// อีเมลแล้ว — เหมือนกับที่ signInWithLine ทำก่อนเรียก auth-line-link ทุกอย่าง เพียงแต่ไม่มี auth-line-link
+// ให้เรียก (ฟังก์ชันนั้นผูกกับ id_token ของ LINE เท่านั้น) จึงไม่แตะ customers/online_students/coupon เลย
+// ปลอดภัยกับทุก entry point ที่มีอยู่แล้วโดยไม่ต้องแก้ตรรกะการสร้างลูกค้า/คอร์สที่มีความเสี่ยงสูงกว่า
+const requestEmailIdentityOtp = async (email) => {
   const supa = await getSupabase();
-  const { data: { session } } = await supa.auth.getSession();
-  if (!session) return null;
-  const pending = load("signup_pending", {}) || {};
-  const authUserId = session.user.id;
-  const email = session.user.email || "";
-  const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || "";
-  save("sb_access_token", session.access_token);
-  const fields = { auth_provider: provider, auth_user_id: authUserId, oauth_sub: authUserId, email, name: name || undefined, display_name: name || undefined, tel: pending.phone || undefined, pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), source: "online-course", gate_variant: pending.gate_variant || getGateVariant(), landing_url: load("landing_url", null), ...getUTM() };
-  const existing = await supaRest("customers", "GET", null, `?auth_user_id=eq.${authUserId}&select=id&limit=1`);
-  let customerId;
-  if (Array.isArray(existing) && existing[0]) { customerId = existing[0].id; await supaRest("customers", "PATCH", fields, `?id=eq.${customerId}`); }
-  else { customerId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6); await supaRest("customers", "POST", { id: customerId, ...fields }); await supaRest("online_students", "POST", { customer_id: customerId, name: name || "", phone: pending.phone || "", email, status: "กำลังเรียน" }); }
+  const { error } = await supa.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  if (error) throw Error(error.message || "ส่งรหัส OTP ไม่สำเร็จ กรุณาลองใหม่");
+};
+const verifyEmailIdentityOtp = async ({ email, token }) => {
+  const supa = await getSupabase();
+  const { data, error } = await supa.auth.verifyOtp({ email, token, type: "email" });
+  if (error || !data?.session) throw Error("รหัส OTP ไม่ถูกต้องหรือหมดอายุ");
+  const authUserId = data.session.user.id;
+  const switchedAccount = forgetOtherAccount(authUserId);
+  const localUser = load("user", null);
+  if (localUser?.customer_id && !localUser?.auth_user_id && localUser?.phone) {
+    try { await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: localUser.customer_id, phone: localUser.phone } }); } catch (e) {}
+  }
+  let meData = {}; try { const { data: d } = await supa.rpc("jia_online_account", { action: "me" }); meData = d || {}; } catch (e) {}
+  const hubProfile = await syncHubIdentity(supa, { nameTh: localUser?.name || meData.name || "", phone: localUser?.phone || meData.phone || "" });
+  const u = {
+    ...(localUser || {}),
+    name: meData.name || localUser?.name || "",
+    phone: meData.phone || localUser?.phone || "",
+    customer_id: meData.customerId || localUser?.customer_id,
+    auth_user_id: authUserId,
+    hub: pickHub(hubProfile) || localUser?.hub,
+  };
+  save("user", u); save("signup_pending", null);
   let progress = load("progress", { done: [], scores: {} });
-  try { const r = await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress }) }); const d = await r.json(); if (d?.progress) progress = mergeProgressLocal(progress, d.progress); } catch (e) {}
-  const u = { name: name || "", phone: pending.phone || "", email, auth_user_id: authUserId, customer_id: customerId };
-  save("user", u); save("signed_up", true); save("progress", progress); save("signup_pending", null); save("oauth_pending", false); save("enrolled", true);
-  safeTrack("signup_complete", { provider });
-  phCapture("signup_complete", { provider, variant: getGateVariant() });
+  if (meData.progress) { progress = mergeProgressLocal(progress, meData.progress); save("progress", progress); }
+  safeTrack("identity_verified", { provider: "email" }); phCapture("identity_verified", { provider: "email" });
+  if (switchedAccount) window.location.reload(); // หน้าจอยังถือความก้าวหน้า/ชื่อของบัญชีก่อนอยู่ในหน่วยความจำ
   return { user: u, progress };
+};
+
+// ========== ออกจากระบบ (บัญชี JIA บนเครื่องนี้ + ที่ class.jiacpr.com) ==========
+// cpr.morroo.com ลงทะเบียนที่ Hub เป็น client "cpr-online" — หน้า class.jiacpr.com/sso/logout ปิด session ของ Hub
+// (ไม่งั้นคนถัดไปบนเครื่องเดียวกันเข้า Hub แล้วอยู่ในบัญชีเดิม) แล้วพากลับมาที่ return_path บนเว็บนี้
+const HUB_LOGOUT_URL = "https://class.jiacpr.com/sso/logout";
+const HUB_CLIENT_ID = "cpr-online";
+const HUB_REDIRECT_URI = "https://cpr.morroo.com/auth/hub/callback";
+const hasLiffLogin = () => { try { for (let i = 0; i < localStorage.length; i++) { if ((localStorage.key(i) || "").startsWith("LIFF_STORE:")) return true; } } catch (e) {} return false; };
+// ปิด session บัญชีบนเครื่องนี้: Supabase ของเว็บนี้ (scope local — เครื่องอื่นของผู้เรียนไม่หลุด) + LINE Login ของ LIFF
+// นอกแอป LINE (ไม่งั้นคนถัดไปกด "เข้าสู่ระบบด้วย LINE" แล้วได้บัญชี LINE เดิมทันทีโดยไม่ถาม)
+const endAccountSession = async () => {
+  try { const supa = await getSupabase(); await supa.auth.signOut({ scope: "local" }); } catch (e) {}
+  try {
+    if (_liff || hasLiffLogin()) {
+      const liff = await loadLiff();
+      if (liff && !liff.isInClient() && liff.isLoggedIn()) liff.logout();
+    }
+  } catch (e) {}
+};
+// ไปหน้า logout ของ Hub (เฉพาะบนโดเมนจริง — Hub ส่งกลับได้แค่ origin ของ redirect ที่ลงทะเบียนไว้) ที่อื่นแค่โหลดหน้าใหม่
+const goHubLogout = (returnPath = "/") => {
+  if (window.location.origin !== new URL(HUB_REDIRECT_URI).origin) { window.location.reload(); return; }
+  const q = new URLSearchParams({ client_id: HUB_CLIENT_ID, redirect_uri: HUB_REDIRECT_URI, return_path: returnPath });
+  window.location.assign(`${HUB_LOGOUT_URL}?${q.toString()}`);
+};
+// "ออกจากระบบ": ปิดบัญชีทุกที่ แต่เก็บข้อมูลการเรียนในเครื่องไว้ (บทที่ซื้อ/ปลดล็อกอยู่ในเครื่องนี้เท่านั้น — ล้างทิ้ง
+// แล้ว login กลับมาก็ไม่คืน) จำไว้ว่าเป็นของบัญชีไหน (signed_out_account) → บัญชีเดิม login กลับมาเรียนต่อได้ทุกอย่าง,
+// คนอื่น login บนเครื่องนี้ = ล้างข้อมูลของคนก่อนก่อน (forgetOtherAccount) ไม่ให้ชื่อ/เบอร์/ความก้าวหน้าไปปนบัญชีใหม่
+// และกันเอฟเฟกต์ auto-link LINE ในแอป LINE ล็อกอินกลับเองเงียบ ๆ จนกว่าจะกดเข้าสู่ระบบเอง
+const logoutAccount = async () => {
+  const u = load("user", null);
+  await endAccountSession();
+  if (u?.auth_user_id) save("signed_out_account", u.auth_user_id);
+  if (u) save("user", { ...u, auth_user_id: undefined, hub: undefined });
+  save("line_id_token", null);
+  goHubLogout("/");
+};
+// "เริ่มใหม่ / เปลี่ยนคนเรียน": ล้างข้อมูลผู้เรียนในเครื่อง + ปิดบัญชีที่ login อยู่ (เดิมล้างแค่ข้อมูล session ยังค้าง)
+const startOverLearner = async () => {
+  const wasSignedIn = !!load("user", null)?.auth_user_id;
+  await endAccountSession();
+  resetLearner();
+  if (wasSignedIn) goHubLogout("/"); else window.location.reload();
+};
+// เรียกหลัง login สำเร็จ (LINE/อีเมล) ก่อนอ่านข้อมูลในเครื่อง — ข้อมูลในเครื่องเป็นของบัญชีที่เพิ่งออกจากระบบไป
+// และคนที่ login ตอนนี้เป็นคนละบัญชี → ล้างก่อน คืน true (ผู้เรียกต้องทิ้งชื่อ/เบอร์ที่อ่านมาจากข้อมูลเดิมด้วย)
+const forgetOtherAccount = (authUserId) => {
+  const prev = load("signed_out_account", null);
+  if (!prev) return false;
+  if (prev === authUserId) { save("signed_out_account", null); return false; }
+  resetLearner();
+  return true;
 };
 
 // ========== CERTIFICATE EXPORT HELPERS (PDF / รูปภาพ) ==========
@@ -379,7 +565,7 @@ const CERT_DECO = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="
 <path d="M62,606 h-34 v-34"/><path d="M55,598 h-22 v-22" stroke-width="1"/>
 </g>
 <g fill="url(#cg)" stroke="url(#cg)">
-<line x1="305" y1="376" x2="438" y2="376" stroke-width="1.4"/><line x1="462" y1="376" x2="595" y2="376" stroke-width="1.4"/>
+<line x1="305" y1="376" x2="438" y2="376" stroke="#B8862F" stroke-width="1.4"/><line x1="462" y1="376" x2="595" y2="376" stroke="#B8862F" stroke-width="1.4"/>
 <rect x="445" y="371" width="10" height="10" transform="rotate(45 450 376)"/>
 <circle cx="305" cy="376" r="2.2" stroke="none"/><circle cx="595" cy="376" r="2.2" stroke="none"/>
 </g>
@@ -578,6 +764,7 @@ const icons = {
   save: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
   replay: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>,
   warn: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2L1 21h22L12 2zm0 15a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm-1-2h2V10h-2v5z"/></svg>,
+  phone: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.57a1 1 0 01-.25 1.02l-2.2 2.2z"/></svg>,
 };
 const I = ({ name, size = 20, color = B.black }) => icons[name]?.(size, color) || null;
 
@@ -627,6 +814,34 @@ function MorrooAdBanner() {
         </div>
       </div>
     </a>
+  );
+}
+
+// ==================== PARTNER CONTACT CARD ====================
+// การ์ดแสดง LINE + เบอร์โทรของ "พาร์ทเนอร์" ผู้มอบคูปองเรียนฟรี (ไม่ใช่ของ JIA)
+// ใช้ 3 จุด: หลัง redeem คูปองพาร์ทเนอร์ / แบนเนอร์ในหน้าคอร์ส / หน้าใบประกาศหลังเรียนจบ
+function PartnerContactCard({ sponsor, where, title, compact }) {
+  if (!sponsor) return null;
+  const lineHref = partnerLineUrl(sponsor.line);
+  const telHref = sponsor.phone ? `tel:${sponsor.phone.replace(/[^0-9+]/g, "")}` : null;
+  const track = (channel) => { safeTrack("partner_contact_click", { company: sponsor.company, channel, where }); phCapture("partner_contact_click", { company: sponsor.company, channel, where }); };
+  if (!lineHref && !telHref) return null;
+  return (
+    <div style={{ background: `${B.gold}0F`, border: `1.5px dashed ${B.gold}`, borderRadius: 14, padding: compact ? "12px 14px" : 18, textAlign: "center" }}>
+      <div style={{ fontSize: compact ? 13 : 15, fontWeight: 800, color: B.black, marginBottom: compact ? 8 : 10 }}>
+        {title || `🎁 คอร์สนี้มอบให้ฟรีโดย ${sponsor.company}`}
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+        {lineHref && <a href={lineHref} target="_blank" rel="noopener noreferrer" onClick={() => track("line")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#06C755", color: B.white, borderRadius: 10, padding: compact ? "9px 16px" : "12px 20px", textDecoration: "none", fontWeight: 700, fontSize: compact ? 13 : 14 }}>
+          <I name="line" size={18} color={B.white}/> ทัก LINE {sponsor.company}
+        </a>}
+        {telHref && <a href={telHref} onClick={() => track("phone")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, background: B.white, color: B.black, border: `1px solid ${B.ltGray}`, borderRadius: 10, padding: compact ? "9px 16px" : "12px 20px", textDecoration: "none", fontWeight: 700, fontSize: compact ? 13 : 14 }}>
+          <I name="phone" size={16} color={B.black}/> โทร {sponsor.phone}
+        </a>}
+      </div>
+    </div>
   );
 }
 
@@ -1134,16 +1349,123 @@ function Store({ go, setUser }) {
   </div>);
 }
 
+// เข้าสู่ระบบด้วย LINE จริง (ไม่ใช่แค่แอด OA เป็นเพื่อน) — ผูกบัญชีชื่อ-เบอร์ที่มีอยู่แล้ว (ถ้ามี) เข้ากับ
+// บัญชี Hub จริง ใช้ซ้ำได้ทั้งที่ LineAddPrompt (หลังสมัคร) และด่านก่อนสอบปลายภาค (Course)
+function LineLoginButton({ user, setUser, label = "เข้าสู่ระบบด้วย LINE" }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (user?.auth_user_id) return null; // hooks above this line already ran — safe to bail out here
+  const doLogin = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const u = user || load("user", null);
+      const result = await signInWithLine({ phone: u?.phone || "", name: u?.name || "" });
+      if (result) setUser && setUser(result.user);
+      else setErr("เข้าสู่ระบบด้วย LINE ไม่สำเร็จ กรุณาลองใหม่");
+    } catch (e) { setErr("เชื่อมต่อ LINE ไม่สำเร็จ กรุณาลองใหม่"); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <button type="button" onClick={doLogin} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "12px 20px", color: B.white, border: "none", fontWeight: 700, fontSize: 14, cursor: "pointer", marginTop: 10, opacity: busy ? .6 : 1 }}>
+        <I name="line" size={20} color={B.white}/> {busy ? "กำลังเชื่อมต่อ..." : label}
+      </button>
+      {err && <div style={{ color: B.red, fontSize: 12, marginTop: 6 }}>{err}</div>}
+    </div>
+  );
+}
+
+// ยืนยันตัวตนด้วยอีเมล — ทางเลือกสำรอง (LINE เป็นหลัก) ให้คนที่ไม่ใช้ LINE ยังมีบัญชีจริงที่รู้ได้ว่าเป็น
+// ใคร ใช้เรียนต่อข้ามเครื่องได้ และมีบัตรนักเรียน/ชื่อชุดเดียวกับ Hub — ไม่บังคับ ข้ามได้เสมอ
+function EmailIdentityCard({ user, setUser }) {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState(false);
+  if (user?.auth_user_id || done) return done ? (
+    <div style={{ background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 12, textAlign: "center", fontSize: 13, fontWeight: 700, color: B.black }}>
+      ✓ ยืนยันตัวตนด้วยอีเมลเรียบร้อย
+    </div>
+  ) : null;
+  const submit = async (e) => {
+    e.preventDefault(); setErr(""); setBusy(true);
+    try {
+      if (!sent) {
+        if (!/^\S+@\S+\.\S+$/.test(email)) throw Error("กรุณากรอกอีเมลให้ถูกต้อง");
+        await requestEmailIdentityOtp(email.trim());
+        setSent(true);
+      } else {
+        const result = await verifyEmailIdentityOtp({ email: email.trim(), token: code.trim() });
+        setUser && setUser(result.user);
+        setDone(true);
+      }
+    } catch (e2) { setErr(e2.message || "ดำเนินการไม่สำเร็จ กรุณาลองใหม่"); }
+    setBusy(false);
+  };
+  return (
+    <div style={{ background: B.gray, borderRadius: 12, padding: 14, marginTop: 12, textAlign: "left" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>ไม่ใช้ LINE? ยืนยันตัวตนด้วยอีเมลแทน (ไม่บังคับ)</div>
+      <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 10, lineHeight: 1.5 }}>เผื่อเปลี่ยนเครื่อง/ไม่มี LINE — บัญชีเดียวกับ class.jiacpr.com เหมือนล็อกอิน LINE</div>
+      <form onSubmit={submit}>
+        {!sent ? (
+          <input required type="email" placeholder="อีเมลของคุณ" value={email} onChange={e => setEmail(e.target.value)} style={{ width: "100%", padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 8 }}/>
+        ) : (
+          <input required inputMode="numeric" pattern="[0-9]{6,10}" placeholder="รหัส OTP จากอีเมล" value={code} onChange={e => setCode(e.target.value)} style={{ width: "100%", padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 8 }}/>
+        )}
+        {err && <div style={{ color: B.red, fontSize: 12, marginBottom: 8 }}>{err}</div>}
+        <button type="submit" disabled={busy} style={{ ...css.btn(B.black, B.white, true), padding: "10px 16px", fontSize: 13, width: "auto" }}>{busy ? "กำลังดำเนินการ..." : sent ? "ยืนยันรหัส OTP" : "ส่งรหัส OTP"}</button>
+      </form>
+    </div>
+  );
+}
+
+// กล่องบัญชี JIA — login แล้ว: ชื่อ + บัตรนักเรียน + "ออกจากระบบ" (logoutAccount: ออกทั้งเว็บนี้และ class.jiacpr.com)
+// เพิ่งออกจากระบบ: บอกว่าข้อมูลการเรียนยังอยู่ในเครื่อง + ปุ่มเข้าสู่ระบบอีกครั้ง; ยังไม่เคย login: ไม่แสดง (มีปุ่มเข้าสู่ระบบ
+// ตามจุดสมัครและก่อนสอบปลายภาคอยู่แล้ว)
+function AccountCard({ user, setUser }) {
+  const [busy, setBusy] = useState(false);
+  if (user?.auth_user_id) {
+    const name = (user.hub?.nameTh || user.name || "").trim() || "บัญชี JIA";
+    return (
+      <div data-testid="account-card" data-state="signed-in" style={{ display: "flex", alignItems: "center", gap: 12, background: B.white, border: `1px solid ${B.green}55`, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+        <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center" }}><I name="check" size={18} color={B.green}/></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: B.dkGray }}>เข้าสู่ระบบบัญชี JIA แล้ว</div>
+          <div style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+          {user.hub?.cardNo && <div style={{ fontSize: 11, color: B.dkGray }}>บัตรนักเรียน {user.hub.cardNo}</div>}
+        </div>
+        <button type="button" disabled={busy} onClick={() => { setBusy(true); logoutAccount().catch(() => setBusy(false)); }} style={{ background: B.gray, color: B.black, border: "none", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>{busy ? "กำลังออก…" : "ออกจากระบบ"}</button>
+      </div>
+    );
+  }
+  if (!load("signed_out_account", null)) return null;
+  return (
+    <div data-testid="account-card" data-state="signed-out" style={{ background: B.gray, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>ออกจากระบบบัญชี JIA แล้ว</div>
+      <div style={{ fontSize: 11.5, color: B.dkGray, marginTop: 4, lineHeight: 1.6 }}>ข้อมูลการเรียนยังอยู่ในเครื่องนี้ — เข้าสู่ระบบบัญชีเดิมเพื่อเรียนต่อ (ถ้ามีคนอื่นเข้าสู่ระบบบนเครื่องนี้ ข้อมูลเดิมจะถูกล้างก่อน)</div>
+      <LineLoginButton user={user} setUser={setUser} label="เข้าสู่ระบบด้วย LINE อีกครั้ง"/>
+    </div>
+  );
+}
+
 // ==================== LINE ADD PROMPT ====================
-function LineAddPrompt({ go, user, variant = "post-register" }) {
+function LineAddPrompt({ go, user, setUser, variant = "post-register" }) {
   const linkCode = getLinkCode();
   const deepLink = lineLinkDeepLink(linkCode);
   const preCourse = variant === "pre-course";
-  // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ (ออก/บันทึกถ้ายังไม่มี — ครอบคลุมทั้ง LINE/Google/Email)
+  // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ — ปกติออกให้แล้วตอนสมัคร/จบคอร์ส (Register/submitQuiz) ที่นี่ดึงจาก
+  // local storage เป็นหลัก แล้วเผื่อกรณียังไม่มี (เช่น ผู้เรียนเก่าที่ยังไม่เคยผ่าน flow ใหม่) ค่อยออกผ่าน RPC
   // ยกเว้นนักเรียน pre-course ที่จ่ายค่าคอร์ส on-site แล้ว — ไม่มีสิทธิ์คูปอง กันเข้าใจผิดเรื่องส่วนลด/เงินคืน
-  const coupon = (!preCourse && !isPreCourseStudent() && isSignedUp())
-    ? (load("coupon", null) || (() => { const c = genCoupon(); save("coupon", c); try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {} return c; })())
-    : null;
+  const showCoupon = !preCourse && !isPreCourseStudent() && isSignedUp();
+  const [coupon, setCoupon] = useState(() => (showCoupon ? load("coupon", null) : null));
+  useEffect(() => {
+    if (!showCoupon || coupon) return;
+    const u = user || load("user", null);
+    if (!u?.customer_id) return;
+    issueOnlineCoupon(u.customer_id, u.phone).then(c => { if (c) { save("coupon", c); setCoupon(c); } });
+  }, [showCoupon, coupon]);
   // gate ก่อนเรียน = ข้ามได้ (strong-soft) แต่จด line_skipped_at ไว้เพื่อไม่เด้งซ้ำ + ให้แบนเนอร์ในคอร์สตามต่อ
   useEffect(() => { safeTrack("line_gate_view", { variant }); phCapture("line_gate_view", { variant }); }, [variant]);
   const onAdded = () => { markLineAdded(user); safeTrack("line_oa_confirm_added", { variant }); phCapture("line_oa_confirm_added", { variant }); go("course"); };
@@ -1151,6 +1473,9 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
   const onClickLink = () => { safeTrack("line_oa_clicked", { variant, has_link_code: true }); phCapture("line_oa_clicked", { variant, has_link_code: true }); };
   // เข้าเรียนเลย (post-register) — ไม่ขวางก่อนได้คุณค่า; จด line_skipped_at กันเด้งซ้ำ ปล่อยให้แบนเนอร์ในคอร์ส + หน้าใบประกาศตามต่อ
   const onEnterCourse = () => { safeTrack("post_register_enter_course", { variant }); phCapture("post_register_enter_course", { variant }); save("line_skipped_at", new Date().toISOString()); go("course"); };
+  // เข้าสู่ระบบด้วย LINE จริง (ไม่ใช่แค่แอด OA เป็นเพื่อน — ดู LineLoginButton) แสดงที่นี่เพราะทุกทางสมัคร
+  // (SignupGate/Register/Claim) ลงเอยที่หน้านี้ทั้งหมด รวมถึง gate variant "soft" (ค่า default) ที่
+  // SignupGate ไม่ถูกเปิดใช้เลย — ที่นี่จึงเป็นจุดเดียวที่ทุกคนเจอปุ่มนี้แน่นอน
 
   // ── post-register: หลังสมัครเสร็จ ดัน "เริ่มเรียนเลย" เป็นปุ่มหลัก, LINE เป็นตัวเลือกเบา ๆ (โปรโมตการแอดหนักไปไว้หน้าใบประกาศแทน) ──
   if (variant === "post-register") {
@@ -1184,6 +1509,8 @@ function LineAddPrompt({ go, user, variant = "post-register" }) {
               </div>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#06994A" }}>เพิ่ม →</span>
             </a>
+            <LineLoginButton user={user} setUser={setUser} label="เข้าสู่ระบบด้วย LINE (ยืนยันตัวตนถาวร)"/>
+            <EmailIdentityCard user={user} setUser={setUser}/>
           </div>
         </div>
       </div>
@@ -1337,12 +1664,33 @@ function SignupGate({ go, setUser }) {
   const [pdpa, setPdpa] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fallback, setFallback] = useState(false); // "ไม่มี LINE?" — เผยฟอร์มชื่อ+เบอร์สำรอง (ไม่ล็อกอิน LINE)
   useEffect(() => { safeTrack("signup_gate_view", { variant: getGateVariant() }); phCapture("gate_shown", { variant: getGateVariant() }); }, []);
 
-  const submit = () => {
+  const validate = () => {
+    if (phone.replace(/\D/g, "").length < 9) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return false; }
+    if (!pdpa) { setErr("กรุณายินยอม PDPA ก่อนสมัคร"); return false; }
+    return true;
+  };
+
+  // เข้าสู่ระบบด้วย LINE — ทางหลัก บัญชีเดียวกับ class.jiacpr.com
+  const submitLine = async () => {
+    if (fallback && !name.trim()) { setErr("กรุณากรอกชื่อ-นามสกุล"); return; }
+    if (!validate()) return;
+    setErr(""); setBusy(true);
+    try {
+      const result = await signInWithLine({ phone: phone.replace(/\D/g, ""), name: name.trim() });
+      if (result) { setUser(result.user); go("lineprompt"); }
+      // ไม่มี result: กำลังนำทางไปหน้า LINE login (ปกติ) หรือเชื่อมต่อไม่สำเร็จแบบเงียบ
+      else setErr("เข้าสู่ระบบด้วย LINE ไม่สำเร็จ กรุณาลองใหม่ หรือใช้ชื่อ-เบอร์แทน");
+    } catch (e) { setErr("เชื่อมต่อ LINE ไม่สำเร็จ กรุณาลองใหม่"); }
+    setBusy(false);
+  };
+
+  // ไม่มี LINE — ทางสำรอง: กรอกชื่อ+เบอร์ ปลดคอร์สแบบไม่ผูกบัญชี (เชื่อม LINE ทีหลังได้จากหน้าคอร์ส)
+  const submitFallback = () => {
     if (!name.trim()) { setErr("กรุณากรอกชื่อ-นามสกุล"); return; }
-    if (phone.replace(/\D/g, "").length < 9) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return; }
-    if (!pdpa) { setErr("กรุณายินยอม PDPA ก่อนสมัคร"); return; }
+    if (!validate()) return;
     setErr(""); setBusy(true);
     const cleanPhone = phone.replace(/\D/g, "");
     const userData = { name: name.trim(), phone: cleanPhone };
@@ -1367,11 +1715,11 @@ function SignupGate({ go, setUser }) {
         <div style={{ ...css.card, textAlign: "center" }}>
           <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#06C75518", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><I name="line" size={36} color="#06C755"/></div>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 6px" }}>อีกขั้นเดียว! 🎉</h2>
-          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>กรอกข้อมูลเพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong></p>
-          <div style={{ marginBottom: 12, textAlign: "left" }}>
+          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>เข้าสู่ระบบด้วย LINE เพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong> บัญชีเดียวกับที่ใช้จองคอร์ส on-site ได้เลย</p>
+          {fallback && <div style={{ marginBottom: 12, textAlign: "left" }}>
             <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อ-นามสกุล *</label>
             <input type="text" placeholder="เช่น สมชาย ใจดี" value={name} onChange={e => { setName(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
-          </div>
+          </div>}
           <div style={{ marginBottom: 12, textAlign: "left" }}>
             <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทรศัพท์ *</label>
             <input type="tel" placeholder="เช่น 081-234-5678" value={phone} onChange={e => { setPhone(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
@@ -1381,9 +1729,17 @@ function SignupGate({ go, setUser }) {
             <span style={{ fontSize: 11, color: B.dkGray, lineHeight: 1.5 }}>ข้าพเจ้ายินยอมให้ JIA TRAINER CENTER เก็บและใช้ข้อมูลส่วนบุคคล (ชื่อ, เบอร์โทร) เพื่อจัดการหลักสูตร ออกใบประกาศนียบัตร และแจ้งข้อมูลหลักสูตร</span>
           </label>
           {err && <div style={{ color: B.red, fontSize: 12, marginBottom: 12 }}>{err}</div>}
-          <button onClick={submit} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 }}>
-            <I name="line" size={22} color={B.white}/> {busy ? "กำลังสมัคร..." : "สมัคร & เพิ่ม LINE @jiacpr →"}
-          </button>
+          {!fallback ? <>
+            <button onClick={submitLine} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 }}>
+              <I name="line" size={22} color={B.white}/> {busy ? "กำลังเชื่อมต่อ..." : "เข้าสู่ระบบด้วย LINE →"}
+            </button>
+            <button onClick={() => { setFallback(true); setErr(""); }} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "8px 4px", cursor: "pointer", textDecoration: "underline" }}>ไม่มี LINE? กรอกชื่อ-เบอร์แทน</button>
+          </> : <>
+            <button onClick={submitFallback} disabled={busy} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", background: B.red, borderRadius: 12, padding: "14px 24px", color: B.white, border: "none", fontWeight: 700, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 }}>
+              {busy ? "กำลังสมัคร..." : "สมัครด้วยชื่อ-เบอร์ →"}
+            </button>
+            <button onClick={() => { setFallback(false); setErr(""); }} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "8px 4px", cursor: "pointer", textDecoration: "underline" }}>← กลับไปเข้าสู่ระบบด้วย LINE</button>
+          </>}
           <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 10, background: "none", border: `1px solid ${B.red}`, borderRadius: 12, color: B.red, fontWeight: 700, fontSize: 14, padding: "11px 16px", cursor: "pointer" }}>🎟️ มีโค้ดแล้ว? ใส่โค้ดเข้าเรียนเลย →</button>
         </div>
       </div>
@@ -1394,24 +1750,39 @@ function SignupGate({ go, setUser }) {
 // ==================== REGISTER (+ PDPA) ====================
 function Register({ go, setUser }) {
   const [f, setF] = useState({ name: "", phone: "", email: "" }); const [err, setErr] = useState({}); const [pdpa, setPdpa] = useState(false);
-  const submit = () => {
+  const submit = async () => {
     const e = {}; if (!f.name.trim()) e.name = "กรุณากรอกชื่อ-นามสกุล"; if (!f.phone.trim() || f.phone.replace(/\D/g, "").length < 9) e.phone = "กรุณากรอกเบอร์โทรที่ถูกต้อง"; if (!pdpa) e.pdpa = "กรุณายินยอม PDPA ก่อนลงทะเบียน"; if (Object.keys(e).length) return setErr(e);
     const cleanPhone = f.phone.replace(/\D/g, "");
-    const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email };
-    setUser(userData); save("user", userData);
+    // เผื่อยืนยันตัวตนไว้แล้วก่อนถึงหน้านี้ (เช่น ด่านก่อนสอบปลายภาคด้วยอีเมล — ดู Course/verifyEmailIdentityOtp)
+    // ต้องไม่ทิ้ง auth_user_id/hub ที่มีอยู่แล้วไปเฉยๆ ไม่งั้นการยืนยันตัวตนที่ทำไว้จะสูญเปล่า
+    const prior = load("user", null);
     const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    // เก็บ customer_id ไว้ใน user ด้วย (ของเดิมไม่เก็บ) — จุดอื่นที่อ่าน load("user") ต่อ (จบคอร์สทีหลัง,
+    // หน้าใบประกาศ) ต้องใช้ค่านี้เรียก issue_online_coupon
+    const userData = { name: f.name.trim(), phone: cleanPhone, email: f.email, customer_id: custId, auth_user_id: prior?.auth_user_id, hub: prior?.hub };
+    setUser(userData); save("user", userData);
     const linkCode = genLinkCode(); save("line_link_code", linkCode);
     const finalProgress = load("progress", { done: [], scores: {} });
     const finalModId = COURSE.modules[COURSE.modules.length - 1].id;
     const completed = finalProgress.done.includes(finalModId);
-    const coupon = load("coupon", null) || (completed && !isPreCourseStudent() ? (() => { const c = genCoupon(); save("coupon", c); return c; })() : null);
     const finalScore = finalProgress.scores[finalModId] || null;
-    supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course", line_link_code: linkCode });
+    await supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, email: f.email || "", source: "online-course", line_link_code: linkCode });
+    // ผูกลูกค้าที่สร้างใหม่นี้เข้ากับบัญชี Hub ที่ยืนยันตัวตนไว้แล้ว (ถ้ามี) ไม่งั้นจะได้ลูกค้าที่ไม่มีเจ้าของ
+    // ทั้งที่ผู้เรียนคนนี้ล็อกอินจริงไปแล้วก่อนหน้านี้ — best-effort, พังไม่กระทบการลงทะเบียนหลัก
+    if (prior?.auth_user_id) {
+      try {
+        const supa = await getSupabase();
+        await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: custId, phone: cleanPhone } });
+        await syncHubIdentity(supa, { nameTh: userData.name, phone: cleanPhone });
+      } catch (e2) {}
+    }
+    let coupon = load("coupon", null);
     if (completed) {
       const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
-      supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: finalScore, coupon_code: coupon, renew_date: renew.toISOString().split("T")[0], pre_course: isPreCourseStudent() });
+      // ต้องบันทึก completed_at ก่อน แล้วค่อยออกคูปอง — issue_online_coupon เช็กว่าเรียนจบแล้วจริงจากแถวนี้
+      await supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: finalScore, renew_date: renew.toISOString().split("T")[0], pre_course: isPreCourseStudent() });
+      if (!coupon && !isPreCourseStudent()) { coupon = await issueOnlineCoupon(custId, cleanPhone); if (coupon) save("coupon", coupon); }
       if (!isPreCourseStudent()) supaRest("sales_tracking", "POST", { name: userData.name, phone: cleanPhone, completed_date: new Date().toISOString(), score: finalScore, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
-      if (coupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
     } else {
       supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน", pre_course: isPreCourseStudent() });
     }
@@ -1450,13 +1821,30 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
     const exp = load("promo_expires", null);
     return code && exp ? { code, expires_at: exp, modules: load("promo_unlocked", []).length ? load("promo_unlocked", []) : PROMO_FREE_MODULES, name: u0?.name || "" } : null;
   });
-  const [redeemCode, setRedeemCode] = useState(initialCode || "");
+  const [redeemCode, setRedeemCode] = useState(initialCode || load("partner_coupon_pending", ""));
   const [redeemErr, setRedeemErr] = useState("");
   const [copied, setCopied] = useState(false);
   // ต้องรู้ว่าใครใช้โค้ด (ชื่อ+เบอร์) ก่อน redeem เสมอ — ผูก online_students ให้ค้นหา/ดูคะแนนย้อนหลังได้
   // (ถ้าเคยกรอกไว้แล้ว เช่นจากฟอร์มขอโค้ดฟรี หรือเคยสมัครมาก่อน ใช้ค่าเดิมได้เลยไม่ต้องกรอกซ้ำ)
   const [redeemName, setRedeemName] = useState(u0?.name || "");
   const [redeemPhone, setRedeemPhone] = useState(u0?.phone || "");
+  // ===== คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — เช็คก่อนว่าโค้ดนี้เป็นคูปองพาร์ทเนอร์ไหม เพื่อโชว์แบนเนอร์ "เรียนฟรีจาก..." =====
+  const [partner, setPartner] = useState(null); // null | { status: valid|redeemed|expired, company, sponsor_line, sponsor_phone, sponsor_value, expires_at }
+  useEffect(() => {
+    const code = (initialCode || "").trim().toUpperCase();
+    if (!code) return;
+    // สแกนซ้ำจากเครื่องที่เคย redeem โค้ดนี้ไปแล้ว — เข้าเรียนต่อได้เลย ไม่ต้องกรอกซ้ำ
+    if (load("promo_redeemed", false) && load("promo_code", null) === code) { go("course"); return; }
+    (async () => {
+      const r = await supaRpc("get_partner_coupon", { p_code: code });
+      const row = Array.isArray(r) && r.length ? r[0] : null;
+      if (!row) return; // ไม่ใช่คูปองพาร์ทเนอร์ (โค้ด LEAD-/VCH-/โค้ดกลางทั่วไป) — flow เดิมทำงานตามปกติ
+      setPartner(row);
+      if (row.status === "valid") { save("claim_start_redeem", true); save("partner_coupon_pending", code); }
+      safeTrack("partner_coupon_open", { company: row.company, status: row.status }); phCapture("partner_coupon_open", { company: row.company, status: row.status });
+      supaRest("lead_capture_events", "POST", { code, event_type: "partner_coupon_open", metadata: { status: row.status } });
+    })();
+  }, []);
 
   const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(e => ({ ...e, [k]: undefined })); };
 
@@ -1604,6 +1992,13 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       // (fallback ระหว่างที่ RPC เวอร์ชันเก่ายังไม่คืน source: โค้ดกลาง multi_use คือ pre-course เสมอ)
       const preCourseStudent = row.source != null ? row.source === "pre_course" : !!row.multi_use;
       save("pre_course_student", preCourseStudent);
+      // คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — จำช่องทางติดต่อพาร์ทเนอร์ไว้โชว์หลัง redeem/ในหน้าคอร์ส/ใบประกาศ
+      // (ยังได้คูปองส่วนลด ฿100 on-site ของ JIA ตามปกติ เพราะ preCourseStudent = false เสมอสำหรับ source นี้)
+      if (row.source === PARTNER_SOURCE) {
+        save("partner_sponsor", { company: row.company, line: row.sponsor_line, phone: row.sponsor_phone, value: row.sponsor_value || partner?.sponsor_value || PRICING.full, code });
+        save("partner_coupon_pending", null);
+        safeTrack("partner_coupon_redeemed", { company: row.company }); phCapture("partner_coupon_redeemed", { company: row.company });
+      }
 
       // ผูกกับ online_students เสมอ (ไม่ว่าจะเคยสมัครมาก่อนหรือไม่) เพื่อให้พนักงานค้นหาคะแนนย้อนหลังได้
       const u = load("user", null);
@@ -1772,13 +2167,24 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
   // ===== Step: redeem =====
   if (step === "redeem") return (
     <div style={css.page}>
-      <div style={css.header(B.red)}><button onClick={() => setStep(claimed ? "reveal" : "form")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ใช้รหัสส่วนลด</div></div>
+      <div style={css.header(B.red)}><button onClick={() => setStep(claimed ? "reveal" : "form")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>{partner ? "รับสิทธิ์เรียนฟรี" : "ใช้รหัสส่วนลด"}</div></div>
       <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        {partner && (
+          <div style={{ background: `linear-gradient(135deg, ${B.gold} 0%, #E08800 100%)`, color: B.white, borderRadius: 16, padding: 18, marginBottom: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, opacity: .9, letterSpacing: 1, textTransform: "uppercase" }}>คูปองเรียนฟรี</div>
+            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>จาก {partner.company}</div>
+            <div style={{ fontSize: 13, marginTop: 6, opacity: .95 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 8 }}>มูลค่า ฿{partner.sponsor_value || PRICING.full}</div>
+            <div style={{ fontSize: 11, marginTop: 8, opacity: .85 }}>ใช้ได้ถึง {thaiShortDate((partner.expires_at || "").slice(0, 10))}</div>
+            {partner.status === "redeemed" && <div style={{ marginTop: 10, background: "rgba(0,0,0,.18)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 700 }}>คูปองใบนี้ถูกใช้ไปแล้ว</div>}
+            {partner.status === "expired" && <div style={{ marginTop: 10, background: "rgba(0,0,0,.18)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 700 }}>คูปองใบนี้หมดอายุแล้ว</div>}
+          </div>
+        )}
         <div style={css.card}>
-          <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>กรอกรหัสส่วนลด</h3>
-          <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX, VCH-XXXXXX หรือโค้ดที่ได้รับจากเจ้าหน้าที่ (เช่น JIA-STUDENT)</p>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>{partner ? "กรอกชื่อ-เบอร์เพื่อรับสิทธิ์" : "กรอกรหัสส่วนลด"}</h3>
+          {!partner && <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>รหัสรูปแบบ LEAD-XXXXXX, VCH-XXXXXX หรือโค้ดที่ได้รับจากเจ้าหน้าที่ (เช่น JIA-STUDENT)</p>}
           <input type="text" value={redeemCode} onChange={e => { setRedeemCode(e.target.value.toUpperCase()); setRedeemErr(""); }} placeholder="LEAD-XXXXXX" autoCapitalize="characters"
-            style={{ width: "100%", padding: "14px 16px", border: `2px solid ${redeemErr ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 18, outline: "none", boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 2, textAlign: "center", textTransform: "uppercase" }}/>
+            style={{ width: "100%", padding: "14px 16px", border: `2px solid ${redeemErr ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 18, outline: "none", boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 2, textAlign: "center", textTransform: "uppercase", marginTop: partner ? 8 : 0 }}/>
           {redeemErr && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{redeemErr}</div>}
         </div>
         <div style={{ ...css.card, marginTop: 12 }}>
@@ -1794,18 +2200,18 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
               style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
           </div>
         </div>
-        <button onClick={redeem} disabled={validating || !redeemCode} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: (validating || !redeemCode) ? .5 : 1 }}>{validating ? "กำลังตรวจสอบ..." : "ปลดล็อกบทเรียน →"}</button>
-        {!claimed && <button onClick={() => setStep("form")} style={{ ...css.btn(B.white, B.dkGray, true), border: `1px solid ${B.ltGray}`, marginTop: 10, fontSize: 13 }}>ยังไม่มีโค้ด? รับฟรีที่นี่ →</button>}
+        <button onClick={redeem} disabled={validating || !redeemCode} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: (validating || !redeemCode) ? .5 : 1 }}>{validating ? "กำลังตรวจสอบ..." : partner ? "รับสิทธิ์เรียนฟรี →" : "ปลดล็อกบทเรียน →"}</button>
+        {!claimed && !partner && <button onClick={() => setStep("form")} style={{ ...css.btn(B.white, B.dkGray, true), border: `1px solid ${B.ltGray}`, marginTop: 10, fontSize: 13 }}>ยังไม่มีโค้ด? รับฟรีที่นี่ →</button>}
       </div>
     </div>
   );
 
   // ===== Step: redeemed =====
-  if (step === "redeemed" && claimed) return (
+  if (step === "redeemed" && claimed) { const sp = getPartnerSponsor(); return (
     <div style={css.page}>
       <div style={{ ...css.wrap, paddingTop: 60, textAlign: "center", paddingBottom: 40 }}>
         <div style={{ width: 80, height: 80, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}><I name="check" size={40} color={B.green}/></div>
-        <h2 style={{ fontSize: 24, fontWeight: 800, margin: "0 0 8px" }}>ปลดล็อกสำเร็จ!</h2>
+        <h2 style={{ fontSize: 24, fontWeight: 800, margin: "0 0 8px" }}>{sp ? `รับสิทธิ์เรียนฟรีจาก ${sp.company} แล้ว!` : "ปลดล็อกสำเร็จ!"}</h2>
         <p style={{ fontSize: 14, color: B.dkGray, marginBottom: 24 }}>โค้ด {claimed.code} ใช้แล้ว</p>
 
         <div style={{ ...css.card, textAlign: "left", marginBottom: 20 }}>
@@ -1821,10 +2227,12 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
           })}
         </div>
 
+        {sp && <div style={{ marginBottom: 20 }}><PartnerContactCard sponsor={sp} where="redeemed"/></div>}
+
         <button onClick={() => go("course")} style={{ ...css.btn(B.red, B.white, true), fontSize: 16, padding: "16px 32px" }}>เข้าเรียนเลย →</button>
       </div>
     </div>
-  );
+  ); }
 
   // fallback
   return (
@@ -1919,10 +2327,20 @@ function Payment({ go, user }) {
 const ENCOURAGE = ["","เยี่ยมมาก! รู้เรื่อง CPR ผู้ใหญ่แล้ว ไปบทต่อไปเลย","ดีมาก! รู้ทั้ง CPR และ AED แล้ว","เก่งมาก! CPR เด็กก็ไม่ยากเลย","สุดยอด! เรียนมาครึ่งทางแล้ว","ใกล้จบแล้ว! อีกบทเดียว","ผ่านครบทุกบทแล้ว! พร้อมสอบข้อสอบสุดท้ายได้เลย"];
 
 // ==================== COURSE ====================
-function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
+function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRandom }) {
   const [active, setActive] = useState(null); const [quiz, setQuiz] = useState(false); const [ans, setAns] = useState({}); const [result, setResult] = useState(null); const [watched, setWatched] = useState(false); const [reviewMode, setReviewMode] = useState(false); const [timer, setTimer] = useState(0); const [canWatch, setCanWatch] = useState(false); const [mustRewatch, setMustRewatch] = useState(false); const [drawnQuiz, setDrawnQuiz] = useState(null); const [grading, setGrading] = useState(false);
   const beginQuiz = (mod) => { setDrawnQuiz(drawQuiz(mod)); setAns({}); setResult(null); setQuiz(true); };
   const timerRef = useRef(null);
+  // ด่านก่อนสอบปลายภาค — grade-quiz บังคับ access_token จริงสำหรับ module สุดท้ายเสมอ (กันปลอมผลสอบ/
+  // ไล่เดาหาเฉลย) หน้านี้กันไม่ให้ผู้เรียนกดเข้าไปแล้วเจอ 401 เงียบๆ โดยไม่รู้สาเหตุ
+  const [examGate, setExamGate] = useState(false);
+  const isAuthed = () => !!(user || load("user", null))?.auth_user_id;
+  useEffect(() => {
+    if (!examGate || !isAuthed()) return;
+    setExamGate(false);
+    const finalMod = COURSE.modules[COURSE.modules.length - 1];
+    setActive(finalMod.id); beginQuiz(finalMod);
+  }, [examGate, user?.auth_user_id]);
   // มีสลิปรอตรวจ → เช็คสถานะกับ server ตอนเปิดหน้าคอร์ส แอดมินอนุมัติแล้วจะปลดล็อกให้ทันที
   const [, setSlipSync] = useState(0);
   useEffect(() => { (async () => { if (await syncPendingSlips()) setSlipSync(x => x + 1); })(); }, []);
@@ -1958,20 +2376,30 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
 
   const submitQuiz = async () => {
     const mod = COURSE.modules.find(m => m.id === active); const qz = drawnQuiz || mod.quiz;
+    const isFinal = !mod.vid;
     // ตรวจฝั่ง server (เฉลยอยู่ใน grade-quiz เท่านั้น) — แปลงคำตอบจากตำแหน่งบนจอกลับเป็น index ต้นฉบับก่อนส่ง
     const questions = qz.map((q, i) => (q.i ?? i));
     const answers = qz.map((q, i) => (q.order ? q.order[ans[i]] : ans[i]));
+    // ข้อสอบปลายภาคต้องแนบ access token จริง (grade-quiz บังคับตรวจ+จำกัดจำนวนครั้ง+ไม่คืนเฉลย) —
+    // บทเรียน 1-6 ไม่ต้อง (แค่แบบฝึกหัดทบทวน ไม่ใช่จุดที่ต้องยืนยันตัวตน)
+    let accessToken = null;
+    if (isFinal) {
+      try { const supa = await getSupabase(); const { data: { session } } = await supa.auth.getSession(); accessToken = session?.access_token || null; } catch (e) {}
+    }
     setGrading(true);
     let graded = null;
     try {
-      const res = await fetch(FN_URL("grade-quiz"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ module_id: mod.id, questions, answers }) });
+      const res = await fetch(FN_URL("grade-quiz"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ module_id: mod.id, questions, answers, access_token: accessToken }) });
       if (res.ok) graded = await res.json();
+      else if (res.status === 401) { alert("กรุณาเข้าสู่ระบบก่อนทำข้อสอบปลายภาค"); return; }
+      else if (res.status === 429) { const d = await res.json().catch(() => ({})); alert(d.error || "ทำข้อสอบครบจำนวนครั้งที่กำหนดต่อวันแล้ว กรุณาลองใหม่วันถัดไป"); return; }
     } catch (e) {}
     setGrading(false);
     if (!graded || typeof graded.score !== "number") { alert("ตรวจคำตอบไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่อีกครั้ง"); return; }
     const { score, correct, total: gradedTotal, passed } = graded;
     // เฉลยที่ตอบกลับเป็น index ต้นฉบับ → แปลงเป็นตำแหน่งที่แสดงบนจอ เพื่อไฮไลต์ข้อถูกตอนรีวิว
-    const corrects = qz.map((q, i) => (q.order ? q.order.indexOf(graded.corrects[i]) : graded.corrects[i]));
+    // ข้อสอบปลายภาคไม่คืนเฉลยกลับมา (กันไล่เดาทีละข้อ) — graded.corrects เป็น undefined ได้ตามปกติ
+    const corrects = Array.isArray(graded.corrects) ? qz.map((q, i) => (q.order ? q.order.indexOf(graded.corrects[i]) : graded.corrects[i])) : null;
     setResult({ score, correct, total: gradedTotal, passed, corrects });
     if (passed && !progress.done.includes(active)) { const np = { ...progress, done: [...progress.done, active], scores: { ...progress.scores, [active]: score } }; setProgress(np); save("progress", np); syncProgressRemote(np);
       // เก็บคะแนนรายบทลง online_students ตรงๆ (ไม่ผ่าน course_progress) เพื่อให้พนักงานดูคะแนนย่อยได้
@@ -1983,21 +2411,34 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
         // ใช้คูปองเดิมที่เคยออกให้ (ตอนสมัคร) เป็นหลัก — อย่าสร้างทับ ไม่งั้นโค้ดที่ผู้เรียนจดไว้จะใช้ไม่ได้
         // นักเรียน pre-course (จ่ายค่า on-site แล้ว) ไม่ออกคูปอง ฿100 — กันใบประกาศ/ทีมขายโชว์ส่วนลดที่ไม่มีจริง
         const existingCoupon = load("coupon", null);
-        const coupon = existingCoupon || (isPreCourseStudent() ? null : genCoupon());
-        if (coupon) save("coupon", coupon);
         if (u) {
           const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
-          supaRest("online_students", "PATCH", { status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: score, coupon_code: coupon, renew_date: renew.toISOString().split("T")[0] }, `?phone=ilike.*${u.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(u.name)}`);
+          // ต้องบันทึก completed_at ก่อน แล้วค่อยออกคูปอง — issue_online_coupon เช็กว่าเรียนจบแล้วจริงจากแถวนี้
+          await supaRest("online_students", "PATCH", { status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: score, renew_date: renew.toISOString().split("T")[0] }, `?phone=ilike.*${u.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(u.name)}`);
+          const coupon = existingCoupon || (isPreCourseStudent() || !u.customer_id ? null : await issueOnlineCoupon(u.customer_id, u.phone));
+          if (coupon && !existingCoupon) save("coupon", coupon);
           // pre-course ไม่ต้องเข้าคิวติดตามขาย (จ่ายและจองคลาสแล้ว)
           if (!isPreCourseStudent()) supaRest("sales_tracking", "POST", { name: u.name, phone: u.phone.replace(/\D/g,""), completed_date: new Date().toISOString(), score, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
-          // POST เข้า promo_codes เฉพาะเมื่อเป็นโค้ดที่เพิ่งสร้าง (โค้ดเดิมถูกบันทึกไปแล้วตอนสมัคร) กันแถวซ้ำ
-          if (coupon && !existingCoupon) supaRest("promo_codes", "POST", { code: coupon, type: "online", discount: 100, staff_name: "system" });
         }
       }
     }
   };
   const resetLesson = () => { setActive(null); setQuiz(false); setAns({}); setResult(null); setWatched(false); setReviewMode(false); setMustRewatch(false); setCanWatch(false); setTimer(0); setDrawnQuiz(null); if (timerRef.current) clearInterval(timerRef.current); };
   const formatTime = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  // ด่านก่อนสอบปลายภาค — เข้าสู่ระบบสำเร็จ (LINE หรืออีเมล) จะปิดด่านนี้และเริ่มข้อสอบให้อัตโนมัติ (useEffect ด้านบน)
+  if (examGate) {
+    return (<div style={css.page}><div style={css.header(B.black)}><button onClick={() => setExamGate(false)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ flex: 1, fontSize: 14, fontWeight: 700, color: B.white }}>ก่อนทำข้อสอบปลายภาค</div></div>
+      <div style={{ ...css.wrap, paddingTop: 24, paddingBottom: 40 }}>
+        <div style={css.card}>
+          <h2 style={{ fontSize: 18, fontWeight: 800, marginTop: 0 }}>เข้าสู่ระบบก่อนทำข้อสอบปลายภาค</h2>
+          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7 }}>เพื่อให้คะแนน/ใบประกาศผูกกับบัญชีจริงของคุณ (กันคนอื่นปลอมผลสอบแทนคุณ) กรุณาเข้าสู่ระบบก่อนเริ่มสอบ — ใช้บัญชีเดียวกับที่จะใช้จองคอร์สภาคปฏิบัติได้เลย</p>
+          <LineLoginButton user={user} setUser={setUser} label="เข้าสู่ระบบด้วย LINE"/>
+          <EmailIdentityCard user={user} setUser={setUser}/>
+        </div>
+      </div>
+    </div>);
+  }
 
   if (active) {
     const mod = COURSE.modules.find(m => m.id === active); const isFinal = !mod.vid; const alreadyDone = done(mod.id);
@@ -2066,12 +2507,15 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
       );
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+      <AccountCard user={user} setUser={setUser}/>
       {/* สิทธิ์ปลดทุกบทจากแคมเปญวันเดียว — บอกนักเรียนชัดๆ ว่าเรียนครบ+สอบผ่านแล้วได้ใบประกาศเลย */}
       {load("camp_course_unlock", false) && (
         <div style={{ width: "100%", marginBottom: 12, padding: "12px 14px", background: `${B.gold}15`, border: `1.5px dashed ${B.gold}`, borderRadius: 12, fontSize: 13, lineHeight: 1.6, color: B.black }}>
           🎉 <b>สิทธิ์พิเศษแคมเปญ LINE:</b> ปลดคอร์สให้ครบทุกบทแล้ว — เรียนจบ + สอบผ่าน รับใบประกาศนียบัตรออนไลน์ได้เลย
         </div>
       )}
+      {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — เตือนตลอดว่าใครมอบสิทธิ์เรียนฟรีนี้ให้ + ปุ่มติดต่อกลับ */}
+      {getPartnerSponsor() && <div style={{ marginBottom: 12 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="course" compact/></div>}
       {/* CPR HERO — เกมฝึกสถานการณ์จริง อิงเนื้อหาบทเรียน (เล่นฟรีทุกเคส) */}
       <button onClick={() => { safeTrack("game_banner_click", { from: "course" }); phCapture("game_banner_click", { from: "course" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", marginBottom: 12, background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 14, padding: "14px 16px", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🚨</div>
@@ -2089,7 +2533,7 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
           <button onClick={async () => { await syncPendingSlips(); setSlipSync(x => x + 1); }} style={{ background: "none", border: `1px solid ${B.gold}`, borderRadius: 8, padding: "4px 10px", fontSize: 12, color: "#8a6d1a", cursor: "pointer", whiteSpace: "nowrap" }}>เช็คสถานะ</button>
         </div>
       )}
-      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+      {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } if (fin && !isAuthed()) { setExamGate(true); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
@@ -2100,25 +2544,78 @@ function Course({ go, progress, setProgress, user, openBlog, goGameRandom }) {
       {/* Mini cert per module */}
       {progress.done.filter(id => id <= 6).length > 0 && progress.done.filter(id => id <= 6).length < 7 && <button onClick={() => go("minicert")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 8, border: `1px solid ${B.ltGray}`, fontSize: 13 }}>ดูใบ Mini Certificate →</button>}
       <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
-      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { resetLearner(); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง และออกจากระบบบัญชีที่เข้าไว้")) startOverLearner(); }} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
     </div>
     {progress.done.length >= 4 && <NewsSection openBlog={openBlog} goAll={() => go("blog")} title="บทความ CPR เพิ่มเติม" subtitle={pct === 100 ? "ทักษะ CPR เสื่อมใน 3-6 เดือน — แวะอ่านทบทวนได้ตลอด" : "เก่งมาก! ใกล้จบแล้ว — มีบทความทบทวนให้อ่านเพิ่ม"} cprOnly={true} max={5}/>}
   </div>);
 }
 
 // ==================== CERTIFICATE ====================
+// ใบประกาศออนไลน์กลางของ JIA (class.jiacpr.com — learning_hub.person_certificates) — ออกให้เมื่อผลสอบปลายภาค
+// ที่ grade-quiz ส่งเข้าระบบกลางผ่านเกณฑ์และได้รับรองแล้ว; เป็นใบ "เพิ่ม" ที่ตรวจสอบได้ด้วยลิงก์/QR ของ Hub ส่วนใบของเว็บนี้
+// ด้านบนยังเหมือนเดิมทุกอย่าง เรียก RPC ตรงด้วย Supabase session ของเว็บนี้ (โปรเจกต์เดียวกับ Hub) — ไม่มี session
+// (ยังไม่ login) หรือ Hub ยังไม่พร้อม ก็ไม่แสดงอะไร
+const HUB_URL = "https://class.jiacpr.com";
+const HUB_COURSE_ID = "cpr";
+function HubCertificateCard() {
+  const [state, setState] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = async () => {
+    try {
+      const supa = await getSupabase();
+      const { data: { session } } = await supa.auth.getSession();
+      if (!session) { setState(null); return; }
+      const { data, error } = await supa.rpc("jia_person_certificates", { action: "mine", payload: {} });
+      if (error || !data) { setState(null); return; }
+      setState({
+        cert: (data.certificates || []).find((c) => c.courseId === HUB_COURSE_ID && c.status === "issued") || null,
+        claimable: (data.claimable || []).some((c) => c.courseId === HUB_COURSE_ID),
+      });
+    } catch (e) { setState(null); }
+  };
+  useEffect(() => { load(); }, []);
+  if (!state || (!state.cert && !state.claimable)) return null;
+  const claim = async () => {
+    setBusy(true); setErr("");
+    try {
+      const supa = await getSupabase();
+      const { error } = await supa.rpc("jia_person_certificates", { action: "claim", payload: { courseId: HUB_COURSE_ID } });
+      if (error) setErr(error.message || "ขอรับใบประกาศไม่สำเร็จ");
+      await load();
+    } catch (e) { setErr("ขอรับใบประกาศไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setBusy(false); }
+  };
+  const box = { display: "block", background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 12, color: B.black, textDecoration: "none", fontSize: 12.5, lineHeight: 1.5 };
+  if (state.cert) {
+    const c = state.cert;
+    const exp = c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "";
+    return <a href={HUB_URL + c.verifyPath} target="_blank" rel="noreferrer" style={box} data-testid="hub-certificate">
+      <strong>ใบประกาศออนไลน์กลาง JIA</strong> · เลขที่ <span style={{ fontFamily: "monospace" }}>{c.number}</span>{exp ? ` · หมดอายุ ${exp}` : ""}
+      <br/><span style={{ fontWeight: 700 }}>ตรวจสอบ / เปิดใบที่ class.jiacpr.com ↗</span>
+    </a>;
+  }
+  return <div style={box} data-testid="hub-certificate-claim">
+    <strong>ผ่านข้อสอบปลายภาคแล้ว</strong> — รับใบประกาศออนไลน์กลางของ JIA (ตรวจสอบได้ด้วย QR) ชื่อบนใบมาจากบัตรนักเรียน JIA ของคุณ
+    <div style={{ marginTop: 8 }}><button onClick={claim} disabled={busy} style={{ background: B.green, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 700, cursor: "pointer" }}>{busy ? "กำลังขอรับ…" : "ขอรับใบประกาศกลาง"}</button></div>
+    {err && <div style={{ color: "#b3261e", marginTop: 6 }}>{err}</div>}
+  </div>;
+}
+
 function Certificate({ user, go }) {
   const d = new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   // นักเรียน pre-course จ่ายค่าคอร์ส on-site เต็มราคาแล้ว — ใบประกาศต้องไม่โชว์ "ส่วนลด ฿100"
   // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน)
   const preCourseStudent = isPreCourseStudent();
-  // ปกติควรมีคูปองจากตอนสมัคร/จบคอร์สอยู่แล้ว — ถ้าต้อง fallback สร้างใหม่ ต้อง POST เข้า promo_codes ด้วย
-  // ไม่งั้นใบเซอร์จะโชว์โค้ดที่พนักงาน validate ไม่ได้ (ไม่มีในฐานข้อมูล)
-  const coupon = preCourseStudent ? null : (load("coupon", null) || (() => {
-    const c = genCoupon(); save("coupon", c);
-    try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: "system" }); } catch (e) {}
-    return c;
-  })());
+  // ปกติควรมีคูปองจากตอนสมัคร/จบคอร์สอยู่แล้ว (Register/submitQuiz) — ถ้ายังไม่มี ออกผ่าน RPC ฝั่งเซิร์ฟเวอร์
+  // แทนการสุ่มโค้ดฝั่ง client เอง ไม่งั้นใบเซอร์จะโชว์โค้ดที่พนักงาน validate ไม่ได้ (ไม่มีในฐานข้อมูลจริง)
+  const [coupon, setCoupon] = useState(() => (preCourseStudent ? null : load("coupon", null)));
+  useEffect(() => {
+    if (preCourseStudent || coupon) return;
+    const u = user || load("user", null);
+    if (!u?.customer_id) return;
+    issueOnlineCoupon(u.customer_id, u.phone).then(c => { if (c) { save("coupon", c); setCoupon(c); } });
+  }, [preCourseStudent, coupon]);
   const certRef = useRef(null);
   const [gen, setGen] = useState(null); // null | "img" | "pdf"
   const fileBase = `JIA_Certificate_${sanitizeFileName(user?.name)}`;
@@ -2194,13 +2691,13 @@ function Certificate({ user, go }) {
     <div style={{ textAlign: "center", marginBottom: 24 }}><div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.gold}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><I name="star" size={38} color={B.gold}/></div><h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>ยินดีด้วย!</h2><p style={{ fontSize: 14, color: B.dkGray }}>คุณผ่านคอร์ส CPR & AED ออนไลน์แล้ว</p></div>
     <div ref={wrapRef} style={{ width: "100%", height: CERT_H * scale, overflow: "hidden", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,.12)" }}>
       <div style={{ width: CERT_W, height: CERT_H, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-        <div ref={certRef} style={{ position: "relative", width: CERT_W, height: CERT_H, boxSizing: "border-box", background: "#FFFDF7", overflow: "hidden" }}>
+        <div ref={certRef} style={{ position: "relative", width: CERT_W, height: CERT_H, boxSizing: "border-box", background: "#FFFDF7", overflow: "hidden", fontFamily: SERIF }}>
           <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: CERT_DECO }}/>
-          <div style={{ position: "absolute", top: 22, left: 0, right: 0, display: "flex", justifyContent: "center" }}><Logo size={240}/></div>
-          <div style={{ position: "absolute", top: 210, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 40, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>ใบประกาศนียบัตร</div>
-          <div style={{ position: "absolute", top: 260, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 13, fontWeight: 700, letterSpacing: 4, color: "#B8862F" }}>CERTIFICATE OF COMPLETION</div>
-          <div style={{ position: "absolute", top: 292, left: 0, right: 0, textAlign: "center", fontSize: 15, lineHeight: 1, color: B.dkGray }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
-          <div style={{ position: "absolute", top: 322, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 42, fontWeight: 600, lineHeight: 1, color: "#0E1E3C" }}>{user?.name || "ชื่อผู้เรียน"}</div>
+          <div style={{ position: "absolute", top: 36, left: 0, right: 0, display: "flex", justifyContent: "center" }}><Logo size={180}/></div>
+          <div style={{ position: "absolute", top: 196, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 44, fontWeight: 700, lineHeight: 1, letterSpacing: 1, color: "#0E1E3C" }}>ใบประกาศนียบัตร</div>
+          <div style={{ position: "absolute", top: 252, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 13, fontWeight: 700, letterSpacing: 5, color: "#B8862F" }}>CERTIFICATE OF COMPLETION</div>
+          <div style={{ position: "absolute", top: 288, left: 0, right: 0, textAlign: "center", fontSize: 15, lineHeight: 1, color: B.dkGray }}>ขอมอบใบประกาศนียบัตรฉบับนี้เพื่อแสดงว่า</div>
+          <div style={{ position: "absolute", top: 318, left: 0, right: 0, textAlign: "center", fontFamily: SERIF, fontSize: 46, fontWeight: 700, lineHeight: 1, color: "#0E1E3C" }}>{user?.name || "ชื่อผู้เรียน"}</div>
           <div style={{ position: "absolute", top: 392, left: 70, right: 70, textAlign: "center", fontSize: 14, color: B.dkGray }}>ได้ผ่านการอบรม <strong style={{ color: "#0E1E3C" }}>ภาคทฤษฎี (ออนไลน์)</strong></div>
           <div style={{ position: "absolute", top: 412, left: 70, right: 70, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>หลักสูตรการช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED · มาตรฐาน 2025</div>
           <div style={{ position: "absolute", top: 436, left: 0, right: 0, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: B.red }}>ขอเชิญฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
@@ -2210,18 +2707,28 @@ function Certificate({ user, go }) {
           </>) : (
             <div style={{ position: "absolute", top: 495, left: 0, right: 0, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#FFF9E8" }}>แสดงใบประกาศนี้กับเจ้าหน้าที่ในวันอบรมภาคปฏิบัติ</div>
           )}
-          <div style={{ position: "absolute", top: 548, left: 50, width: 220, textAlign: "center" }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: B.black }}>{ds}</div>
-            <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
+          <div style={{ position: "absolute", top: 542, left: 64, width: 216, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "5px 6px", boxSizing: "border-box" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25, color: B.black }}>{ds}</div>
+            <div style={{ borderTop: "1.5px solid #C49A48", marginTop: 4, paddingTop: 4, fontSize: 11.5, lineHeight: 1.25, color: B.dkGray }}>วันที่ออกใบประกาศ</div>
           </div>
-          <div style={{ position: "absolute", top: 548, right: 50, width: 220, textAlign: "center" }}>
-            <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 600, color: "#0E1E3C" }}>JIA TRAINER CENTER</div>
-            <div style={{ borderTop: `1.5px solid ${B.gold}`, marginTop: 6, paddingTop: 6, fontSize: 12, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
+          <div style={{ position: "absolute", top: 542, right: 64, width: 216, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "5px 6px", boxSizing: "border-box" }}>
+            <div style={{ fontFamily: SERIF, fontSize: 14, fontWeight: 600, lineHeight: 1.25, color: "#0E1E3C" }}>JIA TRAINER CENTER</div>
+            <div style={{ borderTop: "1.5px solid #C49A48", marginTop: 4, paddingTop: 4, fontSize: 11.5, lineHeight: 1.25, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
           </div>
-          <div style={{ position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 11, color: B.dkGray }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
+          <div style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 10.5, letterSpacing: .5, color: "#8A7A55" }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
         </div>
       </div>
     </div>
+    {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — ขอบคุณผู้มอบคอร์สนี้ + ให้ช่องทางติดต่อกลับ (ไม่แตะรูปใบประกาศ) */}
+    {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
+    {/* ใบประกาศออนไลน์กลาง JIA (ตรวจสอบได้ที่ Hub) — เพิ่มจากใบของเว็บนี้ ไม่แทน */}
+    <HubCertificateCard/>
+    <div style={{ marginTop: 16 }}><AccountCard user={user}/></div>
+    {/* บัตรนักเรียน JIA กลาง (class.jiacpr.com) — มีเมื่อล็อกอิน LINE/อีเมลจริงแล้วเท่านั้น ใบเก่ายังใช้ได้ปกติ */}
+    {user?.hub?.cardNo && <a href="https://class.jiacpr.com/card" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: B.gray, borderRadius: 12, padding: "12px 14px", marginTop: 12, textDecoration: "none", color: B.black }}>
+      <span style={{ fontSize: 12.5 }}>บัตรนักเรียน JIA: <strong style={{ fontFamily: "monospace" }}>{user.hub.cardNo}</strong>{user.hub.verifyLevel === "instructor" ? " · ยืนยันตัวตนแล้ว ✓" : ""}</span>
+      <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>ดูบัตร →</span>
+    </a>}
     {/* ===== LINE invite (โปรโมชัน ไม่บล็อกการดาวน์โหลด) ===== */}
     {lineLinked ? (
       <div style={{ background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 16, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>
@@ -2267,7 +2774,7 @@ function Certificate({ user, go }) {
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
-    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { resetLearner(); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) startOverLearner(); }} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
   </div></div>);
 }
 
@@ -2324,33 +2831,33 @@ function Booking({ go }) {
   const [submitting, setSubmitting] = useState(false);
   const [bookingRef, setBookingRef] = useState(null);
 
-  // รอบเรียน B-CPR ที่เปิดจองจริงจากระบบจองกลาง class.morroo.com (Supabase โปรเจกต์เดียวกัน
-  // เรียกผ่าน edge fn bcpr-api เพื่อได้ seats_left) — โชว์เป็นข้อมูล + ลิงก์ไปจองพร้อมจ่ายที่ hub
+  // รอบเรียน B-CPR ที่เปิดจองจริง — class.jiacpr.com (Hub) เป็นระบบจองกลางแล้ว (แทน class.morroo.com เดิม)
+  // ดึงผ่าน public catalog API (ไม่ต้องใช้ key, เปิด CORS ให้ทุกโดเมน) — โชว์เป็นข้อมูล + ลิงก์ไปจองพร้อมจ่ายที่ hub
   // ดึงไม่ได้/ไม่มีรอบว่าง = ไม่โชว์บล็อกนี้ lead form เดิมทำงานตามปกติ
-  const [hubClasses, setHubClasses] = useState(null);
+  const [hubRounds, setHubRounds] = useState(null);
   useEffect(() => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4000);
-    fetch(`${SUPABASE_URL}/functions/v1/bcpr-api`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
-      body: JSON.stringify({ action: "list_upcoming" }),
-      signal: ctrl.signal,
-    }).then(r => r.json()).then(d => {
-      if (d?.ok && Array.isArray(d.classes)) {
-        const open = d.classes.filter(c => c.course_key === "B-CPR" && c.seats_left > 0).slice(0, 3);
-        if (open.length) setHubClasses(open);
-      }
-    }).catch(() => {}).finally(() => clearTimeout(timer));
+    fetch("https://class.jiacpr.com/api/public/catalog", { signal: ctrl.signal })
+      .then(r => r.json()).then(d => {
+        if (Array.isArray(d?.rounds)) {
+          const open = d.rounds.filter(r => r.courseId === "bcpr" && r.seatsLeft > 0).slice(0, 3);
+          if (open.length) setHubRounds(open);
+        }
+      }).catch(() => {}).finally(() => clearTimeout(timer));
     return () => { ctrl.abort(); clearTimeout(timer); };
   }, []);
-  // 2026-08-22 → "22 ส.ค. 69"
-  const thShortDate = (iso) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
-    if (!m) return String(iso || "");
+  // ISO datetime (UTC) → "22 ส.ค. 69 · 09:00 น." เวลาไทย (UTC+7) — คำนวณ offset เองแบบเดียวกับ todayISOTH()
+  // แทนที่จะพึ่ง timezone ของเบราว์เซอร์ผู้ใช้
+  const thRoundTime = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso || "");
+    const t = new Date(d.getTime() + 7 * 3600 * 1000);
     const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-    return `${Number(m[3])} ${months[Number(m[2]) - 1]} ${(Number(m[1]) + 543) % 100}`;
+    const hh = String(t.getUTCHours()).padStart(2, "0"); const mm = String(t.getUTCMinutes()).padStart(2, "0");
+    return `${t.getUTCDate()} ${months[t.getUTCMonth()]} ${(t.getUTCFullYear() + 543) % 100} · ${hh}:${mm} น.`;
   };
+  const bcprBookingUrl = `https://class.jiacpr.com/courses/bcpr?${coupon ? `coupon=${encodeURIComponent(coupon)}&` : ""}utm_source=cpr-online`;
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inp = { width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${B.ltGray}`, fontSize: 15, boxSizing: "border-box", outline: "none" };
   const lbl = { fontSize: 13, fontWeight: 600, color: B.black, marginBottom: 6, display: "block" };
@@ -2423,23 +2930,23 @@ function Booking({ go }) {
         <I name="check" size={20} color={B.green}/><div><div style={{ fontSize: 13, fontWeight: 700, color: B.green }}>คูปองส่วนลด ฿100 ถูกใช้แล้ว!</div><div style={{ fontSize: 12, color: B.dkGray }}>รหัส: {coupon} • ราคาจาก ฿500 เหลือ ฿400</div></div>
       </div>}
 
-      {/* รอบที่เปิดรับจริงจากระบบจองกลาง — จองออนไลน์พร้อมชำระเงินได้เลยที่ class.morroo.com */}
-      {hubClasses && <div style={{ background: B.white, borderRadius: 16, padding: 16, marginBottom: 20, boxShadow: "0 2px 12px rgba(0,0,0,.06)" }}>
+      {/* รอบที่เปิดรับจริงจากระบบจองกลาง — จองออนไลน์พร้อมชำระเงินได้เลยที่ class.jiacpr.com (คูปองใช้ได้ตรงที่หน้าจองเลย) */}
+      {hubRounds && <div style={{ background: B.white, borderRadius: 16, padding: 16, marginBottom: 20, boxShadow: "0 2px 12px rgba(0,0,0,.06)" }}>
         <div style={{ fontSize: 14, fontWeight: 800 }}>📅 รอบเรียนที่เปิดรับตอนนี้</div>
         <div style={{ fontSize: 12, color: B.dkGray, marginTop: 2, marginBottom: 8 }}>อยากล็อกวันเลยไม่ต้องรอติดต่อกลับ — จองออนไลน์พร้อมชำระเงินได้ทันที</div>
-        {hubClasses.map(c => (
-          <div key={c.class_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${B.ltGray}`, fontSize: 13 }}>
-            <span><strong>{thShortDate(c.date)}</strong> · {c.time_slot} น.</span>
-            <span style={{ color: B.green, fontWeight: 700 }}>เหลือ {c.seats_left} ที่</span>
+        {hubRounds.map(r => (
+          <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${B.ltGray}`, fontSize: 13 }}>
+            <span><strong>{thRoundTime(r.startsAt)}</strong></span>
+            <span style={{ color: B.green, fontWeight: 700 }}>เหลือ {r.seatsLeft} ที่</span>
           </div>
         ))}
-        <a href="https://class.morroo.com/booking.html?course=B-CPR&utm_source=cpr-online" target="_blank" rel="noopener noreferrer"
+        <a href={bcprBookingUrl} target="_blank" rel="noopener noreferrer"
           onClick={() => track("booking_hub_click", { source: "cpr-online" })}
           style={{ display: "block", textAlign: "center", marginTop: 10, background: B.red, color: B.white, borderRadius: 10, padding: "13px 12px", textDecoration: "none", fontWeight: 700, fontSize: 14 }}>
           จองรอบเรียนพร้อมชำระเงินเลย →
         </a>
         {coupon && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6, textAlign: "center" }}>
-          หมายเหตุ: หน้าเว็บจองเป็นราคาเต็ม — ถ้าจะใช้คูปองส่วนลด ฿100 ให้ส่งฟอร์มด้านล่างหรือทักไลน์ให้ทีมงานนัดวันแทน
+          ลิงก์ด้านบนใส่คูปองส่วนลด ฿100 ให้อัตโนมัติแล้ว
         </div>}
       </div>}
 
@@ -2480,6 +2987,7 @@ const TABS = [
   { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
   { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","company","unlock_modules","multi_use","created_at","expires_at","redeemed_at","email_sent_status"] },
   { key: "voucher_issue",   label: "ออก Voucher",      custom: true },
+  { key: "partner_coupons", label: "คูปองพาร์ทเนอร์ (QR)", custom: true },
   { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
   { key: "game_chars",      label: "รูปตัวละครเกม",   custom: true },
 ];
@@ -3510,6 +4018,321 @@ function StandingCodePanel() {
   );
 }
 
+// ==================== PARTNER COUPON (QR ใบละ 1 สิทธิ์ — ธุรกิจพันธมิตรแจกให้ลูกค้าเรียนคอร์สเต็มฟรี) ====================
+function PartnerCouponPanel({ onPrint }) {
+  const [groups, setGroups] = useState([]); // [{ company, rows: [...] }]
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null); // company ที่กำลังดูรายชื่อคนใช้
+  const [editing, setEditing] = useState(null); // company ที่กำลังแก้ไขช่องทางติดต่อ
+  const [editForm, setEditForm] = useState({ sponsor_line: "", sponsor_phone: "", sponsor_value: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const [form, setForm] = useState({ company: "", prefix: "", sponsor_line: "", sponsor_phone: "", sponsor_value: String(PRICING.full), count: "50", expires: "" });
+  const [creating, setCreating] = useState(false);
+  const [err, setErr] = useState("");
+  const [created, setCreated] = useState(null); // ชุดที่เพิ่งสร้าง { company, rows }
+
+  const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(""); };
+
+  const refresh = async () => {
+    setLoading(true);
+    const res = await adminRest("lead_promo_codes", "GET", null, "?source=eq.partner_coupon&select=code,company,name,redeemed_at,redeemed_phone,expires_at,created_at,sponsor_line,sponsor_phone,sponsor_value&order=created_at.desc&limit=5000");
+    const list = Array.isArray(res) ? res : [];
+    const byCompany = new Map();
+    for (const r of list) {
+      if (!byCompany.has(r.company)) byCompany.set(r.company, []);
+      byCompany.get(r.company).push(r);
+    }
+    setGroups([...byCompany.entries()].map(([company, rows]) => ({ company, rows })));
+    setLoading(false);
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const create = async () => {
+    setErr("");
+    const company = form.company.trim();
+    const prefix = form.prefix.trim().toUpperCase();
+    const n = parseInt(form.count, 10) || 0;
+    if (!company) { setErr("กรุณากรอกชื่อพาร์ทเนอร์"); return; }
+    if (!/^[A-Z0-9]{2,8}$/.test(prefix)) { setErr("รหัสย่อ 2-8 ตัว ใช้ A-Z, 0-9 เท่านั้น เช่น OMNOI"); return; }
+    if (n < 1 || n > 200) { setErr("จำนวนใบต้องอยู่ระหว่าง 1-200"); return; }
+    const sponsorValue = parseInt(form.sponsor_value, 10) || PRICING.full;
+    let expiresAt;
+    if (form.expires) {
+      const d = new Date(`${form.expires}T23:59:59`);
+      if (isNaN(d.getTime()) || d.getTime() < Date.now()) { setErr("วันหมดอายุไม่ถูกต้อง (ต้องเป็นวันในอนาคต)"); return; }
+      expiresAt = d.toISOString();
+    } else {
+      const d = new Date(); d.setFullYear(d.getFullYear() + 1);
+      expiresAt = d.toISOString();
+    }
+    setCreating(true);
+    const buildRows = () => {
+      const codes = new Set();
+      while (codes.size < n) codes.add(genPartnerCode(prefix));
+      return [...codes].map(code => ({
+        code, email: "", phone: `coupon:${code}`, name: `คูปองพาร์ทเนอร์ ${company}`,
+        source: PARTNER_SOURCE, company, unlock_modules: VOUCHER_ALL_MODULES,
+        expires_at: expiresAt, multi_use: false,
+        sponsor_line: form.sponsor_line.trim() || null,
+        sponsor_phone: form.sponsor_phone.trim() || null,
+        sponsor_value: sponsorValue,
+      }));
+    };
+    try {
+      // PostgREST insert หลายแถวเป็น atomic — ถ้าโค้ดชนกัน (ความน่าจะเป็นต่ำมาก) สุ่มชุดใหม่ลองอีกครั้งเดียว
+      let res = await adminRest("lead_promo_codes", "POST", buildRows());
+      if (!Array.isArray(res) || !res.length) res = await adminRest("lead_promo_codes", "POST", buildRows());
+      if (!Array.isArray(res) || !res.length) { setErr("สร้างคูปองไม่สำเร็จ กรุณาลองใหม่"); setCreating(false); return; }
+      setCreated({ company, rows: res });
+      await refresh();
+    } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
+    setCreating(false);
+  };
+
+  const startEdit = (g) => {
+    const latest = g.rows[0] || {};
+    setEditing(g.company);
+    setEditForm({ sponsor_line: latest.sponsor_line || "", sponsor_phone: latest.sponsor_phone || "", sponsor_value: String(latest.sponsor_value || PRICING.full) });
+  };
+  const saveEdit = async (company) => {
+    setSavingEdit(true);
+    await adminRest("lead_promo_codes", "PATCH", {
+      sponsor_line: editForm.sponsor_line.trim() || null,
+      sponsor_phone: editForm.sponsor_phone.trim() || null,
+      sponsor_value: parseInt(editForm.sponsor_value, 10) || PRICING.full,
+    }, `?source=eq.partner_coupon&company=eq.${encodeURIComponent(company)}`);
+    setSavingEdit(false);
+    setEditing(null);
+    refresh();
+  };
+
+  const printGroup = (g, onlyUnused) => {
+    const latest = g.rows[0] || {};
+    const rows = onlyUnused ? g.rows.filter(r => !r.redeemed_at && new Date(r.expires_at) > new Date()) : g.rows;
+    if (!rows.length) { alert("ไม่มีคูปองที่พิมพ์ได้ในเงื่อนไขนี้"); return; }
+    onPrint({ company: g.company, rows, sponsor: { line: latest.sponsor_line, phone: latest.sponsor_phone, value: latest.sponsor_value } });
+  };
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <div style={{ background: B.white, borderRadius: 14, padding: 20, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>สร้างคูปองพาร์ทเนอร์ (QR ใบละ 1 สิทธิ์)</h3>
+        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>ธุรกิจพันธมิตร (เช่น ออฟฟิศอ้อมน้อย) แจกคูปองให้ลูกค้า สแกนแล้วเรียนคอร์สเต็มฟรีทันที — คนละ 1 ใบ 1 สิทธิ์ หลังใช้จะเห็น LINE/เบอร์ที่กรอกไว้นี้บนหน้าเว็บ</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อพาร์ทเนอร์ *</label>
+            <input type="text" value={form.company} onChange={e => F("company", e.target.value)} placeholder="เช่น ออฟฟิศอ้อมน้อย" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>รหัสย่อ (ใช้ขึ้นต้นโค้ด) *</label>
+            <input type="text" value={form.prefix} onChange={e => F("prefix", e.target.value.toUpperCase())} placeholder="เช่น OMNOI" autoCapitalize="characters" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "monospace", textTransform: "uppercase" }}/>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>LINE (ID หรือลิงก์)</label>
+            <input type="text" value={form.sponsor_line} onChange={e => F("sponsor_line", e.target.value)} placeholder="เช่น @omnoi หรือลิงก์ line.me" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทร</label>
+            <input type="tel" value={form.sponsor_phone} onChange={e => F("sponsor_phone", e.target.value)} placeholder="เช่น 081-234-5678" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 4 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>มูลค่าที่โชว์ (฿)</label>
+            <input type="number" value={form.sponsor_value} onChange={e => F("sponsor_value", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>จำนวนใบ (1-200)</label>
+            <input type="number" value={form.count} onChange={e => F("count", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>วันหมดอายุ (เว้นว่าง = 1 ปี)</label>
+            <input type="date" value={form.expires} onChange={e => F("expires", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+          </div>
+        </div>
+        {err && <div style={{ color: B.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
+        <button onClick={create} disabled={creating} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: creating ? .6 : 1 }}>{creating ? "กำลังสร้าง..." : "สร้างชุดคูปอง →"}</button>
+      </div>
+
+      {created && (
+        <div style={{ background: `${B.gold}12`, border: `2px solid ${B.gold}`, borderRadius: 14, padding: 20, marginBottom: 16, textAlign: "center" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>สร้างคูปองพาร์ทเนอร์ {created.company} สำเร็จ {created.rows.length} ใบ</div>
+          <button onClick={() => printGroup({ company: created.company, rows: created.rows }, false)} style={{ ...css.btn(B.gold, B.black, true), fontSize: 14 }}>พิมพ์ชุดนี้ →</button>
+        </div>
+      )}
+
+      {loading ? <div style={{ fontSize: 13, color: B.dkGray }}>กำลังโหลด...</div> : groups.length === 0 ? (
+        <div style={{ fontSize: 13, color: B.dkGray }}>ยังไม่มีคูปองพาร์ทเนอร์ในระบบ</div>
+      ) : groups.map(g => {
+        const total = g.rows.length;
+        const used = g.rows.filter(r => r.redeemed_at).length;
+        const expired = g.rows.filter(r => !r.redeemed_at && new Date(r.expires_at) < new Date()).length;
+        const left = total - used - expired;
+        const latest = g.rows[0] || {};
+        return (
+          <div key={g.company} style={{ background: B.white, borderRadius: 14, padding: 18, marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>{g.company}</div>
+                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>
+                  ทั้งหมด {total} · ใช้แล้ว <strong style={{ color: B.green }}>{used}</strong> · เหลือ <strong style={{ color: B.gold }}>{left}</strong>{expired > 0 && <> · หมดอายุ {expired}</>}
+                </div>
+                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>LINE: {latest.sponsor_line || "—"} · โทร: {latest.sponsor_phone || "—"} · มูลค่า ฿{latest.sponsor_value || PRICING.full}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button onClick={() => printGroup(g, true)} style={{ ...css.btn(B.gold, B.black), fontSize: 12, padding: "8px 12px" }}>พิมพ์ใบที่ยังไม่ใช้</button>
+                <button onClick={() => printGroup(g, false)} style={{ ...css.btn(B.white, B.black), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>พิมพ์ทั้งหมด</button>
+                <button onClick={() => setExpanded(expanded === g.company ? null : g.company)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>{expanded === g.company ? "ซ่อนรายชื่อ" : "ดูรายชื่อคนใช้"}</button>
+                <button onClick={() => startEdit(g)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>แก้ไขช่องทางติดต่อ</button>
+              </div>
+            </div>
+
+            {editing === g.company && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${B.gray}` }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                  <input type="text" value={editForm.sponsor_line} onChange={e => setEditForm(p => ({ ...p, sponsor_line: e.target.value }))} placeholder="LINE" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+                  <input type="tel" value={editForm.sponsor_phone} onChange={e => setEditForm(p => ({ ...p, sponsor_phone: e.target.value }))} placeholder="เบอร์โทร" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+                  <input type="number" value={editForm.sponsor_value} onChange={e => setEditForm(p => ({ ...p, sponsor_value: e.target.value }))} placeholder="มูลค่า ฿" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
+                </div>
+                <button onClick={() => saveEdit(g.company)} disabled={savingEdit} style={{ ...css.btn(B.red, B.white), fontSize: 12, padding: "8px 16px" }}>{savingEdit ? "กำลังบันทึก..." : "บันทึก"}</button>
+                <button onClick={() => setEditing(null)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 16px", marginLeft: 8 }}>ยกเลิก</button>
+                <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6 }}>ใช้กับคูปองทุกใบของพาร์ทเนอร์นี้ (คูปองที่พิมพ์ไปแล้วไม่ต้องพิมพ์ใหม่ — QR เดิมยังใช้ได้ แค่หน้าเว็บจะโชว์ข้อมูลใหม่)</div>
+              </div>
+            )}
+
+            {expanded === g.company && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${B.gray}` }}>
+                {g.rows.filter(r => r.redeemed_at).length === 0 ? (
+                  <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีใครใช้คูปองนี้</div>
+                ) : g.rows.filter(r => r.redeemed_at).map(r => (
+                  <div key={r.code} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${B.gray}`, fontSize: 12.5 }}>
+                    <span>{r.name} · {r.redeemed_phone}</span>
+                    <span style={{ color: B.dkGray }}>{new Date(r.redeemed_at).toLocaleString("th-TH")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ==================== PARTNER COUPON CARD (การ์ดคูปอง 1 ใบ — ใช้ทั้งพิมพ์และบันทึกรูป) ====================
+// ขั้นตอนใช้คูปอง — โชว์เป็นวงกลมเลข 1-2-3 พร้อม label สั้นใต้แต่ละวง (อ่านง่ายกว่าข้อความยาว)
+const PARTNER_COUPON_STEPS = ["สแกน QR", "กรอกชื่อ-เบอร์", "เรียนได้ทันที"];
+
+function PartnerCouponCard({ row, svg, cardRef }) {
+  const expiryTh = row.expires_at ? thaiShortDate(String(row.expires_at).slice(0, 10)) : "-";
+  const value = row.sponsor_value || PRICING.full;
+  return (
+    <div ref={cardRef} style={{ width: "90mm", height: "62mm", boxSizing: "border-box", border: "1px dashed #B8862F", borderRadius: "3mm", background: "#FFFDF7", display: "flex", overflow: "hidden", position: "relative", breakInside: "avoid", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", fontFamily: "'Noto Sans Thai', sans-serif" }}>
+      {/* แผงซ้าย: QR เด่นชัดในกรอบขาวขอบทอง + คำกำกับ "สแกนรับสิทธิ์ฟรี" ใต้ QR โดยตรง */}
+      <div style={{ width: "34mm", flexShrink: 0, background: "#FDF3E7", borderRight: "0.6mm solid #F3DB8E", boxSizing: "border-box", padding: "2.4mm", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1mm" }}>
+        <div className="partner-coupon-qr" style={{ width: "30mm", height: "30mm", background: "#fff", border: "0.35mm solid #F3DB8E", borderRadius: "1.5mm", boxSizing: "border-box", padding: "0.8mm", boxShadow: "0 0.4mm 1mm rgba(0,0,0,.08)" }} dangerouslySetInnerHTML={{ __html: svg || "" }}/>
+        <div style={{ fontSize: "6.8pt", fontWeight: 800, color: "#C8102E", textAlign: "center", lineHeight: 1.15 }}>สแกนรับสิทธิ์ฟรี</div>
+        <div style={{ fontFamily: "monospace", fontSize: "6pt", fontWeight: 600, letterSpacing: ".3px", wordBreak: "break-all", color: "#8a6d1a", textAlign: "center" }}>{row.code}</div>
+      </div>
+      {/* แผงขวา: หัวเรื่อง+ป้ายมูลค่า, รายละเอียดคอร์ส, ขั้นตอน, ติดต่อ */}
+      <div style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "2.6mm 3mm", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: "0.8mm", columnGap: "1.5mm" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "1.3mm" }}>
+            <Logo size={24}/>
+            <div style={{ fontSize: "10.5pt", fontWeight: 900, color: "#C8102E", whiteSpace: "nowrap" }}>คูปองเรียนฟรี</div>
+          </div>
+          <div style={{ background: "#F59E0B", color: "#1A1A1A", borderRadius: 999, padding: "0.6mm 2.4mm", textAlign: "center", flexShrink: 0 }}>
+            <div style={{ fontSize: "4.6pt", fontWeight: 700, letterSpacing: ".3px", lineHeight: 1 }}>มูลค่า</div>
+            <div style={{ fontSize: "8.2pt", fontWeight: 900, lineHeight: 1.1 }}>฿{value}</div>
+          </div>
+        </div>
+        <div style={{ height: "0.4mm", background: "#F3DB8E", margin: "1.3mm 0" }}/>
+        <div style={{ fontSize: "7.6pt", color: "#333", lineHeight: 1.3 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
+        <div style={{ fontSize: "7.8pt", fontWeight: 700, color: "#1A1A1A", marginTop: "1.2mm" }}>มอบโดย {row.company}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.8mm", gap: "1mm" }}>
+          {PARTNER_COUPON_STEPS.map((label, i) => (
+            <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5mm", flex: 1, minWidth: 0 }}>
+              <div style={{ width: "3.4mm", height: "3.4mm", borderRadius: "50%", background: "#C8102E", color: "#fff", fontSize: "4.2pt", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
+              <div style={{ fontSize: "5.6pt", color: "#555", textAlign: "center", lineHeight: 1.15 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: "auto", paddingTop: "1.5mm" }}>
+          <div style={{ fontSize: "6.3pt", color: "#666" }}>ใช้ได้ถึง {expiryTh} · 1 คูปอง/1 คน</div>
+          <div style={{ fontSize: "6.5pt", color: "#333", fontWeight: 600, marginTop: "0.8mm" }}>ติดต่อ {row.company}{row.sponsor_line ? ` · LINE ${row.sponsor_line}` : ""}{row.sponsor_phone ? ` · โทร ${row.sponsor_phone}` : ""}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== PARTNER COUPON PRINT SHEET (แทนที่หน้าแอดมินทั้งหน้าตอนพิมพ์ — ไม่ใช้ window.open) ====================
+function PartnerCouponPrintSheet({ job, onClose }) {
+  const [svgs, setSvgs] = useState({}); // code -> svg string
+  const [ready, setReady] = useState(false);
+  const cardRefs = useRef({});
+  const [savingCode, setSavingCode] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const mod = await import("qrcode");
+      const QR = mod.default || mod;
+      const entries = await Promise.all(job.rows.map(async (r) => {
+        const url = `${SITE_URL}/?promo=${r.code}&utm_source=partner&utm_medium=qr&utm_campaign=${encodeURIComponent((r.code.split("-")[0] || "").toLowerCase())}`;
+        const s = await QR.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M" });
+        return [r.code, s];
+      }));
+      if (!cancelled) { setSvgs(Object.fromEntries(entries)); setReady(true); }
+    })();
+    return () => { cancelled = true; };
+  }, [job]);
+
+  const saveImage = async (row) => {
+    const el = cardRefs.current[row.code];
+    if (!el || savingCode) return;
+    setSavingCode(row.code);
+    try {
+      const dataUrl = await captureNodeToPng(el);
+      await deliverBlob(await dataUrlToBlob(dataUrl), `coupon_${row.code}.png`, "image/png");
+    } catch (e) { alert("บันทึกรูปไม่สำเร็จ"); }
+    setSavingCode(null);
+  };
+
+  const PER_PAGE = 8;
+  const pages = [];
+  for (let i = 0; i < job.rows.length; i += PER_PAGE) pages.push(job.rows.slice(i, i + PER_PAGE));
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#E5E5E5" }}>
+      <style>{`@page { size: A4 portrait; margin: 10mm } @media print { .no-print { display: none !important } body { background: #fff } } .partner-coupon-qr svg { display: block; width: 100%; height: 100%; }`}</style>
+      <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 10, background: B.black, color: B.white, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button onClick={onClose} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={22} color={B.white}/></button>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>พิมพ์คูปองพาร์ทเนอร์ — {job.company} ({job.rows.length} ใบ)</div>
+        <button onClick={() => window.print()} disabled={!ready} style={{ ...css.btn(B.gold, B.black), fontSize: 13, padding: "8px 18px", opacity: ready ? 1 : .5, marginLeft: "auto" }}>{ready ? "พิมพ์" : "กำลังสร้าง QR..."}</button>
+      </div>
+      {pages.map((pageRows, pi) => (
+        <div key={pi} style={{ background: "#fff", width: "210mm", minHeight: "277mm", margin: "10mm auto", padding: "10mm", boxSizing: "border-box", breakAfter: "page" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "90mm 90mm", gap: "6mm", justifyContent: "center" }}>
+            {pageRows.map(row => (
+              <div key={row.code} style={{ position: "relative" }}>
+                <PartnerCouponCard row={row} svg={svgs[row.code]} cardRef={el => { cardRefs.current[row.code] = el; }}/>
+                <button className="no-print" onClick={() => saveImage(row)} disabled={savingCode === row.code}
+                  style={{ position: "absolute", top: -22, right: 0, background: B.white, border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 10, padding: "3px 6px", cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,.15)" }}>
+                  {savingCode === row.code ? "..." : "บันทึกรูป"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ==================== COMPANY SCORE REPORT (สำหรับ HR ดูคะแนน pre-course) ====================
 function CompanyReport() {
   const [rows, setRows] = useState([]);
@@ -3733,6 +4556,8 @@ function Admin() {
   const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, line_linked: 0, bookings: 0, new_24h: 0, new_7d: 0 });
   // "เห็นแล้วล่าสุด" — ใช้ไฮไลต์นักเรียนที่สมัครหลังจากครั้งที่เปิดดูรอบก่อน
   const [studentsSeenAt, setStudentsSeenAt] = useState(() => load("admin_students_seen_at", null));
+  // คูปองพาร์ทเนอร์ที่กำลังเปิดพิมพ์ — โชว์แผ่นพิมพ์แทนที่หน้าแอดมินทั้งหน้า (ไม่ใช้ window.open/print trick)
+  const [printJob, setPrintJob] = useState(null);
 
   const currentTab = TABS.find(t => t.key === tab);
   const isCustomTab = !!currentTab?.custom;
@@ -3776,6 +4601,7 @@ function Admin() {
   useEffect(() => { if (authed) { fetchStats(); } }, [authed, fetchStats]);
 
   if (!authed) return <AdminLogin onAuth={() => setAuthed(true)}/>;
+  if (printJob) return <PartnerCouponPrintSheet job={printJob} onClose={() => setPrintJob(null)}/>;
 
   const logout = () => {
     sessionStorage.removeItem(ADMIN_SESSION_KEY);
@@ -3893,6 +4719,7 @@ function Admin() {
         {tab === "dashboard" && <Dashboard/>}
         {tab === "team" && <TeamManager/>}
         {tab === "voucher_issue" && <><VoucherIssuePanel/><StandingCodePanel/></>}
+        {tab === "partner_coupons" && <PartnerCouponPanel onPrint={setPrintJob}/>}
         {tab === "company_report" && <CompanyReport/>}
         {tab === "game_chars" && <GameCharacterImages/>}
 
@@ -4090,6 +4917,10 @@ export default function App() {
     save("coupon", c);
     save("coupon_expires", camp.end); // เก็บวันหมดอายุไว้ (หน้าจอง/เซลล์ใช้อ้างอิงได้)
     // ใส่วันหมดอายุใน staff_name ให้เซลล์เห็นในระบบ (promo_codes ไม่มีคอลัมน์ expires_at)
+    // ⚠️ TODO: Hub ปิด anon insert บน promo_codes แล้ว (เหลือแค่ public.issue_online_coupon ซึ่งกำหนด
+    // สิทธิ์จาก "เรียนจบคอร์สออนไลน์แล้ว" — ไม่ตรงกับกติกาคูปองแคมเปญเกมนี้ที่ให้ตามการชนะเกม) การเขียนแถวนี้จึง
+    // ใช้ไม่ได้แล้ว โค้ดที่โชว์บนจอจะไม่ถูกบันทึกจริง ต้องตัดสินใจ: ออก RPC ใหม่สำหรับคูปองแคมเปญโดยเฉพาะ หรือ
+    // เปลี่ยนกติกา issue_online_coupon ให้ครอบคลุมกรณีนี้ด้วย
     try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: `game·exp ${camp.end}` }); } catch (e) {}
     return { code: c, note };
   }, []);
@@ -4112,6 +4943,9 @@ export default function App() {
   // สั้นๆ ก่อนค่อยฟันธงว่าล้มเหลว
   const [stripeVerify, setStripeVerify] = useState(null); // null | "ok" | "pending" | "failed"
   useEffect(() => {
+    // เก็บ UTM ก่อนเสมอ — เผื่อลิงก์มี ?promo=...&utm_source=... (เช่น QR คูปองพาร์ทเนอร์) เพราะ
+    // ด้านล่างจะ replaceState ตัด query ทิ้งก่อน effect เก็บ UTM หลักจะได้รัน (captureUTM idempotent)
+    captureUTM();
     const params = new URLSearchParams(window.location.search);
     if (params.get("stripe") === "success") {
       const sessionId = params.get("session_id");
@@ -4157,29 +4991,42 @@ export default function App() {
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
   }, []);
 
-  // Auto-link LINE: ถ้าเปิดในแอป LINE (LIFF) และเป็นนักเรียนที่สมัครแล้วแต่ยังไม่ผูก line_user_id
-  // → ผูกเงียบๆ ผ่าน auth-line-link (ดึง line_user_id + กู้ progress กลับมา) โดยไม่ต้องให้ลูกค้าพิมพ์โค้ด
+  // กลับจากหน้า LINE login (signInWithLine เคย liff.login() นำทางออกไปตอนกดปุ่มเข้าสู่ระบบ) → เก็บ
+  // phone/name ที่กรอกไว้ตอนนั้นใน line_login_pending แล้วทำ signInWithLine ต่อให้จบตอนหน้ากลับมาโหลด
+  useEffect(() => {
+    const pending = load("line_login_pending", null);
+    if (!pending) return;
+    (async () => {
+      const result = await signInWithLine(pending);
+      if (result) { setUser(result.user); if (result.progress) setProgress(result.progress); }
+    })();
+  }, []);
+
+  // เคยล็อกอิน LINE แล้ว (มี auth_user_id) แต่ Supabase session หายไปจริง (ล้างข้อมูลเบราว์เซอร์บางส่วน ฯลฯ)
+  // → เคลียร์ auth_user_id ทิ้งแทนที่จะค้างสถานะ "ล็อกอินแล้ว" ทั้งที่ sync ข้อมูลกับบัญชีจริงไม่ได้อีก
   useEffect(() => {
     const u = load("user", null);
-    if (!u?.phone || u?.line_user_id) return;
+    if (!u?.auth_user_id) return;
+    (async () => {
+      try {
+        const supa = await getSupabase();
+        const { data: { session } } = await supa.auth.getSession();
+        if (!session) { const nu = { ...u, auth_user_id: undefined }; setUser(nu); save("user", nu); }
+      } catch (e) {}
+    })();
+  }, []);
+
+  // Auto-link LINE: เปิดในแอป LINE (LIFF) และเป็นนักเรียนที่สมัครแล้วแต่ยังไม่ล็อกอิน LINE จริง (ยังไม่มี
+  // auth_user_id) → เข้าสู่ระบบ LINE ให้เงียบ ๆ (silent: ไม่บังคับ redirect ถ้ายังไม่ได้ล็อกอิน LIFF)
+  useEffect(() => {
+    const u = load("user", null);
+    if (!u?.phone || u?.auth_user_id || load("line_login_pending", null) || load("signed_out_account", null)) return;
     (async () => {
       try {
         const liff = await loadLiff();
         if (!liff || typeof liff.isInClient !== "function" || !liff.isInClient()) return;
-        if (!liff.isLoggedIn()) return;
-        let idToken = null; try { idToken = liff.getIDToken(); } catch (e) {}
-        if (!idToken) return;
-        const res = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
-          id_token: idToken, phone: u.phone, pdpa: true, display_name: u.name || "",
-          utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
-          gate_variant: getGateVariant(),
-        }) });
-        const data = await res.json().catch(() => ({}));
-        if (data?.ok) {
-          const nu = { ...u, line_user_id: data.line_user_id, customer_id: data.customer_id || u.customer_id };
-          setUser(nu); save("user", nu); save("line_added", true);
-          if (data.progress) { setProgress(data.progress); save("progress", data.progress); }
-        }
+        const result = await signInWithLine({ phone: u.phone, name: u.name || "", silent: true });
+        if (result) { setUser(result.user); if (result.progress) setProgress(result.progress); }
       } catch (e) {}
     })();
   }, []);
@@ -4200,12 +5047,12 @@ export default function App() {
           case "stripe-verify": return <StripeVerify status={stripeVerify} go={go}/>;
           case "landing": return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog} goGameRandom={goGameRandom}/>;
           case "register": return <Register go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-          case "lineprompt": return <LineAddPrompt go={go} user={user} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
+          case "lineprompt": return <LineAddPrompt go={go} user={user} setUser={u => { setUser(u); save("user", u); }} variant={isSignedUp() ? "post-register" : "pre-course"}/>;
           case "teaserquiz": return <TeaserQuiz go={go}/>;
           case "signupgate": return <SignupGate go={go} setUser={u => { setUser(u); save("user", u); }} setProgress={p => { setProgress(p); save("progress", p); }}/>;
           case "payment": return <Payment go={go} user={user}/>;
           case "store": return <Store go={go} setUser={u => { setUser(u); save("user", u); }}/>;
-          case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} openBlog={openBlog} goGameRandom={goGameRandom}/>;
+          case "course": return <Course go={go} progress={progress} setProgress={p => { setProgress(p); save("progress", p); }} user={user} setUser={u => { setUser(u); save("user", u); }} openBlog={openBlog} goGameRandom={goGameRandom}/>;
           case "certificate": return <Certificate user={user} go={go}/>;
           case "minicert": return <MiniCert user={user} go={go}/>;
           case "booking": return <Booking go={go}/>;
