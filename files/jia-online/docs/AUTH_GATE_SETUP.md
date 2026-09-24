@@ -180,3 +180,19 @@ end$$;
 - ยังไม่ login / ยังไม่มีผลที่รับรอง / Hub ยังไม่ apply migration → ไม่แสดงอะไร
 ใบกลางออกเมื่อผลสอบได้รับรอง (อัตโนมัติถ้าเปิด `auto_accept` ของคอร์ส `cpr` ที่ Hub หรือเจ้าหน้าที่กดรับรอง) — ดู `docs/unified-identity.md`
 หัวข้อ 7 ใน repo `jia-learning-hub`
+
+## ออกจากระบบ (กล่องบัญชี JIA) — 24 ก.ย. 2569
+
+- `AccountCard` (ใน `src/App.jsx`) อยู่บนหน้าบทเรียนและหน้าใบประกาศ: login แล้ว = ชื่อ (จากบัตรนักเรียน Hub) + เลขบัตร + ปุ่ม
+  "ออกจากระบบ"; เพิ่งออกจากระบบ = แจ้งว่าข้อมูลการเรียนยังอยู่ในเครื่อง + ปุ่ม "เข้าสู่ระบบด้วย LINE อีกครั้ง"; ไม่เคย login = ไม่แสดง
+- "ออกจากระบบ" (`logoutAccount`): `supabase.auth.signOut({scope:'local'})` (เครื่องอื่นของผู้เรียนไม่หลุด) + `liff.logout()` นอกแอป
+  LINE (ไม่งั้นคนถัดไปกดเข้าสู่ระบบด้วย LINE แล้วได้บัญชีเดิมทันที) → ตัด `auth_user_id`/`hub` ออกจาก `jia_user` → ไป
+  `https://class.jiacpr.com/sso/logout?client_id=cpr-online&redirect_uri=https://cpr.morroo.com/auth/hub/callback&return_path=/`
+  ซึ่งปิด session ของ Hub แล้วพากลับมา (บนโดเมนอื่น เช่น preview แค่โหลดหน้าใหม่)
+- **ไม่ล้างข้อมูลการเรียนในเครื่อง** เพราะบทที่ซื้อ/ปลดล็อก (`jia_purchased`, `jia_promo_unlocked`, `jia_camp_course_unlock`) อยู่ในเครื่อง
+  เท่านั้น login กลับมาก็ไม่คืน — จำไว้แทนว่าเป็นของบัญชีไหน (`jia_signed_out_account`):
+  - บัญชีเดิม login กลับมา → เรียนต่อได้ทุกอย่าง
+  - บัญชีอื่น login บนเครื่องนี้ (LINE หรืออีเมล) → `forgetOtherAccount` ล้างข้อมูลของคนก่อนก่อน (เหมือน "เปลี่ยนคนเรียน") แล้วโหลดหน้าใหม่
+    ไม่ให้ชื่อ/เบอร์/ความก้าวหน้าของคนก่อนไปปนบัญชีใหม่ (`attachLocal`, `auth-line-link`)
+  - auto-link LINE เงียบ ๆ ในแอป LINE ไม่ทำงานจนกว่าจะกดเข้าสู่ระบบเอง
+- "เริ่มใหม่ / เปลี่ยนคนเรียน" ออกจากระบบบัญชีด้วย (เดิมล้างแค่ `jia_*` session Supabase ยังค้าง) และถ้า login อยู่จะผ่าน `/sso/logout` ของ Hub
