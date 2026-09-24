@@ -43,6 +43,28 @@ const MAX_ATTEMPTS_PER_DAY = 5;
 
 const PASS_PCT = 80;
 
+// ผลสอบปลายภาคส่งเข้า "ผลสอบกลาง" ของ Hub (learning_hub.exam_results ผ่าน public.jia_results('record'))
+// ด้วย service role ของฟังก์ชันนี้เอง — Hub อยู่ Supabase โปรเจกต์เดียวกัน ไม่ต้องมี secret เพิ่ม
+// Hub คิดคะแนน/ผ่าน-ไม่ผ่านเองจาก correct/total ตามเกณฑ์ของคอร์ส cpr (ไม่เชื่อ score/passed จากที่นี่)
+// attemptRef = id ของ online_exam_attempts → ส่งซ้ำได้ผลเดิม; ถ้า Hub ยังไม่พร้อม/ล่ม แค่ log ไว้
+// ไม่บล็อกผลสอบของผู้เรียน (เติมย้อนหลังได้ด้วย SQL ใน docs/AUTH_GATE_SETUP.md)
+const HUB_RESULTS_CLIENT = "cpr-online";
+const HUB_COURSE_ID = "cpr";
+async function recordAtHub(userId: string, attemptId: number, correct: number, total: number) {
+  try {
+    const { error } = await supa.rpc("jia_results", {
+      action: "record",
+      payload: {
+        sourceClient: HUB_RESULTS_CLIENT, userId, courseId: HUB_COURSE_ID, kind: "post",
+        correct, total, attemptRef: `online-exam-${attemptId}`, finishedAt: new Date().toISOString(),
+      },
+    });
+    if (error) console.warn("hub exam result not recorded:", error.message);
+  } catch (e) {
+    console.warn("hub exam result not recorded:", e instanceof Error ? e.message : e);
+  }
+}
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type, apikey",
@@ -106,8 +128,13 @@ Deno.serve(async (req: Request) => {
   const passed = score >= PASS_PCT;
 
   if (isFinal && authUserId) {
-    try { await supa.from("online_exam_attempts").insert({ auth_user_id: authUserId, module_id: Number(moduleId), score, passed }); }
-    catch { /* บันทึก attempt ไม่สำเร็จไม่ควรบล็อกผลสอบที่ตรวจถูกต้องแล้ว — แค่ rate limit รอบต่อไปจะหลวมกว่าที่ตั้งใจ */ }
+    let attemptId: number | null = null;
+    try {
+      const { data } = await supa.from("online_exam_attempts")
+        .insert({ auth_user_id: authUserId, module_id: Number(moduleId), score, passed }).select("id").single();
+      attemptId = data?.id ?? null;
+    } catch { /* บันทึก attempt ไม่สำเร็จไม่ควรบล็อกผลสอบที่ตรวจถูกต้องแล้ว — แค่ rate limit รอบต่อไปจะหลวมกว่าที่ตั้งใจ */ }
+    if (attemptId !== null) await recordAtHub(authUserId, attemptId, correct, total);
   }
 
   const result: Record<string, unknown> = { score, correct, total, passed };

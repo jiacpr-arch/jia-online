@@ -143,3 +143,30 @@ repo `jia-learning-hub`, `docs/unified-identity.md`
 
 **Deploy:** ไม่มีอะไรต้อง apply/deploy เพิ่มฝั่ง Hub — `jia_identity`/`jia_online_account` deploy อยู่แล้ว
 เว็บนี้แค่เรียกตรง build ปกติก็พร้อมใช้
+
+## ผลสอบปลายภาคเข้า "ผลสอบกลาง" ของ Hub — 24 กันยายน 2026
+
+`grade-quiz` ส่งผลข้อสอบปลายภาค (module 7) **ทุกครั้ง ทั้งผ่านและไม่ผ่าน** เข้า `learning_hub.exam_results` ของ Hub
+ผ่าน `public.jia_results('record')` ด้วย service role ของฟังก์ชันเอง (Hub อยู่โปรเจกต์เดียวกัน ไม่มี secret เพิ่ม):
+`{sourceClient:'cpr-online', userId, courseId:'cpr', kind:'post', correct, total, attemptRef:'online-exam-<id ของ online_exam_attempts>'}`
+- Hub คิดคะแนน/ผ่าน-ไม่ผ่านเองจาก correct/total ตามเกณฑ์คอร์ส `cpr` (80%) — ส่งซ้ำ ref เดิมได้ผลเดิม
+- ผลที่ Hub บันทึกยังไม่นับเป็น "ผ่านออนไลน์" ของรอบฝึกที่ Hub จนกว่าเจ้าหน้าที่รับรองใน `class.jiacpr.com/operations/learning`
+  หรือเจ้าของหลักสูตรเปิดรับรองอัตโนมัติของคอร์ส `cpr` (ดู `docs/unified-identity.md` หัวข้อ 6 ใน repo `jia-learning-hub`)
+- Hub ล่ม/ยังไม่ apply migration/ปฏิเสธ → แค่ `console.warn` ในฟังก์ชัน **ผู้เรียนยังได้ผลสอบตามปกติ**
+- บทเรียน 1–6 ไม่ถูกส่ง (เป็นแบบฝึก ไม่ใช่ผลสอบที่ใช้ตัดสิน)
+
+**ลำดับ deploy:** apply `20261016100000_exam_results.sql` ของ Hub + เพิ่มแถว `sso_clients` `cpr-online` ที่มี
+`allowed_courses = array['cpr']` ก่อน แล้วค่อย deploy `grade-quiz` (ถ้า deploy ก่อน ก็ไม่พัง แค่ผลช่วงนั้นไม่เข้า Hub
+— เติมย้อนหลังได้ด้วย SQL ด้านล่าง)
+
+**เติมผลเก่าย้อนหลัง** (ครั้งเดียว หลัง Hub พร้อม — `online_exam_attempts` เก็บแค่ score แต่ข้อสอบปลายภาค 10 ข้อพอดี
+จึงได้ `correct = score/10` ตรงเป๊ะ; ref เดียวกับที่ฟังก์ชันใช้ รันซ้ำได้ไม่ซ้ำแถว):
+```sql
+do $$declare a record;begin
+ perform set_config('request.jwt.claim.role','service_role',true);
+ for a in select id,auth_user_id,score,created_at from public.online_exam_attempts where module_id=7 order by id loop
+  perform public.jia_results('record',jsonb_build_object('sourceClient','cpr-online','userId',a.auth_user_id,'courseId','cpr',
+   'kind','post','correct',a.score/10,'total',10,'attemptRef','online-exam-'||a.id,'finishedAt',a.created_at));
+ end loop;
+end$$;
+```
