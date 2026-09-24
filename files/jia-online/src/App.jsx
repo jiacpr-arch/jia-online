@@ -354,6 +354,8 @@ const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) =>
   const { data: verified, error } = await supa.auth.verifyOtp({ token_hash: result.data.tokenHash, type: "magiclink" });
   if (error || !verified?.session) return null;
   const authUserId = verified.session.user.id;
+  const switchedAccount = forgetOtherAccount(authUserId);
+  if (switchedAccount) { phone = ""; name = ""; }
 
   // ผูกแถวลูกค้าเดิม (สมัครด้วยชื่อ+เบอร์แบบไม่ผ่าน LINE มาก่อน) เข้ากับบัญชี LINE ที่เพิ่งล็อกอิน
   // ก่อนเรียก auth-line-link เสมอ — ไม่งั้น auth-line-link จะมองว่าเป็นคนละคน (จับคู่ด้วย line_user_id
@@ -398,6 +400,7 @@ const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) =>
   save("signup_pending", null); save("line_login_pending", null);
   safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
   phCapture("signup_complete", { provider: "line", variant: getGateVariant() });
+  if (switchedAccount) window.location.reload(); // หน้าจอยังถือความก้าวหน้า/ชื่อของบัญชีก่อนอยู่ในหน่วยความจำ
   return { user: u, progress, isFriend };
 };
 
@@ -417,6 +420,7 @@ const verifyEmailIdentityOtp = async ({ email, token }) => {
   const { data, error } = await supa.auth.verifyOtp({ email, token, type: "email" });
   if (error || !data?.session) throw Error("รหัส OTP ไม่ถูกต้องหรือหมดอายุ");
   const authUserId = data.session.user.id;
+  const switchedAccount = forgetOtherAccount(authUserId);
   const localUser = load("user", null);
   if (localUser?.customer_id && !localUser?.auth_user_id && localUser?.phone) {
     try { await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: localUser.customer_id, phone: localUser.phone } }); } catch (e) {}
@@ -435,7 +439,61 @@ const verifyEmailIdentityOtp = async ({ email, token }) => {
   let progress = load("progress", { done: [], scores: {} });
   if (meData.progress) { progress = mergeProgressLocal(progress, meData.progress); save("progress", progress); }
   safeTrack("identity_verified", { provider: "email" }); phCapture("identity_verified", { provider: "email" });
+  if (switchedAccount) window.location.reload(); // หน้าจอยังถือความก้าวหน้า/ชื่อของบัญชีก่อนอยู่ในหน่วยความจำ
   return { user: u, progress };
+};
+
+// ========== ออกจากระบบ (บัญชี JIA บนเครื่องนี้ + ที่ class.jiacpr.com) ==========
+// cpr.morroo.com ลงทะเบียนที่ Hub เป็น client "cpr-online" — หน้า class.jiacpr.com/sso/logout ปิด session ของ Hub
+// (ไม่งั้นคนถัดไปบนเครื่องเดียวกันเข้า Hub แล้วอยู่ในบัญชีเดิม) แล้วพากลับมาที่ return_path บนเว็บนี้
+const HUB_LOGOUT_URL = "https://class.jiacpr.com/sso/logout";
+const HUB_CLIENT_ID = "cpr-online";
+const HUB_REDIRECT_URI = "https://cpr.morroo.com/auth/hub/callback";
+const hasLiffLogin = () => { try { for (let i = 0; i < localStorage.length; i++) { if ((localStorage.key(i) || "").startsWith("LIFF_STORE:")) return true; } } catch (e) {} return false; };
+// ปิด session บัญชีบนเครื่องนี้: Supabase ของเว็บนี้ (scope local — เครื่องอื่นของผู้เรียนไม่หลุด) + LINE Login ของ LIFF
+// นอกแอป LINE (ไม่งั้นคนถัดไปกด "เข้าสู่ระบบด้วย LINE" แล้วได้บัญชี LINE เดิมทันทีโดยไม่ถาม)
+const endAccountSession = async () => {
+  try { const supa = await getSupabase(); await supa.auth.signOut({ scope: "local" }); } catch (e) {}
+  try {
+    if (_liff || hasLiffLogin()) {
+      const liff = await loadLiff();
+      if (liff && !liff.isInClient() && liff.isLoggedIn()) liff.logout();
+    }
+  } catch (e) {}
+};
+// ไปหน้า logout ของ Hub (เฉพาะบนโดเมนจริง — Hub ส่งกลับได้แค่ origin ของ redirect ที่ลงทะเบียนไว้) ที่อื่นแค่โหลดหน้าใหม่
+const goHubLogout = (returnPath = "/") => {
+  if (window.location.origin !== new URL(HUB_REDIRECT_URI).origin) { window.location.reload(); return; }
+  const q = new URLSearchParams({ client_id: HUB_CLIENT_ID, redirect_uri: HUB_REDIRECT_URI, return_path: returnPath });
+  window.location.assign(`${HUB_LOGOUT_URL}?${q.toString()}`);
+};
+// "ออกจากระบบ": ปิดบัญชีทุกที่ แต่เก็บข้อมูลการเรียนในเครื่องไว้ (บทที่ซื้อ/ปลดล็อกอยู่ในเครื่องนี้เท่านั้น — ล้างทิ้ง
+// แล้ว login กลับมาก็ไม่คืน) จำไว้ว่าเป็นของบัญชีไหน (signed_out_account) → บัญชีเดิม login กลับมาเรียนต่อได้ทุกอย่าง,
+// คนอื่น login บนเครื่องนี้ = ล้างข้อมูลของคนก่อนก่อน (forgetOtherAccount) ไม่ให้ชื่อ/เบอร์/ความก้าวหน้าไปปนบัญชีใหม่
+// และกันเอฟเฟกต์ auto-link LINE ในแอป LINE ล็อกอินกลับเองเงียบ ๆ จนกว่าจะกดเข้าสู่ระบบเอง
+const logoutAccount = async () => {
+  const u = load("user", null);
+  await endAccountSession();
+  if (u?.auth_user_id) save("signed_out_account", u.auth_user_id);
+  if (u) save("user", { ...u, auth_user_id: undefined, hub: undefined });
+  save("line_id_token", null);
+  goHubLogout("/");
+};
+// "เริ่มใหม่ / เปลี่ยนคนเรียน": ล้างข้อมูลผู้เรียนในเครื่อง + ปิดบัญชีที่ login อยู่ (เดิมล้างแค่ข้อมูล session ยังค้าง)
+const startOverLearner = async () => {
+  const wasSignedIn = !!load("user", null)?.auth_user_id;
+  await endAccountSession();
+  resetLearner();
+  if (wasSignedIn) goHubLogout("/"); else window.location.reload();
+};
+// เรียกหลัง login สำเร็จ (LINE/อีเมล) ก่อนอ่านข้อมูลในเครื่อง — ข้อมูลในเครื่องเป็นของบัญชีที่เพิ่งออกจากระบบไป
+// และคนที่ login ตอนนี้เป็นคนละบัญชี → ล้างก่อน คืน true (ผู้เรียกต้องทิ้งชื่อ/เบอร์ที่อ่านมาจากข้อมูลเดิมด้วย)
+const forgetOtherAccount = (authUserId) => {
+  const prev = load("signed_out_account", null);
+  if (!prev) return false;
+  if (prev === authUserId) { save("signed_out_account", null); return false; }
+  resetLearner();
+  return true;
 };
 
 // ========== CERTIFICATE EXPORT HELPERS (PDF / รูปภาพ) ==========
@@ -1356,6 +1414,35 @@ function EmailIdentityCard({ user, setUser }) {
         {err && <div style={{ color: B.red, fontSize: 12, marginBottom: 8 }}>{err}</div>}
         <button type="submit" disabled={busy} style={{ ...css.btn(B.black, B.white, true), padding: "10px 16px", fontSize: 13, width: "auto" }}>{busy ? "กำลังดำเนินการ..." : sent ? "ยืนยันรหัส OTP" : "ส่งรหัส OTP"}</button>
       </form>
+    </div>
+  );
+}
+
+// กล่องบัญชี JIA — login แล้ว: ชื่อ + บัตรนักเรียน + "ออกจากระบบ" (logoutAccount: ออกทั้งเว็บนี้และ class.jiacpr.com)
+// เพิ่งออกจากระบบ: บอกว่าข้อมูลการเรียนยังอยู่ในเครื่อง + ปุ่มเข้าสู่ระบบอีกครั้ง; ยังไม่เคย login: ไม่แสดง (มีปุ่มเข้าสู่ระบบ
+// ตามจุดสมัครและก่อนสอบปลายภาคอยู่แล้ว)
+function AccountCard({ user, setUser }) {
+  const [busy, setBusy] = useState(false);
+  if (user?.auth_user_id) {
+    const name = (user.hub?.nameTh || user.name || "").trim() || "บัญชี JIA";
+    return (
+      <div data-testid="account-card" data-state="signed-in" style={{ display: "flex", alignItems: "center", gap: 12, background: B.white, border: `1px solid ${B.green}55`, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+        <div style={{ minWidth: 38, height: 38, borderRadius: 10, background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center" }}><I name="check" size={18} color={B.green}/></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: B.dkGray }}>เข้าสู่ระบบบัญชี JIA แล้ว</div>
+          <div style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+          {user.hub?.cardNo && <div style={{ fontSize: 11, color: B.dkGray }}>บัตรนักเรียน {user.hub.cardNo}</div>}
+        </div>
+        <button type="button" disabled={busy} onClick={() => { setBusy(true); logoutAccount().catch(() => setBusy(false)); }} style={{ background: B.gray, color: B.black, border: "none", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>{busy ? "กำลังออก…" : "ออกจากระบบ"}</button>
+      </div>
+    );
+  }
+  if (!load("signed_out_account", null)) return null;
+  return (
+    <div data-testid="account-card" data-state="signed-out" style={{ background: B.gray, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>ออกจากระบบบัญชี JIA แล้ว</div>
+      <div style={{ fontSize: 11.5, color: B.dkGray, marginTop: 4, lineHeight: 1.6 }}>ข้อมูลการเรียนยังอยู่ในเครื่องนี้ — เข้าสู่ระบบบัญชีเดิมเพื่อเรียนต่อ (ถ้ามีคนอื่นเข้าสู่ระบบบนเครื่องนี้ ข้อมูลเดิมจะถูกล้างก่อน)</div>
+      <LineLoginButton user={user} setUser={setUser} label="เข้าสู่ระบบด้วย LINE อีกครั้ง"/>
     </div>
   );
 }
@@ -2417,6 +2504,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
       );
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+      <AccountCard user={user} setUser={setUser}/>
       {/* สิทธิ์ปลดทุกบทจากแคมเปญวันเดียว — บอกนักเรียนชัดๆ ว่าเรียนครบ+สอบผ่านแล้วได้ใบประกาศเลย */}
       {load("camp_course_unlock", false) && (
         <div style={{ width: "100%", marginBottom: 12, padding: "12px 14px", background: `${B.gold}15`, border: `1.5px dashed ${B.gold}`, borderRadius: 12, fontSize: 13, lineHeight: 1.6, color: B.black }}>
@@ -2453,7 +2541,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
       {/* Mini cert per module */}
       {progress.done.filter(id => id <= 6).length > 0 && progress.done.filter(id => id <= 6).length < 7 && <button onClick={() => go("minicert")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 8, border: `1px solid ${B.ltGray}`, fontSize: 13 }}>ดูใบ Mini Certificate →</button>}
       <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
-      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง")) { resetLearner(); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+      <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?\n\nข้อมูลการเรียนจะถูกล้าง และออกจากระบบบัญชีที่เข้าไว้")) startOverLearner(); }} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 12, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
     </div>
     {progress.done.length >= 4 && <NewsSection openBlog={openBlog} goAll={() => go("blog")} title="บทความ CPR เพิ่มเติม" subtitle={pct === 100 ? "ทักษะ CPR เสื่อมใน 3-6 เดือน — แวะอ่านทบทวนได้ตลอด" : "เก่งมาก! ใกล้จบแล้ว — มีบทความทบทวนให้อ่านเพิ่ม"} cprOnly={true} max={5}/>}
   </div>);
@@ -2632,6 +2720,7 @@ function Certificate({ user, go }) {
     {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
     {/* ใบประกาศออนไลน์กลาง JIA (ตรวจสอบได้ที่ Hub) — เพิ่มจากใบของเว็บนี้ ไม่แทน */}
     <HubCertificateCard/>
+    <div style={{ marginTop: 16 }}><AccountCard user={user}/></div>
     {/* บัตรนักเรียน JIA กลาง (class.jiacpr.com) — มีเมื่อล็อกอิน LINE/อีเมลจริงแล้วเท่านั้น ใบเก่ายังใช้ได้ปกติ */}
     {user?.hub?.cardNo && <a href="https://class.jiacpr.com/card" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: B.gray, borderRadius: 12, padding: "12px 14px", marginTop: 12, textDecoration: "none", color: B.black }}>
       <span style={{ fontSize: 12.5 }}>บัตรนักเรียน JIA: <strong style={{ fontFamily: "monospace" }}>{user.hub.cardNo}</strong>{user.hub.verifyLevel === "instructor" ? " · ยืนยันตัวตนแล้ว ✓" : ""}</span>
@@ -2682,7 +2771,7 @@ function Certificate({ user, go }) {
     <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
-    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) { resetLearner(); window.location.reload(); }}} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
+    <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) startOverLearner(); }} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
   </div></div>);
 }
 
@@ -4924,7 +5013,7 @@ export default function App() {
   // auth_user_id) → เข้าสู่ระบบ LINE ให้เงียบ ๆ (silent: ไม่บังคับ redirect ถ้ายังไม่ได้ล็อกอิน LIFF)
   useEffect(() => {
     const u = load("user", null);
-    if (!u?.phone || u?.auth_user_id || load("line_login_pending", null)) return;
+    if (!u?.phone || u?.auth_user_id || load("line_login_pending", null) || load("signed_out_account", null)) return;
     (async () => {
       try {
         const liff = await loadLiff();
