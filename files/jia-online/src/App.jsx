@@ -4900,29 +4900,32 @@ export default function App() {
   // ชนะเกม CPR HERO → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (funnel ดึงคนมาเรียนจริง)
   // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) และยกเว้นนักเรียน pre-course ที่จ่ายค่า on-site แล้ว
   // (กันเข้าใจผิดเรื่องส่วนลด/เงินคืน — กฎเดียวกับหน้าใบประกาศ/สมัคร)
-  const issueGameVoucher = useCallback(() => {
+  // เฉพาะช่วงแคมเปญเท่านั้น — นอกช่วงไม่ออกคูปอง (เกมยังเล่นได้ปกติ แค่ไม่มีรางวัลคูปอง) — sync ล้วน
+  // ให้ GamePage เรียกเช็คได้ทันทีตอนจบเคส โดยไม่ต้องรอ round-trip ไปเซิร์ฟเวอร์ก่อน
+  const gameVoucherEligible = useCallback(() => !isPreCourseStudent() && !!activeGameVoucherCampaign(), []);
+  // ออกคูปองจริง (async) — ต้องมีเบอร์โทรเพราะ RPC ฝั่ง Hub (public.issue_campaign_coupon) ใช้เบอร์เป็นคีย์
+  // จำกัดสิทธิ์ (1 เบอร์ = 1 คูปองต่อแคมเปญ กันคนกดรีเฟรชขอโค้ดใหม่ไม่จำกัด — ตั้งแต่ Hub ปิด anon insert
+  // ตรงบน promo_codes โค้ดที่สุ่มฝั่ง client เองแล้วยัดเข้าตารางแบบเดิมใช้ไม่ได้อีกต่อไป)
+  const issueGameVoucher = useCallback(async (phone) => {
     if (isPreCourseStudent()) return null;
-    // เฉพาะช่วงแคมเปญเท่านั้น — นอกช่วงไม่ออกคูปอง (เกมยังเล่นได้ปกติ แค่ไม่มีรางวัลคูปอง)
     const camp = activeGameVoucherCampaign();
     if (!camp) return null;
     const note = camp.start === camp.end
       ? `ใช้ได้เฉพาะวันที่ ${thaiShortDate(camp.end)} วันเดียว · ${camp.event}`
       : `ใช้เป็นส่วนลดภายใน ${thaiShortDate(camp.end)} · เฉพาะ${camp.event}`;
-    // รียูสคูปองเดิมเฉพาะใบที่ยังไม่หมดอายุ (ไม่มีวันหมดอายุ = คูปองสมัคร ใช้ได้ตลอด)
+    // รียูสคูปองเดิมเฉพาะใบที่ยังไม่หมดอายุ (ไม่มีวันหมดอายุ = คูปองสมัคร ใช้ได้ตลอด) — ไม่ต้องขอเบอร์ซ้ำ
     // ใบจากแคมเปญก่อนที่หมดอายุแล้ว → ออกใบใหม่ของแคมเปญนี้แทน
     const existing = load("coupon", null);
     const existingExp = load("coupon_expires", null);
     if (existing && (!existingExp || todayISOTH() <= existingExp)) return { code: existing, note };
-    const c = genCoupon();
-    save("coupon", c);
+    const cleanPhone = (phone || "").replace(/\D/g, "");
+    if (cleanPhone.length < 9) return null;
+    const res = await supaRpc("issue_campaign_coupon", { p_phone: cleanPhone, p_campaign: camp.key || "" });
+    if (!res || !res.issued || !res.code) return null;
+    save("coupon", res.code);
     save("coupon_expires", camp.end); // เก็บวันหมดอายุไว้ (หน้าจอง/เซลล์ใช้อ้างอิงได้)
-    // ใส่วันหมดอายุใน staff_name ให้เซลล์เห็นในระบบ (promo_codes ไม่มีคอลัมน์ expires_at)
-    // ⚠️ TODO: Hub ปิด anon insert บน promo_codes แล้ว (เหลือแค่ public.issue_online_coupon ซึ่งกำหนด
-    // สิทธิ์จาก "เรียนจบคอร์สออนไลน์แล้ว" — ไม่ตรงกับกติกาคูปองแคมเปญเกมนี้ที่ให้ตามการชนะเกม) การเขียนแถวนี้จึง
-    // ใช้ไม่ได้แล้ว โค้ดที่โชว์บนจอจะไม่ถูกบันทึกจริง ต้องตัดสินใจ: ออก RPC ใหม่สำหรับคูปองแคมเปญโดยเฉพาะ หรือ
-    // เปลี่ยนกติกา issue_online_coupon ให้ครอบคลุมกรณีนี้ด้วย
-    try { supaRest("promo_codes", "POST", { code: c, type: "online", discount: 100, staff_name: `game·exp ${camp.end}` }); } catch (e) {}
-    return { code: c, note };
+    save("game_voucher_phone", cleanPhone); // จำเบอร์ไว้ กันไม่ต้องถามซ้ำตอนเล่นเคสต่อไปในแคมเปญเดียวกัน
+    return { code: res.code, note };
   }, []);
   // เข้าคอร์ส: ขึ้นกับตัวแปรด่าน (A/B) — before-course เด้งสมัครก่อน, soft = แอด LINE แบบข้ามได้, after-lesson-1 = เข้าเลย (ด่านไปโผล่หลังจบบท 1)
   const enterCourse = useCallback(() => {
@@ -5059,7 +5062,7 @@ export default function App() {
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
-          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")} autoRandom={gameAutoRandom}/>;
+          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} voucherEligible={gameVoucherEligible} voucherPhone={load("game_voucher_phone", null)} onGoBooking={() => go("booking")} autoRandom={gameAutoRandom}/>;
           default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog} goGameRandom={goGameRandom}/>;
         }
       })()}
