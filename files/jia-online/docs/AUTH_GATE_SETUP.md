@@ -110,3 +110,73 @@ payload = `before-course` | `after-lesson-1` | `soft` (ค่าเริ่ม�
 - ข้ามเว็บ: ล็อกอิน LINE ที่นี่ → เปิด `https://class.jiacpr.com/account` → กด LINE → เห็นเป็นบัญชีเดียวกัน
   (แผงคอร์สออนไลน์ใน `/account` แสดงสถานะ/คูปองตรงกัน)
 - ลูกค้าที่เคยกรอกชื่อ-เบอร์ไว้ก่อน (ทางสำรอง) แล้วมาล็อกอิน LINE ทีหลัง → `customers` ยังมีแถวเดียว (ไม่สร้างซ้ำ)
+
+## บัตรนักเรียนกลาง + ยืนยันตัวตนด้วยอีเมล (สำรอง) — ส่วนหนึ่งของ unified identity ทั้งเครือ JIA — 23 กันยายน 2026
+
+เว็บนี้อยู่ Supabase โปรเจกต์เดียวกับ Hub (`class.jiacpr.com`, `tpoiyykbgsgnrdwzgzvn`) จึงเรียก RPC
+`public.jia_identity` ของ Hub ตรงจากเบราว์เซอร์ได้เลยด้วย Supabase session ของเว็บนี้เอง — ไม่ต้องผ่าน
+`/sso` หรือบัตรผ่าน (JWT) แบบที่แอปข้ามโปรเจกต์ (bls-hcp-app/acls-emr) ต้องใช้ รายละเอียดฝั่ง Hub อยู่ที่
+repo `jia-learning-hub`, `docs/unified-identity.md`
+
+**เพิ่มในนี้ (ดู `syncHubIdentity`/`pickHub` ใน `src/App.jsx`):**
+- หลัง `signInWithLine()` แลก session สำเร็จ (ไม่แก้ mechanism เดิม) → เรียก `jia_identity('me')` แล้ว
+  `saveProfile` อัตโนมัติด้วยชื่อ-เบอร์ที่มีอยู่แล้วถ้ายังไม่มีโปรไฟล์กลาง (best-effort — พังไม่กระทบ login เดิม)
+  ผลลัพธ์ (`cardNo`/`nameTh`/`verifyLevel`) เก็บไว้ที่ `user.hub` แล้วโชว์เป็นลิงก์ "บัตรนักเรียน JIA" ที่หน้า
+  `Certificate` (ลิงก์ไป `class.jiacpr.com/card` — เอาไว้ให้ครูสแกน/ยืนยันตัวตนจริงที่คลาสได้)
+- ปุ่ม **"เข้าสู่ระบบด้วย LINE (ยืนยันตัวตนถาวร)"** จริง (เรียก `signInWithLine` ตัวเดิม ไม่ใช่แค่ "เพิ่ม OA
+  เป็นเพื่อน") ย้ายมาอยู่ที่หน้า `LineAddPrompt` variant `post-register` ด้วย — เดิมปุ่มนี้มีอยู่แค่ที่
+  `SignupGate` ซึ่งใน gate variant `soft` (**ค่า default ปัจจุบัน**) ไม่ถูกเปิดใช้เลย (`gateOn` ตรวจ
+  `variant !== "soft"`) ทำให้ผู้เรียนส่วนใหญ่ (ที่สมัครผ่าน `Register`/`Claim` ตอนเรียนจบ ไม่ใช่ก่อนเรียน)
+  ไม่มีทางเจอปุ่มล็อกอิน LINE จริงเลยมาก่อน — `LineAddPrompt` เป็นจุดเดียวที่ทุก entry point (SignupGate/
+  Register/Claim) ลงเอยเหมือนกันหมด จึงเป็นที่เดียวที่การันตีว่าทุกคนเจอ
+- **อีเมล (ทางเลือกสำรอง — LINE เป็นหลัก):** `EmailIdentityCard` component เดียวกันในหน้านั้น — OTP อีเมล
+  ตรงผ่าน `supabase.auth.signInWithOtp/verifyOtp` ของโปรเจกต์นี้เอง (ไม่ต้องมี server proxy เพิ่ม — เว็บนี้
+  เก็บ session ใน localStorage อยู่แล้วตามความเสี่ยงที่ยอมรับไว้ด้านบน) แล้ว `jia_online_account
+  ('attachLocal')` ผูกเข้ากับแถว `customers` ที่มีอยู่แล้ว (ต้องมี `customer_id`+`phone` ตรงกันเท่านั้น — ไม่
+  สร้างลูกค้าใหม่ ไม่แตะ `auth-line-link`/coupon/online_students เลย) จึงปลอดภัยกับทุก entry point โดยไม่
+  ต้องแก้ตรรกะสร้างลูกค้าที่มีความเสี่ยงสูงกว่า (ยังไม่รองรับ "สมัครใหม่ด้วยอีเมลอย่างเดียวตั้งแต่ต้น" — ต้อง
+  กรอกชื่อ-เบอร์ผ่านทางใดทางหนึ่งก่อนเสมอ แล้วค่อยยืนยันด้วยอีเมลทีหลังได้)
+
+**ไม่ได้แก้ในรอบนี้ (ตั้งใจ เพื่อจำกัดความเสี่ยง):** ชื่อบนใบประกาศยังอ่านจาก `user.name` (local) เหมือนเดิม
+ทุกไบต์ — การรวมใบประกาศ/ชื่อที่ล็อกแล้วให้ตรงกับ Hub เป็นงานเฟสถัดไป (`person_certificates`, ดู
+`jia-learning-hub` roadmap) ที่ต้องระมัดระวังเรื่อง evidence hash ของใบที่ออกไปแล้วเป็นพิเศษ
+
+**Deploy:** ไม่มีอะไรต้อง apply/deploy เพิ่มฝั่ง Hub — `jia_identity`/`jia_online_account` deploy อยู่แล้ว
+เว็บนี้แค่เรียกตรง build ปกติก็พร้อมใช้
+
+## ผลสอบปลายภาคเข้า "ผลสอบกลาง" ของ Hub — 24 กันยายน 2026
+
+`grade-quiz` ส่งผลข้อสอบปลายภาค (module 7) **ทุกครั้ง ทั้งผ่านและไม่ผ่าน** เข้า `learning_hub.exam_results` ของ Hub
+ผ่าน `public.jia_results('record')` ด้วย service role ของฟังก์ชันเอง (Hub อยู่โปรเจกต์เดียวกัน ไม่มี secret เพิ่ม):
+`{sourceClient:'cpr-online', userId, courseId:'cpr', kind:'post', correct, total, attemptRef:'online-exam-<id ของ online_exam_attempts>'}`
+- Hub คิดคะแนน/ผ่าน-ไม่ผ่านเองจาก correct/total ตามเกณฑ์คอร์ส `cpr` (80%) — ส่งซ้ำ ref เดิมได้ผลเดิม
+- ผลที่ Hub บันทึกยังไม่นับเป็น "ผ่านออนไลน์" ของรอบฝึกที่ Hub จนกว่าเจ้าหน้าที่รับรองใน `class.jiacpr.com/operations/learning`
+  หรือเจ้าของหลักสูตรเปิดรับรองอัตโนมัติของคอร์ส `cpr` (ดู `docs/unified-identity.md` หัวข้อ 6 ใน repo `jia-learning-hub`)
+- Hub ล่ม/ยังไม่ apply migration/ปฏิเสธ → แค่ `console.warn` ในฟังก์ชัน **ผู้เรียนยังได้ผลสอบตามปกติ**
+- บทเรียน 1–6 ไม่ถูกส่ง (เป็นแบบฝึก ไม่ใช่ผลสอบที่ใช้ตัดสิน)
+
+**ลำดับ deploy:** apply `20261016100000_exam_results.sql` ของ Hub + เพิ่มแถว `sso_clients` `cpr-online` ที่มี
+`allowed_courses = array['cpr']` ก่อน แล้วค่อย deploy `grade-quiz` (ถ้า deploy ก่อน ก็ไม่พัง แค่ผลช่วงนั้นไม่เข้า Hub
+— เติมย้อนหลังได้ด้วย SQL ด้านล่าง)
+
+**เติมผลเก่าย้อนหลัง** (ครั้งเดียว หลัง Hub พร้อม — `online_exam_attempts` เก็บแค่ score แต่ข้อสอบปลายภาค 10 ข้อพอดี
+จึงได้ `correct = score/10` ตรงเป๊ะ; ref เดียวกับที่ฟังก์ชันใช้ รันซ้ำได้ไม่ซ้ำแถว):
+```sql
+do $$declare a record;begin
+ perform set_config('request.jwt.claim.role','service_role',true);
+ for a in select id,auth_user_id,score,created_at from public.online_exam_attempts where module_id=7 order by id loop
+  perform public.jia_results('record',jsonb_build_object('sourceClient','cpr-online','userId',a.auth_user_id,'courseId','cpr',
+   'kind','post','correct',a.score/10,'total',10,'attemptRef','online-exam-'||a.id,'finishedAt',a.created_at));
+ end loop;
+end$$;
+```
+
+## ใบประกาศออนไลน์กลาง JIA บนหน้าใบประกาศ — 24 กันยายน 2026
+
+หน้า `Certificate` แสดงการ์ด "ใบประกาศออนไลน์กลาง JIA" **เพิ่ม** จากใบของเว็บนี้ (ใบเดิมไม่เปลี่ยน ตามที่ตัดสินใจ) — `HubCertificateCard`
+ใน `src/App.jsx` เรียก `public.jia_person_certificates('mine')` ด้วย Supabase session ของเว็บนี้ (Hub อยู่โปรเจกต์เดียวกัน):
+- มีใบแล้ว → เลขที่ใบ `JIA-CPR-ONL-…` + วันหมดอายุ + ลิงก์ตรวจสอบ `https://class.jiacpr.com/portal?verify=<token>` (เปิดใบ/QR ที่ Hub)
+- ผลสอบปลายภาคผ่านและได้รับรองแล้วแต่ยังไม่มีใบ (เช่น บัตรนักเรียนยังไม่มีชื่อตอนนั้น) → ปุ่ม "ขอรับใบประกาศกลาง" (`claim`)
+- ยังไม่ login / ยังไม่มีผลที่รับรอง / Hub ยังไม่ apply migration → ไม่แสดงอะไร
+ใบกลางออกเมื่อผลสอบได้รับรอง (อัตโนมัติถ้าเปิด `auto_accept` ของคอร์ส `cpr` ที่ Hub หรือเจ้าหน้าที่กดรับรอง) — ดู `docs/unified-identity.md`
+หัวข้อ 7 ใน repo `jia-learning-hub`
