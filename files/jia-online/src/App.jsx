@@ -2460,6 +2460,57 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
 }
 
 // ==================== CERTIFICATE ====================
+// ใบประกาศออนไลน์กลางของ JIA (class.jiacpr.com — learning_hub.person_certificates) — ออกให้เมื่อผลสอบปลายภาค
+// ที่ grade-quiz ส่งเข้าระบบกลางผ่านเกณฑ์และได้รับรองแล้ว; เป็นใบ "เพิ่ม" ที่ตรวจสอบได้ด้วยลิงก์/QR ของ Hub ส่วนใบของเว็บนี้
+// ด้านบนยังเหมือนเดิมทุกอย่าง เรียก RPC ตรงด้วย Supabase session ของเว็บนี้ (โปรเจกต์เดียวกับ Hub) — ไม่มี session
+// (ยังไม่ login) หรือ Hub ยังไม่พร้อม ก็ไม่แสดงอะไร
+const HUB_URL = "https://class.jiacpr.com";
+const HUB_COURSE_ID = "cpr";
+function HubCertificateCard() {
+  const [state, setState] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = async () => {
+    try {
+      const supa = await getSupabase();
+      const { data: { session } } = await supa.auth.getSession();
+      if (!session) { setState(null); return; }
+      const { data, error } = await supa.rpc("jia_person_certificates", { action: "mine", payload: {} });
+      if (error || !data) { setState(null); return; }
+      setState({
+        cert: (data.certificates || []).find((c) => c.courseId === HUB_COURSE_ID && c.status === "issued") || null,
+        claimable: (data.claimable || []).some((c) => c.courseId === HUB_COURSE_ID),
+      });
+    } catch (e) { setState(null); }
+  };
+  useEffect(() => { load(); }, []);
+  if (!state || (!state.cert && !state.claimable)) return null;
+  const claim = async () => {
+    setBusy(true); setErr("");
+    try {
+      const supa = await getSupabase();
+      const { error } = await supa.rpc("jia_person_certificates", { action: "claim", payload: { courseId: HUB_COURSE_ID } });
+      if (error) setErr(error.message || "ขอรับใบประกาศไม่สำเร็จ");
+      await load();
+    } catch (e) { setErr("ขอรับใบประกาศไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setBusy(false); }
+  };
+  const box = { display: "block", background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 12, color: B.black, textDecoration: "none", fontSize: 12.5, lineHeight: 1.5 };
+  if (state.cert) {
+    const c = state.cert;
+    const exp = c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "";
+    return <a href={HUB_URL + c.verifyPath} target="_blank" rel="noreferrer" style={box} data-testid="hub-certificate">
+      <strong>ใบประกาศออนไลน์กลาง JIA</strong> · เลขที่ <span style={{ fontFamily: "monospace" }}>{c.number}</span>{exp ? ` · หมดอายุ ${exp}` : ""}
+      <br/><span style={{ fontWeight: 700 }}>ตรวจสอบ / เปิดใบที่ class.jiacpr.com ↗</span>
+    </a>;
+  }
+  return <div style={box} data-testid="hub-certificate-claim">
+    <strong>ผ่านข้อสอบปลายภาคแล้ว</strong> — รับใบประกาศออนไลน์กลางของ JIA (ตรวจสอบได้ด้วย QR) ชื่อบนใบมาจากบัตรนักเรียน JIA ของคุณ
+    <div style={{ marginTop: 8 }}><button onClick={claim} disabled={busy} style={{ background: B.green, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 700, cursor: "pointer" }}>{busy ? "กำลังขอรับ…" : "ขอรับใบประกาศกลาง"}</button></div>
+    {err && <div style={{ color: "#b3261e", marginTop: 6 }}>{err}</div>}
+  </div>;
+}
+
 function Certificate({ user, go }) {
   const d = new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   // นักเรียน pre-course จ่ายค่าคอร์ส on-site เต็มราคาแล้ว — ใบประกาศต้องไม่โชว์ "ส่วนลด ฿100"
@@ -2579,6 +2630,8 @@ function Certificate({ user, go }) {
     </div>
     {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — ขอบคุณผู้มอบคอร์สนี้ + ให้ช่องทางติดต่อกลับ (ไม่แตะรูปใบประกาศ) */}
     {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
+    {/* ใบประกาศออนไลน์กลาง JIA (ตรวจสอบได้ที่ Hub) — เพิ่มจากใบของเว็บนี้ ไม่แทน */}
+    <HubCertificateCard/>
     {/* บัตรนักเรียน JIA กลาง (class.jiacpr.com) — มีเมื่อล็อกอิน LINE/อีเมลจริงแล้วเท่านั้น ใบเก่ายังใช้ได้ปกติ */}
     {user?.hub?.cardNo && <a href="https://class.jiacpr.com/card" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: B.gray, borderRadius: 12, padding: "12px 14px", marginTop: 12, textDecoration: "none", color: B.black }}>
       <span style={{ fontSize: 12.5 }}>บัตรนักเรียน JIA: <strong style={{ fontFamily: "monospace" }}>{user.hub.cardNo}</strong>{user.hub.verifyLevel === "instructor" ? " · ยืนยันตัวตนแล้ว ✓" : ""}</span>

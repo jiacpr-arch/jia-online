@@ -170,3 +170,13 @@ do $$declare a record;begin
  end loop;
 end$$;
 ```
+
+## ใบประกาศออนไลน์กลาง JIA บนหน้าใบประกาศ — 24 กันยายน 2026
+
+หน้า `Certificate` แสดงการ์ด "ใบประกาศออนไลน์กลาง JIA" **เพิ่ม** จากใบของเว็บนี้ (ใบเดิมไม่เปลี่ยน ตามที่ตัดสินใจ) — `HubCertificateCard`
+ใน `src/App.jsx` เรียก `public.jia_person_certificates('mine')` ด้วย Supabase session ของเว็บนี้ (Hub อยู่โปรเจกต์เดียวกัน):
+- มีใบแล้ว → เลขที่ใบ `JIA-CPR-ONL-…` + วันหมดอายุ + ลิงก์ตรวจสอบ `https://class.jiacpr.com/portal?verify=<token>` (เปิดใบ/QR ที่ Hub)
+- ผลสอบปลายภาคผ่านและได้รับรองแล้วแต่ยังไม่มีใบ (เช่น บัตรนักเรียนยังไม่มีชื่อตอนนั้น) → ปุ่ม "ขอรับใบประกาศกลาง" (`claim`)
+- ยังไม่ login / ยังไม่มีผลที่รับรอง / Hub ยังไม่ apply migration → ไม่แสดงอะไร
+ใบกลางออกเมื่อผลสอบได้รับรอง (อัตโนมัติถ้าเปิด `auto_accept` ของคอร์ส `cpr` ที่ Hub หรือเจ้าหน้าที่กดรับรอง) — ดู `docs/unified-identity.md`
+หัวข้อ 7 ใน repo `jia-learning-hub`
