@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#C8102E" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<title>คู่มือ CPR ฉุกเฉิน | JIA TRAINER CENTER</title>
+<!-- หน้านี้ต้องใช้ได้แม้ออฟไลน์ (service worker precache ไว้) — ห้ามพึ่งไฟล์/ฟอนต์ภายนอก -->
+<style>
+  :root { --red: #C8102E; --ink: #1A1A1A; --muted: #555; --cream: #FFF8F0; --card: #FFFFFF; --line: #E8E8E8; --green: #16A34A; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Noto Sans Thai", "Sukhumvit Set", "Thonburi", -apple-system, "Segoe UI", sans-serif; background: var(--cream); color: var(--ink); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  header { background: var(--red); color: #fff; padding: 16px; position: sticky; top: 0; z-index: 5; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  header .wrap { display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 18px; flex: 1; }
+  header a.home { color: #fff; font-size: 13px; opacity: .9; text-decoration: underline; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 0 16px; }
+  .call { display: block; margin: 16px 0 10px; background: var(--ink); color: #fff; text-align: center; border-radius: 16px; padding: 18px; font-size: 22px; font-weight: 800; text-decoration: none; }
+  .call small { display: block; font-size: 13px; font-weight: 500; opacity: .8; }
+  .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 6px 0 12px; }
+  .tabs button { flex: 0 0 auto; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; color: var(--ink); }
+  .tabs button[aria-selected="true"] { background: var(--red); border-color: var(--red); color: #fff; }
+  section { display: none; }
+  section.on { display: block; }
+  .card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+  h2 { font-size: 18px; margin-bottom: 8px; }
+  ol { padding-left: 0; list-style: none; counter-reset: s; }
+  ol li { counter-increment: s; position: relative; padding: 10px 0 10px 44px; border-top: 1px solid var(--line); font-size: 15.5px; }
+  ol li:first-child { border-top: none; }
+  ol li::before { content: counter(s); position: absolute; left: 0; top: 10px; width: 32px; height: 32px; border-radius: 50%; background: var(--red); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  b { font-weight: 800; }
+  .note { font-size: 13px; color: var(--muted); }
+  .metro { text-align: center; }
+  .beat { width: 140px; height: 140px; border-radius: 50%; margin: 10px auto; background: #fde2e6; display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: 800; color: var(--red); transition: transform .06s ease-out, background .06s; user-select: none; }
+  .beat.pulse { transform: scale(1.12); background: var(--red); color: #fff; }
+  .btn { display: block; width: 100%; border: none; border-radius: 12px; padding: 14px; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer; background: var(--red); color: #fff; }
+  .btn.alt { background: #fff; color: var(--ink); border: 1px solid var(--line); margin-top: 8px; }
+  .offline { display: none; background: #FEF3C7; color: #92400E; font-size: 13px; padding: 8px 12px; border-radius: 10px; margin-top: 12px; }
+  footer { font-size: 12px; color: var(--muted); text-align: center; padding: 20px 16px 40px; }
+  footer a { color: var(--red); font-weight: 700; }
+</style>
+</head>
+<body>
+<header><div class="wrap"><h1>🚨 คู่มือ CPR ฉุกเฉิน</h1><a class="home" href="/">กลับหน้าคอร์ส</a></div></header>
+<main class="wrap">
+  <div class="offline" id="offline">กำลังออฟไลน์ — คู่มือนี้ยังใช้ได้ตามปกติ (โทร 1669 ได้ถ้ามีสัญญาณโทรศัพท์)</div>
+  <a class="call" href="tel:1669">📞 โทร 1669<small>สายด่วนการแพทย์ฉุกเฉิน — เปิดลำโพงแล้วทำตามคำแนะนำ</small></a>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="adult">CPR ผู้ใหญ่</button>
+    <button role="tab" aria-selected="false" data-tab="child">เด็ก / ทารก</button>
+    <button role="tab" aria-selected="false" data-tab="aed">ใช้ AED</button>
+    <button role="tab" aria-selected="false" data-tab="choke">สำลัก</button>
+  </div>
+
+  <section id="adult" class="on">
+    <div class="card">
+      <h2>ผู้ใหญ่หมดสติ ไม่หายใจ</h2>
+      <ol>
+        <li><b>ดูความปลอดภัย</b> รอบตัวก่อนเข้าไปช่วย</li>
+        <li><b>ปลุกเรียก ตบไหล่</b> ดูการหายใจไม่เกิน 10 วินาที — ไม่หายใจ หรือหายใจเฮือก ๆ = เริ่ม CPR</li>
+        <li><b>โทร 1669</b> (เปิดลำโพง) และให้คนอื่นไปหา <b>เครื่อง AED</b></li>
+        <li><b>กดหน้าอก</b> วางส้นมือกลางหน้าอก แขนตรง กดลึก <b>5–6 ซม.</b> เร็ว <b>100–120 ครั้ง/นาที</b> ปล่อยให้หน้าอกคืนตัวสุดทุกครั้ง</li>
+        <li>ถ้าเป่าปากได้: <b>กด 30 ครั้ง เป่า 2 ครั้ง</b> — ไม่มั่นใจ <b>กดอย่างเดียวต่อเนื่อง</b> ก็ช่วยชีวิตได้</li>
+        <li>AED มาถึง → เปิดเครื่องแล้วทำตามเสียงทันที (ดูแท็บ “ใช้ AED”)</li>
+        <li>ทำต่อจนผู้ป่วยตื่น/หายใจปกติ หรือเจ้าหน้าที่มาถึง — มีคนช่วย <b>สลับคนกดทุก 2 นาที</b></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="child">
+    <div class="card">
+      <h2>เด็ก (1 ปี – วัยรุ่น)</h2>
+      <ol>
+        <li>ปลุกเรียก ดูการหายใจ — ไม่หายใจ ให้ตะโกนขอความช่วยเหลือ ให้คนโทร <b>1669</b> และหา AED</li>
+        <li>กดหน้าอกด้วยมือเดียวหรือสองมือ ลึกประมาณ <b>5 ซม.</b> (1/3 ของความหนาหน้าอก) เร็ว <b>100–120 ครั้ง/นาที</b></li>
+        <li>กด 30 ครั้ง เป่า 2 ครั้ง</li>
+        <li>อยู่คนเดียวและไม่มีโทรศัพท์ติดตัว: ทำ CPR ประมาณ <b>2 นาที</b> ก่อน แล้วค่อยไปโทร 1669</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h2>ทารก (ต่ำกว่า 1 ปี)</h2>
+      <ol>
+        <li>ตบฝ่าเท้าเรียก ดูการหายใจ — ไม่หายใจ เริ่ม CPR และให้คนโทร <b>1669</b></li>
+        <li>ใช้ <b>2 นิ้ว</b> (หรือ 2 นิ้วโป้งโอบรอบอก) กดกลางหน้าอกใต้แนวราวนม ลึกประมาณ <b>4 ซม.</b> เร็ว 100–120 ครั้ง/นาที</li>
+        <li>กด 30 ครั้ง เป่า 2 ครั้ง (ครอบทั้งปากและจมูก เป่าเบา ๆ พอให้อกขยับ)</li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="aed">
+    <div class="card">
+      <h2>ใช้เครื่อง AED</h2>
+      <ol>
+        <li><b>เปิดเครื่อง</b> แล้วทำตามเสียงพูดของเครื่องทุกขั้นตอน</li>
+        <li>เปิดเสื้อ เช็ดหน้าอกให้แห้ง <b>ติดแผ่น</b> ตามรูปบนแผ่น (ใต้ไหปลาร้าขวา / ใต้รักแร้ซ้าย)</li>
+        <li>ตอนเครื่อง <b>วิเคราะห์</b> และ <b>ช็อก</b>: ห้ามใครแตะตัวผู้ป่วย — ตะโกน “ถอยออก!”</li>
+        <li>ช็อกแล้ว (หรือเครื่องบอกไม่ต้องช็อก) → <b>กดหน้าอกต่อทันที</b> เครื่องจะวิเคราะห์ใหม่ทุก 2 นาที</li>
+      </ol>
+      <p class="note">เด็กเล็ก/ทารก: ใช้แผ่นเด็กถ้ามี ถ้าไม่มีใช้แผ่นผู้ใหญ่ได้ (วางหน้าอก-หลัง ไม่ให้แผ่นชนกัน)</p>
+    </div>
+  </section>
+
+  <section id="choke">
+    <div class="card">
+      <h2>ผู้ใหญ่ / เด็กโต สำลัก</h2>
+      <ol>
+        <li>ถามว่า “สำลักใช่ไหม?” — ถ้า <b>ยังไอได้</b> ให้ไอแรง ๆ ต่อไป อย่าตบหลัง</li>
+        <li><b>พูด/ไอ/หายใจไม่ได้</b>: ยืนด้านหลัง กำมือวางเหนือสะดือ อีกมือกุม แล้ว <b>กระตุกเข้าและขึ้นแรง ๆ</b> ซ้ำจนของหลุด</li>
+        <li>หมดสติ: วางลงพื้น โทร 1669 เริ่ม <b>CPR</b> — ก่อนเป่าปากให้ <b>เปิดปากดู เขี่ยออกเฉพาะของที่เห็นชัด</b> (ห้ามล้วงกวาดคอ)</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h2>ทารกสำลัก</h2>
+      <ol>
+        <li>คว่ำทารกบนแขน ศีรษะต่ำกว่าลำตัว <b>ตบหลัง 5 ครั้ง</b> ระหว่างสะบัก</li>
+        <li>พลิกหงาย <b>กดหน้าอก 5 ครั้ง</b> ด้วย 2 นิ้ว (ตำแหน่งเดียวกับ CPR ทารก)</li>
+        <li>ทำสลับจนของหลุด — <b>ห้ามกดท้อง</b>ทารก · หมดสติ = เริ่ม CPR ทารกและโทร 1669</li>
+      </ol>
+    </div>
+  </section>
+
+  <div class="card metro">
+    <h2>จังหวะกดหน้าอก 110 ครั้ง/นาที</h2>
+    <p class="note">กดตามจังหวะไฟกะพริบ/เสียง — วางโทรศัพท์ข้าง ๆ แล้วกดต่อเนื่อง</p>
+    <div class="beat" id="beat">110</div>
+    <button class="btn" id="metroBtn">▶ เริ่มจังหวะ</button>
+    <p class="note" id="count" style="margin-top:8px"></p>
+  </div>
+
+  <p class="note" style="text-align:center">คู่มือนี้ช่วยเตือนความจำในเหตุฉุกเฉิน ไม่ใช่สิ่งทดแทนการฝึกอบรม — เรียนคอร์สเต็มและฝึกกับหุ่นจริงจะช่วยได้อย่างมั่นใจ</p>
+</main>
+<footer>JIA TRAINER CENTER · <a href="/">เรียน CPR &amp; AED ออนไลน์ที่ cpr.morroo.com</a> · LINE @jiacpr</footer>
+<script>
+  // แท็บ
+  document.querySelectorAll('.tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.tabs button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+      document.querySelectorAll('section').forEach(function (s) { s.classList.toggle('on', s.id === b.dataset.tab); });
+    });
+  });
+  // ออฟไลน์
+  function net() { document.getElementById('offline').style.display = navigator.onLine ? 'none' : 'block'; }
+  window.addEventListener('online', net); window.addEventListener('offline', net); net();
+  // เมโทรนอม 110 bpm (WebAudio + สั่น + ไฟกะพริบ) — นับรอบ 30 ครั้ง ช่วยจำจังหวะ 30:2
+  var ctx = null, timer = null, n = 0, wake = null;
+  var beat = document.getElementById('beat'), btn = document.getElementById('metroBtn'), count = document.getElementById('count');
+  function tick() {
+    n++;
+    beat.classList.add('pulse'); setTimeout(function () { beat.classList.remove('pulse'); }, 120);
+    beat.textContent = String(((n - 1) % 30) + 1);
+    count.textContent = 'รอบที่ ' + (Math.floor((n - 1) / 30) + 1) + ' · ครบ 30 ครั้ง = เป่า 2 ครั้ง (หรือกดต่อถ้ากดอย่างเดียว)';
+    try {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = ((n - 1) % 30) === 0 ? 1320 : 880; g.gain.value = 0.25;
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.05);
+    } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) {}
+  }
+  btn.addEventListener('click', function () {
+    if (timer) {
+      clearInterval(timer); timer = null; btn.textContent = '▶ เริ่มจังหวะ'; beat.textContent = '110';
+      try { wake && wake.release(); } catch (e) {} wake = null;
+      return;
+    }
+    try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume && ctx.resume(); } catch (e) {}
+    try { navigator.wakeLock && navigator.wakeLock.request('screen').then(function (w) { wake = w; }).catch(function () {}); } catch (e) {}
+    n = 0; tick(); timer = setInterval(tick, 60000 / 110); btn.textContent = '■ หยุด';
+  });
+  if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(function () {}); }
+</script>
+</body>
+</html>

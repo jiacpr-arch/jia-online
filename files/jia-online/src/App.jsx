@@ -269,6 +269,33 @@ function BlogDetail({ slug, goBack, openBlog }) {
 }
 
 // ==================== LANDING ====================
+// ==================== คู่มือฉุกเฉิน + ติดตั้งแอป (PWA) ====================
+// ปุ่มติดตั้งโผล่เฉพาะเบราว์เซอร์ที่ยิง beforeinstallprompt (Chrome/Android) — iOS ใช้ "เพิ่มไปยังหน้าจอโฮม" เอง
+let _installEvt = null;
+const _installListeners = new Set();
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); _installEvt = e; _installListeners.forEach((f) => f(true)); });
+  window.addEventListener("appinstalled", () => { _installEvt = null; _installListeners.forEach((f) => f(false)); safeTrack("pwa_installed"); phCapture("pwa_installed", {}); });
+}
+function EmergencyGuideCard({ compact = false }) {
+  const [canInstall, setCanInstall] = useState(!!_installEvt);
+  useEffect(() => { _installListeners.add(setCanInstall); return () => { _installListeners.delete(setCanInstall); }; }, []);
+  const install = async () => {
+    if (!_installEvt) return;
+    _installEvt.prompt();
+    try { const r = await _installEvt.userChoice; safeTrack("pwa_install_prompt", { outcome: r?.outcome }); } catch (e) {}
+    _installEvt = null; setCanInstall(false);
+  };
+  return <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: compact ? 12 : 14 }}>
+    <a href="/emergency.html" onClick={() => { safeTrack("emergency_guide_open"); phCapture("emergency_guide_open", {}); }} style={{ flex: "1 1 200px", display: "flex", alignItems: "center", gap: 10, background: B.white, border: `1px solid ${B.red}33`, borderRadius: 14, padding: "12px 14px", color: B.black, textDecoration: "none" }}>
+      <span style={{ fontSize: 22 }}>🚨</span>
+      <span style={{ flex: 1 }}><span style={{ display: "block", fontSize: 14, fontWeight: 800 }}>คู่มือ CPR ฉุกเฉิน</span><span style={{ display: "block", fontSize: 11.5, color: B.dkGray }}>ขั้นตอน + จังหวะกด 110/นาที · ใช้ได้แม้ออฟไลน์</span></span>
+      <I name="arrow" size={14} color={B.dkGray}/>
+    </a>
+    {canInstall && <button onClick={install} style={{ ...css.btn(B.black, B.white), flex: "0 0 auto", padding: "12px 16px", fontSize: 13 }}>📲 ติดตั้งแอป</button>}
+  </div>;
+}
+
 function Landing({ go, enterCourse, openBlog, goGameRandom }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
   return (<div style={css.page}>
@@ -294,6 +321,7 @@ function Landing({ go, enterCourse, openBlog, goGameRandom }) {
 
     {/* CPR HERO — เกมภารกิจพลเมืองดี (เล่นฟรีทุกเคส) */}
     <div style={{ ...css.wrap, paddingTop: 24 }}>
+      <EmergencyGuideCard/>
       <button onClick={() => { safeTrack("game_banner_click", { from: "landing" }); phCapture("game_banner_click", { from: "landing" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 16, padding: 18, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 16px rgba(16,24,47,.35)" }}>
         <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 26 }}>🚨</div>
         <div style={{ flex: 1 }}>
@@ -1778,6 +1806,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
       {progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id) && <CourseCertNotice go={go}/>}
       {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } if (fin && !isAuthed()) { setExamGate(true); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {user?.customer_id && user?.phone && progress.done.length > 0 && <ReferralCard user={user} compact/>}
+      <EmergencyGuideCard compact/>
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
