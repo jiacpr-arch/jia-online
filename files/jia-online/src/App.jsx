@@ -1565,6 +1565,15 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
     const finalMod = COURSE.modules[COURSE.modules.length - 1];
     setActive(finalMod.id); beginQuiz(finalMod);
   }, [examGate, user?.auth_user_id]);
+  // มาจากปุ่ม "ทำข้อสอบปลายภาคใหม่" (ใบประกาศหมดอายุ) → เปิดข้อสอบปลายภาคให้เลย (ยังไม่ล็อกอิน → ด่านเข้าสู่ระบบก่อน)
+  useEffect(() => {
+    if (!load("autostart_final", false)) return;
+    save("autostart_final", false);
+    const finalMod = COURSE.modules[COURSE.modules.length - 1];
+    if (!isModuleAccessible(finalMod.id, getPurchased())) return;
+    if (!isAuthed()) { setExamGate(true); return; }
+    setActive(finalMod.id); beginQuiz(finalMod);
+  }, []);
   // มีสลิปรอตรวจ → เช็คสถานะกับ server ตอนเปิดหน้าคอร์ส แอดมินอนุมัติแล้วจะปลดล็อกให้ทันที
   const [, setSlipSync] = useState(0);
   useEffect(() => { (async () => { if (await syncPendingSlips()) setSlipSync(x => x + 1); })(); }, []);
@@ -1757,6 +1766,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
           <button onClick={async () => { await syncPendingSlips(); setSlipSync(x => x + 1); }} style={{ background: "none", border: `1px solid ${B.gold}`, borderRadius: 8, padding: "4px 10px", fontSize: 12, color: "#8a6d1a", cursor: "pointer", whiteSpace: "nowrap" }}>เช็คสถานะ</button>
         </div>
       )}
+      {progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id) && <CourseCertNotice go={go}/>}
       {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } if (fin && !isAuthed()) { setExamGate(true); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
@@ -1781,53 +1791,128 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
 // (ยังไม่ login) หรือ Hub ยังไม่พร้อม ก็ไม่แสดงอะไร
 const HUB_URL = "https://class.jiacpr.com";
 const HUB_COURSE_ID = "cpr";
-function HubCertificateCard() {
-  const [state, setState] = useState(null);
+// ใบประกาศกลางของ Hub: โหลดสถานะ + "ขอรับอัตโนมัติ" ครั้งเดียวเมื่อมีสิทธิ์ (ผ่านข้อสอบปลายภาคที่ยืนยันตัวตนแล้ว)
+// ไม่ต้องรอผู้เรียนกดปุ่มเอง — ใบนี้คือใบที่ตรวจสอบได้จริง (QR บนใบประกาศชี้ไปหน้า verify ของ Hub)
+// ขอรับอัตโนมัติไม่สำเร็จ (เช่น โปรไฟล์ Hub ยังไม่ครบ) → การ์ดยังมีปุ่มให้กดขอรับเองพร้อมข้อความ error ตามเดิม
+const useHubCertificate = () => {
+  const [state, setState] = useState(null); // null | { cert, claimable }
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const load = async () => {
+  const autoTried = useRef(false);
+  const fetchMine = useCallback(async () => {
     try {
       const supa = await getSupabase();
       const { data: { session } } = await supa.auth.getSession();
-      if (!session) { setState(null); return; }
+      if (!session) { setState(null); return null; }
       const { data, error } = await supa.rpc("jia_person_certificates", { action: "mine", payload: {} });
-      if (error || !data) { setState(null); return; }
-      setState({
-        cert: (data.certificates || []).find((c) => c.courseId === HUB_COURSE_ID && c.status === "issued") || null,
+      if (error || !data) { setState(null); return null; }
+      const mine = (data.certificates || []).filter((c) => c.courseId === HUB_COURSE_ID);
+      const next = {
+        cert: mine.find((c) => c.status === "issued") || null,
+        // ใบล่าสุดไม่ว่าสถานะไหน (หมดอายุแล้วก็ยังต้องรู้ เพื่อเตือนให้สอบใหม่รับใบใหม่)
+        latest: mine.filter((c) => c.expiresAt).sort((a, b) => new Date(b.issuedAt || 0) - new Date(a.issuedAt || 0))[0] || null,
         claimable: (data.claimable || []).some((c) => c.courseId === HUB_COURSE_ID),
-      });
-    } catch (e) { setState(null); }
-  };
-  useEffect(() => { load(); }, []);
-  if (!state || (!state.cert && !state.claimable)) return null;
-  const claim = async () => {
-    setBusy(true); setErr("");
+      };
+      setState(next);
+      return next;
+    } catch (e) { setState(null); return null; }
+  }, []);
+  const claim = useCallback(async ({ silent = false } = {}) => {
+    setBusy(true); if (!silent) setErr("");
     try {
       const supa = await getSupabase();
       const { error } = await supa.rpc("jia_person_certificates", { action: "claim", payload: { courseId: HUB_COURSE_ID } });
-      if (error) setErr(error.message || "ขอรับใบประกาศไม่สำเร็จ");
-      await load();
-    } catch (e) { setErr("ขอรับใบประกาศไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+      if (error) { if (!silent) setErr(error.message || "ขอรับใบประกาศไม่สำเร็จ"); }
+      else { safeTrack("hub_cert_claimed", { auto: silent }); phCapture("hub_cert_claimed", { auto: silent }); }
+      await fetchMine();
+    } catch (e) { if (!silent) setErr("ขอรับใบประกาศไม่สำเร็จ ลองใหม่อีกครั้ง"); }
     finally { setBusy(false); }
-  };
+  }, [fetchMine]);
+  useEffect(() => {
+    (async () => {
+      const s = await fetchMine();
+      if (s && !s.cert && s.claimable && !autoTried.current) { autoTried.current = true; await claim({ silent: true }); }
+    })();
+  }, [fetchMine, claim]);
+  return { state, busy, err, claim };
+};
+const hubVerifyUrl = (cert) => (cert?.verifyPath ? HUB_URL + cert.verifyPath : null);
+const thaiDate = (iso) => { try { return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }); } catch (e) { return ""; } };
+// ใบประกาศใกล้หมดอายุ/หมดแล้ว (อิงวันหมดอายุของใบกลางที่ Hub) — ใช้โชว์แถบเตือนต่ออายุ
+const CERT_RENEW_WARN_DAYS = 45;
+const certRenewState = (cert) => {
+  if (!cert?.expiresAt) return null;
+  const days = Math.ceil((new Date(cert.expiresAt).getTime() - Date.now()) / 86400000);
+  if (days < 0) return { expired: true, days };
+  if (days <= CERT_RENEW_WARN_DAYS) return { expired: false, days };
+  return null;
+};
+
+// แถบเตือนใบประกาศใกล้หมดอายุ / หมดอายุแล้ว — หมดแล้วพาไปสอบปลายภาคใหม่ (grade-quiz ส่งผลเข้า Hub → รับใบใหม่อัตโนมัติ)
+function RenewBanner({ renew, go }) {
+  const retake = () => { save("autostart_final", true); safeTrack("cert_renew_click", { expired: renew.expired }); phCapture("cert_renew_click", { expired: renew.expired }); go("course"); };
+  const bg = renew.expired ? `${B.red}10` : `${B.gold}14`, bd = renew.expired ? `${B.red}55` : `${B.gold}66`;
+  return <div data-testid="cert-renew-banner" style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 12, padding: "12px 14px", marginTop: 12, fontSize: 13, lineHeight: 1.55, color: B.black }}>
+    {renew.expired
+      ? <><strong>ใบประกาศของคุณหมดอายุแล้ว</strong> — ทักษะ CPR ลดลงได้เร็วถ้าไม่ได้ทบทวน ทำข้อสอบปลายภาคใหม่ให้ผ่านเพื่อรับใบประกาศฉบับใหม่ (ทบทวนวิดีโอก่อนได้)</>
+      : <><strong>ใบประกาศจะหมดอายุในอีก {renew.days} วัน</strong> — ทบทวนวิดีโอไว้ให้พร้อม เมื่อครบกำหนดแล้วทำข้อสอบปลายภาคใหม่เพื่อรับใบฉบับใหม่ (หรือต่อยอดด้วยคอร์สภาคปฏิบัติ On-site)</>}
+    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+      {renew.expired
+        ? <button onClick={retake} style={{ ...css.btn(B.red, B.white), padding: "10px 16px", fontSize: 13 }}>ทำข้อสอบปลายภาคใหม่ →</button>
+        : <button onClick={() => go("course")} style={{ ...css.btn(B.black, B.white), padding: "10px 16px", fontSize: 13 }}>ทบทวนบทเรียน</button>}
+      <button onClick={() => go("booking")} style={{ ...css.btn(B.white, B.black), padding: "10px 16px", fontSize: 13, border: `1px solid ${B.ltGray}` }}>จองคอร์ส On-site</button>
+    </div>
+  </div>;
+}
+
+// หน้าบทเรียน: เรียนจบแล้วเท่านั้น — เตือนต่ออายุ (ถ้าใกล้/เลยกำหนด) + ขอรับใบกลางให้อัตโนมัติแม้ไม่ได้เปิดหน้าใบประกาศ
+function CourseCertNotice({ go }) {
+  const hub = useHubCertificate();
+  const renew = hub.state?.claimable ? null : certRenewState(hub.state?.cert || hub.state?.latest);
+  return renew ? <div style={{ marginBottom: 12 }}><RenewBanner renew={renew} go={go}/></div> : null;
+}
+
+function HubCertificateCard({ hub }) {
+  const { state, busy, err, claim } = hub;
+  if (!state || (!state.cert && !state.claimable)) return null;
   const box = { display: "block", background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 12, color: B.black, textDecoration: "none", fontSize: 12.5, lineHeight: 1.5 };
   if (state.cert) {
     const c = state.cert;
-    const exp = c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "";
-    return <a href={HUB_URL + c.verifyPath} target="_blank" rel="noreferrer" style={box} data-testid="hub-certificate">
-      <strong>ใบประกาศออนไลน์กลาง JIA</strong> · เลขที่ <span style={{ fontFamily: "monospace" }}>{c.number}</span>{exp ? ` · หมดอายุ ${exp}` : ""}
+    const exp = c.expiresAt ? thaiDate(c.expiresAt) : "";
+    return <a href={hubVerifyUrl(c)} target="_blank" rel="noreferrer" style={box} data-testid="hub-certificate">
+      <strong>ใบประกาศออนไลน์กลาง JIA</strong> · เลขที่ <span style={{ fontFamily: "monospace" }}>{c.number}</span>{exp ? ` · ใช้ได้ถึง ${exp}` : ""}
+      <br/>นายจ้าง/HR สแกน QR บนใบประกาศ หรือเปิดลิงก์นี้เพื่อตรวจสอบได้ทันที
       <br/><span style={{ fontWeight: 700 }}>ตรวจสอบ / เปิดใบที่ class.jiacpr.com ↗</span>
     </a>;
   }
   return <div style={box} data-testid="hub-certificate-claim">
     <strong>ผ่านข้อสอบปลายภาคแล้ว</strong> — รับใบประกาศออนไลน์กลางของ JIA (ตรวจสอบได้ด้วย QR) ชื่อบนใบมาจากบัตรนักเรียน JIA ของคุณ
-    <div style={{ marginTop: 8 }}><button onClick={claim} disabled={busy} style={{ background: B.green, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 700, cursor: "pointer" }}>{busy ? "กำลังขอรับ…" : "ขอรับใบประกาศกลาง"}</button></div>
+    <div style={{ marginTop: 8 }}><button onClick={() => claim()} disabled={busy} style={{ background: B.green, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 700, cursor: "pointer" }}>{busy ? "กำลังขอรับ…" : "ขอรับใบประกาศกลาง"}</button></div>
     {err && <div style={{ color: "#b3261e", marginTop: 6 }}>{err}</div>}
   </div>;
 }
 
+// QR ตรวจสอบใบประกาศ (SVG) — สร้างฝั่ง client จากลิงก์ verify ของ Hub
+function VerifyQR({ url, size = 84 }) {
+  const [svg, setSvg] = useState("");
+  useEffect(() => {
+    if (!url) return;
+    let alive = true;
+    import("qrcode").then((mod) => (mod.default || mod).toString(url, { type: "svg", margin: 0, errorCorrectionLevel: "M" })).then((s) => { if (alive) setSvg(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, [url]);
+  if (!svg) return null;
+  return <div style={{ width: size, height: size }} dangerouslySetInnerHTML={{ __html: svg.replace("<svg", `<svg width="${size}" height="${size}"`) }}/>;
+}
+
 function Certificate({ user, go }) {
-  const d = new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
+  const hub = useHubCertificate();
+  const hubCert = hub.state?.cert || null;
+  const verifyUrl = hubVerifyUrl(hubCert);
+  // ต่ออายุ: Hub ออกใบใหม่ให้ได้เมื่อใบเดิมหมดอายุแล้ว + สอบปลายภาคผ่านใหม่ (ใบที่ยังไม่หมดอายุ claim ซ้ำจะได้ใบเดิม)
+  const renew = hub.state?.claimable ? null : certRenewState(hubCert || hub.state?.latest);
+  // มีใบกลางแล้ว → ใช้วันที่ออกใบจริงของ Hub (เดิมโชว์ "วันนี้" ทุกครั้งที่เปิดหน้า)
+  const d = hubCert?.issuedAt ? new Date(hubCert.issuedAt) : new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   // นักเรียน pre-course จ่ายค่าคอร์ส on-site เต็มราคาแล้ว — ใบประกาศต้องไม่โชว์ "ส่วนลด ฿100"
   // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน)
   const preCourseStudent = isPreCourseStudent();
@@ -1940,13 +2025,20 @@ function Certificate({ user, go }) {
             <div style={{ borderTop: "1.5px solid #C49A48", marginTop: 4, paddingTop: 4, fontSize: 11.5, lineHeight: 1.25, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
           </div>
           <div style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 10.5, letterSpacing: .5, color: "#8A7A55" }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
+          {verifyUrl && <div data-testid="cert-verify-qr" style={{ position: "absolute", top: 44, right: 58, width: 112, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "8px 6px 6px", boxSizing: "border-box" }}>
+            <div style={{ display: "flex", justifyContent: "center" }}><VerifyQR url={verifyUrl} size={84}/></div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#0E1E3C", marginTop: 4, lineHeight: 1.2 }}>สแกนตรวจสอบใบประกาศ</div>
+            <div style={{ fontSize: 9.5, color: B.dkGray, fontFamily: "monospace", lineHeight: 1.3 }}>{hubCert.number}</div>
+            {hubCert.expiresAt && <div style={{ fontSize: 9.5, color: B.dkGray, lineHeight: 1.3 }}>ใช้ได้ถึง {thaiDate(hubCert.expiresAt)}</div>}
+          </div>}
         </div>
       </div>
     </div>
     {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — ขอบคุณผู้มอบคอร์สนี้ + ให้ช่องทางติดต่อกลับ (ไม่แตะรูปใบประกาศ) */}
     {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
     {/* ใบประกาศออนไลน์กลาง JIA (ตรวจสอบได้ที่ Hub) — เพิ่มจากใบของเว็บนี้ ไม่แทน */}
-    <HubCertificateCard/>
+    {renew && <RenewBanner renew={renew} go={go}/>}
+    <HubCertificateCard hub={hub}/>
     <div style={{ marginTop: 16 }}><AccountCard user={user}/></div>
     {/* บัตรนักเรียน JIA กลาง (class.jiacpr.com) — มีเมื่อล็อกอิน LINE/อีเมลจริงแล้วเท่านั้น ใบเก่ายังใช้ได้ปกติ */}
     {user?.hub?.cardNo && <a href="https://class.jiacpr.com/card" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: B.gray, borderRadius: 12, padding: "12px 14px", marginTop: 12, textDecoration: "none", color: B.black }}>

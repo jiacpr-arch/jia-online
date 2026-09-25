@@ -4,6 +4,7 @@
 // กลุ่มที่ตาม:
 //   A) จบคอร์สออนไลน์แล้ว แต่ยังไม่จอง on-site  → unpaid_d0 / d3 / d7 (มีคูปอง)
 //   B) เรียนค้าง (กำลังเรียน)                    → stuck_d2 / d5
+//   C) ใบประกาศกลาง (Hub) ใกล้หมดอายุ / เพิ่งหมดอายุ → cert_exp_30 / cert_expired (ต่อเลขใบ กันซ้ำรายรอบ)
 //   (3 เดือน / 11 เดือน enqueue โดย online-course-broadcast?action=enqueue)
 //
 // Safeguards: ส่งเฉพาะ customer ที่มี line_user_id, กันส่งซ้ำ (customer_id+type),
@@ -54,6 +55,8 @@ const MSG: Record<string, (name: string, code: string | null, paid?: boolean) =>
   stuck_d2: (n, _c, paid) => paid
     ? `คุณ ${n} 👋 เห็นว่าเรียนทฤษฎี CPR ออนไลน์ค้างไว้นิดเดียวเอง!\nเรียนให้จบก่อนวันอบรม จะได้เต็มที่กับการฝึกภาคปฏิบัติครับ\n👉 เรียนต่อ: cpr.morroo.com\n${FOOTER}`
     : `คุณ ${n} 👋 เห็นว่าเรียน CPR ออนไลน์ค้างไว้นิดเดียวเอง!\nเหลืออีกไม่กี่บทก็ได้ใบประกาศ + คูปองส่วนลดแล้วนะครับ\n👉 เรียนต่อ: cpr.morroo.com\n${FOOTER}`,
+  cert_exp_30: (n) => `คุณ ${n} 🩺\nใบประกาศ CPR & AED ออนไลน์ของคุณจะหมดอายุในอีกไม่ถึง 1 เดือน\n\nทบทวนวิดีโอไว้ให้พร้อม แล้วสอบปลายภาคใหม่หลังครบกำหนดเพื่อรับใบฉบับใหม่ได้เลย\n👉 cpr.morroo.com\n\nอยากฝึกกับหุ่นจริง/ใช้ AED จริง จองคอร์ส on-site ได้ครับ\n${FOOTER}`,
+  cert_expired: (n) => `คุณ ${n} ⏰\nใบประกาศ CPR & AED ออนไลน์ของคุณหมดอายุแล้ว\nทักษะ CPR ลดลงเร็วถ้าไม่ได้ทบทวน — สอบปลายภาคใหม่ให้ผ่านเพื่อรับใบประกาศฉบับใหม่\n👉 cpr.morroo.com\n${FOOTER}`,
   stuck_d5: (n, _c, paid) => paid
     ? `คุณ ${n} 💪 ทักษะ CPR ช่วยชีวิตคนใกล้ตัวได้จริง อย่าเพิ่งหยุดกลางทางนะครับ\nเรียนทฤษฎีให้จบก่อนวันเข้าคลาส แล้วพบกันในวันอบรมครับ\n👉 cpr.morroo.com\n${FOOTER}`
     : `คุณ ${n} 💪 ทักษะ CPR ช่วยชีวิตคนใกล้ตัวได้จริง อย่าเพิ่งหยุดกลางทางนะครับ\nเรียนจบรับใบประกาศ + คูปอง on-site ฿100 ฟรีๆ\n👉 cpr.morroo.com\n${FOOTER}`,
@@ -108,9 +111,37 @@ async function enqueueDrip(preview: boolean) {
       scheduled_at: new Date().toISOString(), status: "pending",
     });
   }
+  // C) ใบประกาศกลางใกล้/เพิ่งหมดอายุ — อ่านจาก Hub ผ่าน RPC (service role เท่านั้น) แล้วจับคู่ลูกค้าด้วย auth_user_id
+  //    type ต่อท้ายเลขใบ (cert_exp_30:<เลข>) → ต่ออายุรอบหน้าก็เตือนได้อีก ไม่ชนกับรอบก่อน
+  try {
+    const { data: certs } = await supa.rpc("online_cert_expiry_candidates", { p_from_days: -8, p_to_days: 31 });
+    const uids = [...new Set((certs || []).map((c: any) => c.user_id))];
+    if (uids.length) {
+      const { data: byAuth } = await supa.from("customers").select("id,name,line_user_id,auth_user_id")
+        .in("auth_user_id", uids).not("line_user_id", "is", null);
+      const custByAuth = new Map<string, any>();
+      for (const c of byAuth || []) if (!custByAuth.has(c.auth_user_id)) custByAuth.set(c.auth_user_id, c);
+      for (const c of certs || []) {
+        const cust = custByAuth.get(c.user_id);
+        if (!cust) continue;
+        const daysLeft = Math.ceil((new Date(c.expires_at).getTime() - now) / DAY);
+        const base = daysLeft < 0 ? (daysLeft >= -7 ? "cert_expired" : null) : (daysLeft >= 21 && daysLeft <= 30 ? "cert_exp_30" : null);
+        if (!base) continue;
+        const type = `${base}:${c.number}`;
+        if (already.has(`${cust.id}|${type}`)) continue;
+        already.add(`${cust.id}|${type}`);
+        toInsert.push({
+          customer_id: cust.id, line_user_id: cust.line_user_id, type,
+          message_text: MSG[base](cust.name || "", null),
+          scheduled_at: new Date().toISOString(), status: "pending",
+        });
+      }
+    }
+  } catch (e) { console.warn("cert expiry reminders skipped:", e instanceof Error ? e.message : e); }
+
   if (preview) {
     const byType: Record<string, number> = {};
-    for (const r of toInsert) byType[r.type] = (byType[r.type] || 0) + 1;
+    for (const r of toInsert) { const t = r.type.split(":")[0]; byType[t] = (byType[t] || 0) + 1; }
     return { preview: true, would_enqueue: toInsert.length, by_type: byType, sample: toInsert.slice(0, 3).map(r => ({ type: r.type, text: r.message_text })) };
   }
   let enq = 0;
