@@ -5,6 +5,7 @@ import GamePage from "./game/GamePage";
 import { shuffled } from "./game/storyEngine";
 import {
   B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
+  REFERRAL_DISCOUNT_PCT, REFERRAL_REWARD_TEXT, captureReferral, getRefCode, referralLink,
 } from "./lib/core";
 // หน้าแอดมินแยกเป็น chunk ของตัวเอง — ผู้เรียนทั่วไปไม่ต้องดาวน์โหลดโค้ดแอดมิน
 const Admin = lazy(() => import("./admin/Admin"));
@@ -382,6 +383,10 @@ function Store({ go, setUser }) {
   const total = calcPrice(selected.length);
   const isFull = selected.length + purchased.filter(x => x <= 6).length >= 6;
 
+  // มาจากลิงก์ชวนเพื่อน → โชว์ส่วนลดเมื่อจ่ายผ่าน Stripe (ราคาจริงคำนวณใหม่ใน stripe-checkout; โอน+สลิปไม่มีส่วนลดนี้)
+  const [refCode, setRefCode] = useState(null);
+  useEffect(() => { const c = getRefCode(); if (c) supaRpc("referral_code_valid", { p_code: c }).then((ok) => { if (ok === true) setRefCode(c); }); }, []);
+  const refDiscount = refCode ? Math.floor(total * REFERRAL_DISCOUNT_PCT / 100) : 0;
   const [stripePaying, setStripePaying] = useState(false);
   const payWithStripe = async () => {
     const buyer = ensureBuyer();
@@ -398,7 +403,7 @@ function Store({ go, setUser }) {
         body: JSON.stringify({
           type: "online_purchase",
           items: [{ name: `JIA Online: ${moduleNames.join(", ")}`, amount: total }],
-          metadata: { phone: buyer.phone, modules: selected.join(","), name: buyer.name },
+          metadata: { phone: buyer.phone, modules: selected.join(","), name: buyer.name, ...(refCode ? { ref_code: refCode } : {}) },
           successUrl: window.location.origin + window.location.pathname + "?stripe=success",
           cancelUrl: window.location.origin + window.location.pathname + "?stripe=cancel",
         }),
@@ -482,8 +487,9 @@ function Store({ go, setUser }) {
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>ชำระออนไลน์ (บัตรเครดิต / PromptPay)</div>
         <button onClick={payWithStripe} disabled={stripePaying || !buyerReady} style={{ ...css.btn("#635BFF", B.white), padding: "14px 32px", fontSize: 15, width: "100%", opacity: (stripePaying || !buyerReady) ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/></svg>
-          {stripePaying ? "กำลังเปิดหน้าชำระเงิน..." : "ชำระผ่าน Stripe"}
+          {stripePaying ? "กำลังเปิดหน้าชำระเงิน..." : refDiscount ? `ชำระผ่าน Stripe ฿${total - refDiscount}` : "ชำระผ่าน Stripe"}
         </button>
+        {refDiscount > 0 && <div data-testid="referral-discount" style={{ fontSize: 12.5, color: B.green, fontWeight: 700, marginTop: 8 }}>🎁 ส่วนลดเพื่อนแนะนำ {REFERRAL_DISCOUNT_PCT}% (−฿{refDiscount}) เมื่อชำระผ่าน Stripe</div>}
         <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8 }}>รองรับ Visa / Mastercard / PromptPay — ปลดล็อคทันที</div>
       </div>
       <div style={{ ...css.card, textAlign: "center", marginBottom: 14, position: "relative" }}>
@@ -1768,6 +1774,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
       )}
       {progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id) && <CourseCertNotice go={go}/>}
       {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } if (fin && !isAuthed()) { setExamGate(true); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+      {user?.customer_id && user?.phone && progress.done.length > 0 && <ReferralCard user={user} compact/>}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
@@ -1903,6 +1910,42 @@ function VerifyQR({ url, size = 84 }) {
   }, [url]);
   if (!svg) return null;
   return <div style={{ width: size, height: size }} dangerouslySetInnerHTML={{ __html: svg.replace("<svg", `<svg width="${size}" height="${size}"`) }}/>;
+}
+
+// ==================== REFERRAL CARD (ชวนเพื่อน) ====================
+// ต้องมี customer_id + เบอร์ (สมัครแล้ว) — server ยืนยันความเป็นเจ้าของแล้วคืนโค้ดเดิม/สร้างใหม่ + ยอดเพื่อนที่สมัคร/ซื้อ
+function ReferralCard({ user, compact = false }) {
+  const u = user || load("user", null);
+  const [info, setInfo] = useState(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!u?.customer_id || !u?.phone) return;
+    supaRpc("referral_my_code", { p_customer_id: u.customer_id, p_phone: u.phone }).then((d) => {
+      if (d?.code) { save("my_ref_code", d.code); setInfo(d); }
+    });
+  }, [u?.customer_id, u?.phone]);
+  if (!info) return null;
+  const link = referralLink(info.code);
+  const text = `มาเรียน CPR & AED ออนไลน์ด้วยกัน ช่วยชีวิตคนใกล้ตัวได้จริง 💪 เข้าลิงก์นี้ได้ส่วนลด ${REFERRAL_DISCOUNT_PCT}% ตอนซื้อคอร์ส`;
+  const share = async () => {
+    safeTrack("referral_share", { code: info.code }); phCapture("referral_share", { code: info.code });
+    try { if (navigator.share) { await navigator.share({ title: "JIA CPR Online", text, url: link }); return; } } catch (e) { if (e?.name === "AbortError") return; }
+    window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text), "_blank");
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
+  return <div data-testid="referral-card" style={{ background: `${B.gold}10`, border: `1px solid ${B.gold}55`, borderRadius: 16, padding: compact ? 14 : 18, marginTop: 14 }}>
+    <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>🎁 ชวนเพื่อนเรียน CPR</div>
+    <div style={{ fontSize: 12.5, color: B.dkGray, lineHeight: 1.6 }}>เพื่อนที่เข้าผ่านลิงก์ของคุณได้ส่วนลด <strong style={{ color: B.black }}>{REFERRAL_DISCOUNT_PCT}%</strong> ตอนซื้อคอร์ส · {REFERRAL_REWARD_TEXT}</div>
+    <div style={{ display: "flex", gap: 8, alignItems: "center", background: B.white, border: `1px solid ${B.ltGray}`, borderRadius: 10, padding: "8px 10px", marginTop: 10 }}>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{link.replace(/^https:\/\//, "")}</span>
+      <button onClick={copy} style={{ background: B.gray, border: "none", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>{copied ? "คัดลอกแล้ว" : "คัดลอก"}</button>
+    </div>
+    <button onClick={share} style={{ ...css.btn("#06C755", B.white, true), marginTop: 10, padding: "12px 20px", fontSize: 14 }}>แชร์ลิงก์ให้เพื่อน</button>
+    <div style={{ display: "flex", justifyContent: "space-around", marginTop: 10, fontSize: 12, color: B.dkGray, textAlign: "center" }}>
+      <div><div style={{ fontSize: 18, fontWeight: 800, color: B.black }}>{info.signups || 0}</div>เพื่อนสมัคร</div>
+      <div><div style={{ fontSize: 18, fontWeight: 800, color: B.black }}>{info.purchases || 0}</div>เพื่อนซื้อคอร์ส</div>
+    </div>
+  </div>;
 }
 
 function Certificate({ user, go }) {
@@ -2087,7 +2130,8 @@ function Certificate({ user, go }) {
       </div>
       )}
     </>)}
-    <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
+    {/* ชวนเพื่อน (มีโค้ดของตัวเอง) — ยังสมัครไม่ครบ (ไม่มี customer_id) ใช้ปุ่มแชร์แบบเดิม */}
+    {(user?.customer_id && user?.phone) ? <ReferralCard user={user}/> : <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>}
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
     <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) startOverLearner(); }} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
@@ -2465,6 +2509,7 @@ export default function App() {
   // UTM + A/B variant
   useEffect(() => {
     captureUTM();
+    captureReferral();
     // ลิงก์เฉพาะกิจแคมเปญ (?camp=line0806) — จำ key ไว้ให้ issueGameVoucher เช็คสิทธิ์คูปอง
     try { const ck = new URLSearchParams(window.location.search).get("camp"); if (ck) save("game_camp", ck); } catch (e) {}
     // แคมเปญที่เปิด unlockCourse: เข้าผ่านลิงก์ในวันแคมเปญ → ปลดคอร์สทุกบทให้เลย (จำสิทธิ์ถาวรในเครื่อง)
@@ -2478,6 +2523,18 @@ export default function App() {
     if (gameParam) { const u = { ...getUTM(), mode: gameRandomParam ? "random" : "hub" }; safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
   }, []);
+
+  // เข้ามาจากลิงก์ชวนเพื่อน แล้วสมัครสำเร็จ (ทุกเส้นทางจบที่ user มี customer_id + phone) → บันทึกยอดให้ผู้ชวนครั้งเดียว
+  // server ตรวจเองว่าเป็นลูกค้าใหม่จริง (สร้างภายใน 3 วัน) และไม่ใช่เบอร์เดียวกับเจ้าของโค้ด
+  useEffect(() => {
+    const code = getRefCode();
+    if (!code || load("ref_recorded", false) || !user?.customer_id || !user?.phone) return;
+    supaRpc("referral_record_signup", { p_code: code, p_customer_id: user.customer_id, p_phone: user.phone }).then((ok) => {
+      if (ok === null) return; // เรียกไม่สำเร็จ (เน็ต/ยังไม่ deploy) — ลองใหม่รอบหน้า
+      save("ref_recorded", true);
+      if (ok) { safeTrack("referral_signup", { code }); phCapture("referral_signup", { code }); }
+    });
+  }, [user?.customer_id, user?.phone]);
 
   // กลับจากหน้า LINE login (signInWithLine เคย liff.login() นำทางออกไปตอนกดปุ่มเข้าสู่ระบบ) → เก็บ
   // phone/name ที่กรอกไว้ตอนนั้นใน line_login_pending แล้วทำ signInWithLine ต่อให้จบตอนหน้ากลับมาโหลด

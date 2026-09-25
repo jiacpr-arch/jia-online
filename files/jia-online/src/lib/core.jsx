@@ -277,6 +277,24 @@ export const captureUTM = () => {
 };
 export const getUTM = () => load("utm", {});
 
+// ========== REFERRAL (ชวนเพื่อน) ==========
+// ลิงก์ cpr.morroo.com/?ref=R123ABC → จำโค้ดไว้ในเครื่อง (ครั้งแรกที่เข้า ไม่ทับของเดิม)
+// ส่วนลดคำนวณจริงใน stripe-checkout เสมอ — ค่านี้ใช้แสดงผลบนหน้าร้านเท่านั้น (ต้องตรงกับฝั่ง server)
+export const REFERRAL_DISCOUNT_PCT = 20;
+// ✏️ ข้อความของรางวัลฝั่งผู้ชวน — แก้ให้ตรงนโยบายจริงก่อนเปิดใช้ (ระบบนับยอดให้ แอดมินมอบรางวัลเองจากแท็บ "ชวนเพื่อน")
+export const REFERRAL_REWARD_TEXT = "เพื่อนที่ซื้อคอร์สผ่านลิงก์ของคุณครบ 3 คน รับส่วนลดคอร์ส On-site เพิ่ม ฿200 (ทีมงานติดต่อมอบให้ทาง LINE)";
+const REF_CODE_RE = /^R[A-Z0-9]{6}$/;
+export const captureReferral = () => {
+  try {
+    const raw = (new URLSearchParams(window.location.search).get("ref") || "").trim().toUpperCase();
+    if (!REF_CODE_RE.test(raw)) return;
+    if (load("my_ref_code", null) === raw) return; // เปิดลิงก์ของตัวเอง
+    if (!load("ref_code", null)) { save("ref_code", raw); safeTrack("referral_landing", { code: raw }); phCapture("referral_landing", { code: raw }); }
+  } catch (e) {}
+};
+export const getRefCode = () => load("ref_code", null);
+export const referralLink = (code) => `${SITE_URL}/?ref=${code}&utm_source=referral&utm_medium=friend`;
+
 export const mergeProgressLocal = (a, b) => {
   const done = [...new Set([...(a?.done || []), ...(b?.done || [])])].sort((x, y) => x - y);
   const scores = { ...(a?.scores || {}) };

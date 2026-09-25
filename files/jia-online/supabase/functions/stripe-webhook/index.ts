@@ -49,6 +49,14 @@ Deno.serve(async (req) => {
           })
           .eq("stripe_session_id", session.id)
           .eq("payment_status", "รอชำระ");
+        // ซื้อผ่านลิงก์ชวนเพื่อน — บันทึกยอดให้เจ้าของโค้ด (unique ต่อ purchase_id: webhook ซ้ำไม่นับซ้ำ)
+        if (meta.ref_code && meta.purchase_id) {
+          const { error: refErr } = await supabase.from("referral_events").insert({
+            code: meta.ref_code, kind: "purchase", purchase_id: meta.purchase_id,
+            amount: (session.amount_total ?? 0) / 100, discount: Number(meta.ref_discount || 0),
+          });
+          if (refErr && refErr.code !== "23505") console.warn("referral purchase not recorded:", refErr.message);
+        }
       } else if (type === "booking") {
         const bookingId = meta.booking_id;
         if (bookingId) {

@@ -27,6 +27,7 @@ const ALLOW = new Set<string>([
   "sales_tracking", "lead_promo_codes", "lead_capture_events", "promo_codes",
   "jiaroo_leads", "jiaroo_lead_events", "jiaroo_messages", "jiaroo_team",
   "game_character_images",
+  "referral_codes", "referral_events",
 ]);
 const METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
 

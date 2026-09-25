@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   B, SUPABASE_KEY, FN_URL, PRICING, VOUCHER_ALL_MODULES, STANDING_NEVER_EXPIRES, VOUCHER_SOURCES, SITE_URL, PARTNER_SOURCE, genPartnerCode, _adminKey, setAdminKey, adminRest, adminPing, thaiShortDate, genVoucherCode, normalizePhone, save, load, captureNodeToPng, deliverBlob, dataUrlToBlob, COURSE, I, Logo, css,
 } from "../lib/core";
+import { ReferralReport } from "./GrowthPanels";
 
 // ==================== ADMIN ====================
 // รหัสแอดมินถูกตรวจฝั่ง server (edge function admin-api ตั้ง ADMIN_API_KEY) — ไม่มีความลับในบันเดิลแล้ว
@@ -21,6 +22,7 @@ const TABS = [
   { key: "voucher_issue",   label: "ออก Voucher",      custom: true },
   { key: "partner_coupons", label: "คูปองพาร์ทเนอร์ (QR)", custom: true },
   { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
+  { key: "referrals",       label: "ชวนเพื่อน",        custom: true },
   { key: "game_chars",      label: "รูปตัวละครเกม",   custom: true },
 ];
 
@@ -1754,6 +1756,7 @@ export default function Admin() {
         {tab === "partner_coupons" && <PartnerCouponPanel onPrint={setPrintJob}/>}
         {tab === "company_report" && <CompanyReport/>}
         {tab === "game_chars" && <GameCharacterImages/>}
+        {tab === "referrals" && <ReferralReport/>}
 
         {/* Search & filter (for table tabs only) */}
         {!isCustomTab && (
