@@ -28,6 +28,7 @@ const ALLOW = new Set<string>([
   "jiaroo_leads", "jiaroo_lead_events", "jiaroo_messages", "jiaroo_team",
   "game_character_images",
   "referral_codes", "referral_events", "company_portal_links",
+  "tax_invoice_requests", "course_reviews",
 ]);
 const METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
 

@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   B, SUPABASE_KEY, FN_URL, PRICING, VOUCHER_ALL_MODULES, STANDING_NEVER_EXPIRES, VOUCHER_SOURCES, SITE_URL, PARTNER_SOURCE, genPartnerCode, _adminKey, setAdminKey, adminRest, adminPing, thaiShortDate, genVoucherCode, normalizePhone, save, load, captureNodeToPng, deliverBlob, dataUrlToBlob, COURSE, I, Logo, css,
 } from "../lib/core";
-import { ReferralReport, CompanyPortalLinks } from "./GrowthPanels";
+import { ReferralReport, CompanyPortalLinks, TaxInvoiceRequests, ReviewsModeration } from "./GrowthPanels";
 
 // ==================== ADMIN ====================
 // รหัสแอดมินถูกตรวจฝั่ง server (edge function admin-api ตั้ง ADMIN_API_KEY) — ไม่มีความลับในบันเดิลแล้ว
@@ -23,6 +23,8 @@ const TABS = [
   { key: "partner_coupons", label: "คูปองพาร์ทเนอร์ (QR)", custom: true },
   { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
   { key: "referrals",       label: "ชวนเพื่อน",        custom: true },
+  { key: "tax_invoices",    label: "ใบกำกับภาษี",      custom: true },
+  { key: "reviews",         label: "รีวิวคอร์ส",       custom: true },
   { key: "game_chars",      label: "รูปตัวละครเกม",   custom: true },
 ];
 
@@ -1758,6 +1760,8 @@ export default function Admin() {
         {tab === "company_report" && <CompanyReport/>}
         {tab === "game_chars" && <GameCharacterImages/>}
         {tab === "referrals" && <ReferralReport/>}
+        {tab === "tax_invoices" && <TaxInvoiceRequests/>}
+        {tab === "reviews" && <ReviewsModeration/>}
 
         {/* Search & filter (for table tabs only) */}
         {!isCustomTab && (

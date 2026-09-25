@@ -105,3 +105,85 @@ export function CompanyPortalLinks({ company }) {
     </div>}
   </div>;
 }
+
+// ==================== คำขอใบกำกับภาษี ====================
+// ออกใบจริงใน FlowAccount แล้วกรอกเลขที่ใบที่นี่ → สถานะ "ออกแล้ว" (ส่งให้ลูกค้าทางอีเมล/LINE เอง)
+export function TaxInvoiceRequests() {
+  const [rows, setRows] = useState(null);
+  const [status, setStatus] = useState("รอออก");
+  const reload = useCallback(async () => {
+    const r = await adminRest("tax_invoice_requests", "GET", null, `?select=*&order=created_at.desc&limit=500${status ? `&status=eq.${encodeURIComponent(status)}` : ""}`);
+    setRows(Array.isArray(r) ? r : []);
+  }, [status]);
+  useEffect(() => { reload(); }, [reload]);
+  const issue = async (r) => {
+    const no = prompt(`เลขที่ใบกำกับภาษี (จาก FlowAccount) สำหรับ ${r.name}`, r.invoice_no || "");
+    if (no == null) return;
+    await adminRest("tax_invoice_requests", "PATCH", { status: "ออกแล้ว", invoice_no: no.trim() || null, issued_at: new Date().toISOString() }, `?id=eq.${r.id}`);
+    reload();
+  };
+  const cancel = async (r) => {
+    const note = prompt("เหตุผลที่ยกเลิก (ไม่บังคับ)", "");
+    if (note == null) return;
+    await adminRest("tax_invoice_requests", "PATCH", { status: "ยกเลิก", admin_note: note || null }, `?id=eq.${r.id}`);
+    reload();
+  };
+  const copy = (r) => { const t = [r.name, `เลขประจำตัวผู้เสียภาษี ${r.tax_id}${r.branch ? ` (${r.branch})` : ""}`, r.address, r.email || "", `ยอด ${r.amount ?? "-"} บาท · บทเรียน ${r.modules || "-"}`].filter(Boolean).join("\n"); try { navigator.clipboard.writeText(t); } catch (e) {} };
+  return <div>
+    <Note>คำขอจากหน้า “ขอใบกำกับภาษีเต็มรูป” — ยอด/บทเรียนผูกอัตโนมัติถ้าเบอร์ตรงกับการซื้อที่ชำระแล้ว (ช่องยอดว่าง = ต้องตรวจยอดเอง) · กด “คัดลอกข้อมูล” ไปวางใน FlowAccount</Note>
+    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      {["รอออก", "ออกแล้ว", "ยกเลิก", ""].map((s) => <button key={s || "all"} onClick={() => setStatus(s)} style={{ ...css.btn(status === s ? B.red : B.white, status === s ? B.white : B.black), padding: "6px 14px", fontSize: 13, border: `1px solid ${B.ltGray}` }}>{s || "ทั้งหมด"}</button>)}
+    </div>
+    {!rows ? <div style={{ color: B.dkGray }}>กำลังโหลด...</div> :
+    <Table head={["วันที่", "ผู้เสียภาษี", "เลขภาษี / สาขา", "ที่อยู่", "ติดต่อ", "ยอด", "สถานะ", ""]} empty={!rows.length && "ไม่มีคำขอ"}>
+      {rows.map((r) => <tr key={r.id}>
+        <td style={td}>{fmtDate(r.created_at)}</td>
+        <td style={{ ...td, fontWeight: 600 }}>{r.name}<div style={{ fontSize: 11, color: B.dkGray }}>{r.buyer_type === "person" ? "บุคคลธรรมดา" : "นิติบุคคล"}</div></td>
+        <td style={{ ...td, fontFamily: "monospace" }}>{r.tax_id}<div style={{ fontFamily: "inherit", fontSize: 11, color: B.dkGray }}>{r.branch || ""}</div></td>
+        <td style={{ ...td, maxWidth: 260, fontSize: 12 }}>{r.address}</td>
+        <td style={{ ...td, fontSize: 12 }}>{r.phone}<br/>{r.email || ""}</td>
+        <td style={td}>{r.amount != null ? `฿${r.amount}` : <span style={{ color: B.gold }}>ตรวจเอง</span>}</td>
+        <td style={td}>{r.status}{r.invoice_no ? <div style={{ fontSize: 11, fontFamily: "monospace" }}>{r.invoice_no}</div> : null}</td>
+        <td style={{ ...td, whiteSpace: "nowrap" }}>
+          <button onClick={() => copy(r)} style={{ ...css.btn(B.gray, B.black), padding: "6px 10px", fontSize: 12 }}>คัดลอกข้อมูล</button>{" "}
+          {r.status === "รอออก" && <><button onClick={() => issue(r)} style={{ ...css.btn(B.green, B.white), padding: "6px 10px", fontSize: 12 }}>ออกแล้ว</button>{" "}
+          <button onClick={() => cancel(r)} style={{ ...css.btn(B.white, B.red), padding: "6px 10px", fontSize: 12, border: `1px solid ${B.red}55` }}>ยกเลิก</button></>}
+        </td>
+      </tr>)}
+    </Table>}
+  </div>;
+}
+
+// ==================== รีวิวคอร์ส (อนุมัติก่อนขึ้นหน้าแรก) ====================
+export function ReviewsModeration() {
+  const [rows, setRows] = useState(null);
+  const [show, setShow] = useState("pending"); // pending | approved | all
+  const reload = useCallback(async () => {
+    const f = show === "pending" ? "&approved=is.false" : show === "approved" ? "&approved=is.true" : "";
+    const r = await adminRest("course_reviews", "GET", null, `?select=*,customers(tel)&order=updated_at.desc&limit=500${f}`);
+    setRows(Array.isArray(r) ? r : []);
+  }, [show]);
+  useEffect(() => { reload(); }, [reload]);
+  const setApproved = async (r, v) => { await adminRest("course_reviews", "PATCH", { approved: v }, `?id=eq.${r.id}`); reload(); };
+  const del = async (r) => { if (!confirm("ลบรีวิวนี้?")) return; await adminRest("course_reviews", "DELETE", null, `?id=eq.${r.id}`); reload(); };
+  return <div>
+    <Note>รีวิวจากผู้เรียนที่เรียนจบแล้ว (1 คน 1 รีวิว แก้ไขได้ — แก้แล้วต้องอนุมัติใหม่) · หน้าแรกแสดงเฉพาะที่อนุมัติและมีข้อความ</Note>
+    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      {[["pending", "รออนุมัติ"], ["approved", "อนุมัติแล้ว"], ["all", "ทั้งหมด"]].map(([k, l]) => <button key={k} onClick={() => setShow(k)} style={{ ...css.btn(show === k ? B.red : B.white, show === k ? B.white : B.black), padding: "6px 14px", fontSize: 13, border: `1px solid ${B.ltGray}` }}>{l}</button>)}
+    </div>
+    {!rows ? <div style={{ color: B.dkGray }}>กำลังโหลด...</div> :
+    <Table head={["วันที่", "ชื่อที่แสดง", "เบอร์", "คะแนน", "ข้อความ", "สถานะ", ""]} empty={!rows.length && "ไม่มีรีวิว"}>
+      {rows.map((r) => <tr key={r.id}>
+        <td style={td}>{fmtDate(r.updated_at)}</td><td style={{ ...td, fontWeight: 600 }}>{r.display_name}</td><td style={td}>{r.customers?.tel || "—"}</td>
+        <td style={{ ...td, color: B.gold, whiteSpace: "nowrap" }}>{"★".repeat(r.rating)}</td>
+        <td style={{ ...td, maxWidth: 360 }}>{r.comment || <span style={{ color: B.dkGray }}>(ไม่มีข้อความ)</span>}</td>
+        <td style={td}>{r.approved ? "✓ แสดงอยู่" : "รออนุมัติ"}</td>
+        <td style={{ ...td, whiteSpace: "nowrap" }}>
+          {r.approved ? <button onClick={() => setApproved(r, false)} style={{ ...css.btn(B.gray, B.black), padding: "6px 10px", fontSize: 12 }}>ซ่อน</button>
+            : <button onClick={() => setApproved(r, true)} style={{ ...css.btn(B.green, B.white), padding: "6px 10px", fontSize: 12 }}>อนุมัติ</button>}{" "}
+          <button onClick={() => del(r)} style={{ ...css.btn(B.white, B.red), padding: "6px 10px", fontSize: 12, border: `1px solid ${B.red}55` }}>ลบ</button>
+        </td>
+      </tr>)}
+    </Table>}
+  </div>;
+}

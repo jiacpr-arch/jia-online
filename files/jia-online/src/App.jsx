@@ -269,6 +269,99 @@ function BlogDetail({ slug, goBack, openBlog }) {
 }
 
 // ==================== LANDING ====================
+// ==================== ขอใบกำกับภาษีเต็มรูป ====================
+// ผู้ซื้อ/บริษัทกรอกข้อมูลผู้เสียภาษี → RPC request_tax_invoice (ตรวจเลข 13 หลัก + ผูกการซื้อล่าสุดถ้าเบอร์ตรงและชำระแล้ว)
+// แอดมินออกใบใน FlowAccount แล้วบันทึกเลขที่ในแท็บ "ใบกำกับภาษี" ส่งให้ทางอีเมล/LINE
+const taxIdValid = (v) => { const d = (v || "").replace(/\D/g, ""); if (d.length !== 13) return false; let s = 0; for (let i = 0; i < 12; i++) s += Number(d[i]) * (13 - i); return (11 - (s % 11)) % 10 === Number(d[12]); };
+function TaxInvoicePage({ go, user }) {
+  const lp = load("last_purchase", null);
+  const [f, setF] = useState({ buyerType: "company", name: "", taxId: "", branch: "สำนักงานใหญ่", address: "", email: "", phone: user?.phone || "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState(null);
+  const set = (k) => (e) => { setF({ ...f, [k]: e.target.value }); setErr(""); };
+  const submit = async () => {
+    if (!taxIdValid(f.taxId)) { setErr("เลขประจำตัวผู้เสียภาษีไม่ถูกต้อง (13 หลัก)"); return; }
+    setBusy(true);
+    const r = await supaRpc("request_tax_invoice", { p: { ...f, purchaseId: lp?.purchase_id || null, stripeSessionId: lp?.session_id || null } });
+    setBusy(false);
+    if (!r) { setErr("ส่งคำขอไม่สำเร็จ กรุณาลองใหม่ หรือติดต่อ LINE @jiacpr"); return; }
+    if (r.error) { setErr(r.error); return; }
+    setDone(r); safeTrack("tax_invoice_request", { linked: !!r.linked }); phCapture("tax_invoice_request", { linked: !!r.linked });
+  };
+  const inp = { width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  const field = (k, label, ph, extra = {}) => <div style={{ marginBottom: 12 }}><label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>{label}</label>{extra.area ? <textarea rows={3} value={f[k]} onChange={set(k)} placeholder={ph} style={{ ...inp, resize: "vertical" }}/> : <input value={f[k]} onChange={set(k)} placeholder={ph} inputMode={extra.inputMode} style={inp}/>}</div>;
+  return (<div style={css.page}><div style={css.header(B.red)}><button onClick={() => go("course")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ขอใบกำกับภาษีเต็มรูป</div></div>
+    <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+      {done ? <div style={{ ...css.card, textAlign: "center" }} data-testid="tax-invoice-done">
+        <div style={{ fontSize: 40 }}>✅</div>
+        <div style={{ fontSize: 17, fontWeight: 800, margin: "8px 0" }}>ได้รับคำขอแล้ว</div>
+        <div style={{ fontSize: 13.5, color: B.dkGray, lineHeight: 1.6 }}>ทีมงานจะออกใบกำกับภาษีและส่งให้{f.email ? `ทางอีเมล ${f.email}` : "ทาง LINE/เบอร์โทรที่ให้ไว้"} ภายใน 3 วันทำการ{done.linked ? "" : " (ไม่พบรายการซื้อที่ชำระแล้วของเบอร์นี้ในเครื่อง — ทีมงานจะตรวจสอบยอดให้)"}</div>
+        <button onClick={() => go("course")} style={{ ...css.btn(B.black, B.white, true), marginTop: 16 }}>กลับหน้าบทเรียน</button>
+      </div> : <>
+        <div style={{ ...css.card, marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.6, marginBottom: 14 }}>สำหรับบริษัท/ผู้ที่ต้องการใบกำกับภาษีเต็มรูปของคอร์สออนไลน์ที่ชำระแล้ว{lp ? " — ระบบจะแนบรายการซื้อล่าสุดบนเครื่องนี้ให้อัตโนมัติ" : ""}</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[["company", "นิติบุคคล"], ["person", "บุคคลธรรมดา"]].map(([v, l]) => <button key={v} onClick={() => setF({ ...f, buyerType: v, branch: v === "company" ? (f.branch || "สำนักงานใหญ่") : "" })} style={{ flex: 1, padding: "10px", borderRadius: 10, border: `2px solid ${f.buyerType === v ? B.red : B.ltGray}`, background: f.buyerType === v ? `${B.red}08` : B.white, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
+          </div>
+          {field("name", f.buyerType === "company" ? "ชื่อบริษัท *" : "ชื่อ-นามสกุล *", f.buyerType === "company" ? "เช่น บริษัท ตัวอย่าง จำกัด" : "")}
+          {field("taxId", "เลขประจำตัวผู้เสียภาษี 13 หลัก *", "", { inputMode: "numeric" })}
+          {f.buyerType === "company" && field("branch", "สาขา", "สำนักงานใหญ่ / สาขาที่ 00001")}
+          {field("address", "ที่อยู่ตามทะเบียน *", "เลขที่ ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์", { area: true })}
+          {field("email", "อีเมลรับใบกำกับภาษี", "เช่น account@company.com")}
+          {field("phone", "เบอร์โทรที่ใช้ตอนซื้อ *", "", { inputMode: "tel" })}
+          {err && <div style={{ color: B.red, fontSize: 13, marginBottom: 8 }}>{err}</div>}
+        </div>
+        <button onClick={submit} disabled={busy} style={{ ...css.btn(B.red, B.white, true), opacity: busy ? .6 : 1 }}>{busy ? "กำลังส่ง..." : "ส่งคำขอใบกำกับภาษี"}</button>
+      </>}
+    </div></div>);
+}
+
+// ==================== รีวิวคอร์ส ====================
+// ฟอร์มรีวิว (หน้าใบประกาศ) — ต้องสมัครครบ (customer_id + phone) และเรียนจบ; server ตรวจซ้ำทั้งหมด
+function ReviewForm({ user }) {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [state, setState] = useState(() => (load("review_sent", false) ? "sent" : "idle")); // idle | busy | sent
+  const [err, setErr] = useState("");
+  if (!user?.customer_id || !user?.phone) return null;
+  if (state === "sent") return <div style={{ ...css.card, marginTop: 14, textAlign: "center", fontSize: 13.5, color: B.dkGray }}>ขอบคุณสำหรับรีวิว 🙏 รีวิวจะแสดงบนหน้าเว็บหลังทีมงานตรวจสอบ</div>;
+  const submit = async () => {
+    if (!rating) { setErr("กรุณาให้คะแนนดาว"); return; }
+    setState("busy");
+    const r = await supaRpc("submit_course_review", { p_customer_id: user.customer_id, p_phone: user.phone, p_rating: rating, p_comment: comment });
+    if (r?.ok) { save("review_sent", true); setState("sent"); safeTrack("review_submit", { rating }); phCapture("review_submit", { rating }); }
+    else { setErr(r?.error || "ส่งรีวิวไม่สำเร็จ กรุณาลองใหม่"); setState("idle"); }
+  };
+  return <div data-testid="review-form" style={{ ...css.card, marginTop: 14 }}>
+    <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>รีวิวคอร์สนี้</div>
+    <div style={{ fontSize: 12.5, color: B.dkGray, marginBottom: 10 }}>ความเห็นของคุณช่วยให้คนอื่นตัดสินใจเรียน CPR ได้ง่ายขึ้น</div>
+    <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>{[1, 2, 3, 4, 5].map((n) => <button key={n} aria-label={`${n} ดาว`} onClick={() => { setRating(n); setErr(""); }} style={{ background: "none", border: "none", padding: 2, cursor: "pointer", fontSize: 30, lineHeight: 1, color: n <= rating ? B.gold : B.ltGray }}>★</button>)}</div>
+    <textarea value={comment} onChange={(e) => setComment(e.target.value.slice(0, 600))} rows={3} placeholder="เล่าสั้น ๆ ว่าได้อะไรจากคอร์สนี้ (ไม่บังคับ)" style={{ width: "100%", padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }}/>
+    {err && <div style={{ color: B.red, fontSize: 12.5, marginTop: 6 }}>{err}</div>}
+    <button onClick={submit} disabled={state === "busy"} style={{ ...css.btn(B.black, B.white, true), marginTop: 10, padding: "12px 20px", fontSize: 14 }}>{state === "busy" ? "กำลังส่ง..." : "ส่งรีวิว"}</button>
+  </div>;
+}
+// รีวิวที่อนุมัติแล้วบนหน้าแรก — ยังไม่มีรีวิวเลยก็ซ่อนทั้งส่วน
+function ReviewsSection() {
+  const [d, setD] = useState(null);
+  useEffect(() => { supaRpc("public_course_reviews", { p_limit: 12 }).then((r) => { if (r?.reviews?.length) setD(r); }); }, []);
+  if (!d) return null;
+  return <div style={{ ...css.wrap, paddingTop: 28 }} data-testid="reviews-section">
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
+      <h3 style={{ fontSize: 18, fontWeight: 800 }}>ผู้เรียนว่าอย่างไร</h3>
+      <span style={{ fontSize: 13, color: B.dkGray }}><span style={{ color: B.gold }}>★</span> {d.avg} จาก {d.count} รีวิว</span>
+    </div>
+    <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 6, scrollSnapType: "x mandatory" }}>
+      {d.reviews.map((r, i) => <div key={i} style={{ ...css.card, padding: 16, flex: "0 0 78%", maxWidth: 320, scrollSnapAlign: "start" }}>
+        <div style={{ color: B.gold, fontSize: 15, letterSpacing: 1 }}>{"★".repeat(r.rating)}<span style={{ color: B.ltGray }}>{"★".repeat(5 - r.rating)}</span></div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.6, margin: "6px 0 8px" }}>“{r.comment}”</div>
+        <div style={{ fontSize: 12, color: B.dkGray, fontWeight: 600 }}>— {r.name}</div>
+      </div>)}
+    </div>
+  </div>;
+}
+
 // ==================== คู่มือฉุกเฉิน + ติดตั้งแอป (PWA) ====================
 // ปุ่มติดตั้งโผล่เฉพาะเบราว์เซอร์ที่ยิง beforeinstallprompt (Chrome/Android) — iOS ใช้ "เพิ่มไปยังหน้าจอโฮม" เอง
 let _installEvt = null;
@@ -319,6 +412,7 @@ function Landing({ go, enterCourse, openBlog, goGameRandom }) {
       </div>
     </div>
 
+    <ReviewsSection/>
     {/* CPR HERO — เกมภารกิจพลเมืองดี (เล่นฟรีทุกเคส) */}
     <div style={{ ...css.wrap, paddingTop: 24 }}>
       <EmergencyGuideCard/>
@@ -471,6 +565,7 @@ function Store({ go, setUser }) {
           if (Array.isArray(rec) && rec.length) {
             // ไม่ปลดล็อกทันที — เข้าคิวรอแอดมินตรวจสลิป (Course จะ sync สถานะให้อัตโนมัติ)
             savePendingSlips([...getPendingSlips(), { id: rec[0].id, modules: selected, at: Date.now() }]);
+            save("last_purchase", { purchase_id: rec[0].id, modules: selected.join(","), at: Date.now() }); // อ้างอิงตอนขอใบกำกับภาษี
             setSlipDone(true);
           } else {
             alert("บันทึกการแจ้งชำระไม่สำเร็จ กรุณาส่งสลิปทาง LINE แทน");
@@ -522,6 +617,7 @@ function Store({ go, setUser }) {
         </button>
         {refDiscount > 0 && <div data-testid="referral-discount" style={{ fontSize: 12.5, color: B.green, fontWeight: 700, marginTop: 8 }}>🎁 ส่วนลดเพื่อนแนะนำ {REFERRAL_DISCOUNT_PCT}% (−฿{refDiscount}) เมื่อชำระผ่าน Stripe</div>}
         <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8 }}>รองรับ Visa / Mastercard / PromptPay — ปลดล็อคทันที</div>
+        <div style={{ fontSize: 11, color: B.dkGray, marginTop: 4 }}>ต้องการใบกำกับภาษีในนามบริษัท? ขอได้หลังชำระเงินที่หน้าบทเรียน</div>
       </div>
       <div style={{ ...css.card, textAlign: "center", marginBottom: 14, position: "relative" }}>
         <div style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", background: B.white, padding: "0 12px", fontSize: 12, color: B.dkGray }}>หรือ</div>
@@ -1807,6 +1903,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
       {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } if (fin && !isAuthed()) { setExamGate(true); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
       {user?.customer_id && user?.phone && progress.done.length > 0 && <ReferralCard user={user} compact/>}
       <EmergencyGuideCard compact/>
+      {(load("last_purchase", null) || (load("purchased", []) || []).some((x) => x > 1)) && <button onClick={() => go("taxinvoice")} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12.5, textDecoration: "underline", cursor: "pointer", marginTop: 12, padding: 0 }}>ต้องการใบกำกับภาษีเต็มรูป? ขอได้ที่นี่</button>}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
@@ -2164,6 +2261,7 @@ function Certificate({ user, go }) {
     </>)}
     {/* ชวนเพื่อน (มีโค้ดของตัวเอง) — ยังสมัครไม่ครบ (ไม่มี customer_id) ใช้ปุ่มแชร์แบบเดิม */}
     {(user?.customer_id && user?.phone) ? <ReferralCard user={user}/> : <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>}
+    <ReviewForm user={user}/>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
     <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) startOverLearner(); }} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
@@ -2524,6 +2622,7 @@ export default function App() {
             const newMods = (row.modules || "").split(",").map(Number).filter(Boolean);
             const merged = [...new Set([...getPurchased(), ...newMods])];
             savePurchased(merged);
+            save("last_purchase", { session_id: sessionId, modules: row.modules, at: Date.now() }); // อ้างอิงตอนขอใบกำกับภาษี
             if (!cancelled) { setStripeVerify("ok"); setPage("course"); }
             return;
           }
@@ -2640,6 +2739,7 @@ export default function App() {
           case "certificate": return <Certificate user={user} go={go}/>;
           case "minicert": return <MiniCert user={user} go={go}/>;
           case "booking": return <Booking go={go}/>;
+          case "taxinvoice": return <TaxInvoicePage go={go} user={user}/>;
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
