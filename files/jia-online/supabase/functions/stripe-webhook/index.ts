@@ -6,6 +6,8 @@
 //   ตอนนี้ match ด้วย stripe_session_id ที่ stripe-checkout ผูกไว้กับแถวนั้นโดยเฉพาะ
 //
 // Auth: ตรวจ Stripe-Signature ด้วย STRIPE_WEBHOOK_SECRET (fail closed อยู่แล้วในโค้ดเดิม)
+// ตรวจด้วย constructEventAsync — Deno ใช้ SubtleCrypto ซึ่งเป็น async เท่านั้น
+// เวอร์ชัน sync (constructEvent) โยน error ทุกครั้ง ทำให้ webhook ตอบ 400 ตลอด
 // Secrets ที่ใช้: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SUPABASE_SERVICE_ROLE_KEY
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -30,7 +32,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.text();
-    const event = stripe.webhooks.constructEvent(body, signature, endpointSecret);
+    const event = await stripe.webhooks.constructEventAsync(body, signature, endpointSecret);
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
