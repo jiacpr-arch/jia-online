@@ -1,0 +1,23 @@
+name: build
+
+# ตรวจว่าหน้าเว็บ build ผ่านทุก PR และทุก push เข้า main (repo นี้ไม่มี lint/test script — build คือด่านขั้นต่ำ)
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: files/jia-online
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: files/jia-online/package-lock.json
+      - run: npm ci
+      - run: npm run build

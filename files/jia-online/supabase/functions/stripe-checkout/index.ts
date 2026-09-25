@@ -9,7 +9,9 @@
 //   - ต่อท้าย successUrl ด้วย session_id={CHECKOUT_SESSION_ID} ให้ Stripe แทนค่าให้เอง
 // type อื่น (เช่น "booking") ไม่รับแล้ว — path เดิมเชื่อ items/amount จาก client และไม่มี caller จริง
 //
-// POST { type, items, metadata:{phone,modules,name}, successUrl, cancelUrl }
+// POST { type, items, metadata:{phone,modules,name,ref_code?}, successUrl, cancelUrl }
+//   ref_code: โค้ดชวนเพื่อน (referral_codes) — ถ้าถูกต้องและไม่ใช่เบอร์ของเจ้าของโค้ดเอง ลด REFERRAL_DISCOUNT_PCT
+//   ตรวจ/คำนวณฝั่ง server ทั้งหมด (client แค่ส่งโค้ดมา) แล้วแนบใน metadata ให้ stripe-webhook บันทึกยอดตอนจ่ายจริง
 // Secrets ที่ใช้: STRIPE_SECRET_KEY, SUPABASE_SERVICE_ROLE_KEY (มีอยู่แล้ว)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -39,6 +41,20 @@ function calcPrice(count: number): number {
     : count * PRICING.single;
   return Math.min(tiered, PRICING.full);
 }
+// ส่วนลดเพื่อนแนะนำ — ต้องตรงกับ REFERRAL_DISCOUNT_PCT ใน src/lib/core.jsx (ใช้แค่แสดงผลฝั่งเว็บ)
+const REFERRAL_DISCOUNT_PCT = 20;
+const phoneTail = (p: string) => String(p || "").replace(/\D/g, "").slice(-9);
+// คืน code ที่ใช้ได้ (ตัวพิมพ์ใหญ่) หรือ null — ห้ามใช้โค้ดของตัวเอง (เบอร์ผู้ซื้อ = เบอร์เจ้าของโค้ด)
+async function validReferral(rawCode: unknown, buyerPhone: string): Promise<string | null> {
+  const code = String(rawCode || "").trim().toUpperCase();
+  if (!/^R[A-Z0-9]{6}$/.test(code)) return null;
+  const { data } = await supa.from("referral_codes").select("code, customers(tel)").eq("code", code).maybeSingle();
+  if (!data) return null;
+  const ownerTel = (data as any).customers?.tel || "";
+  if (ownerTel && phoneTail(ownerTel) === phoneTail(buyerPhone)) return null;
+  return code;
+}
+
 // id 1 ฟรีอยู่แล้ว, id 7 คือแบบทดสอบสุดท้าย (ปลดล็อกอัตโนมัติเมื่อผ่านบท 1-6) — ซื้อได้เฉพาะ 2-6
 const MODULE_NAMES: Record<number, string> = {
   2: "บทที่ 2: CPR ทารก",
@@ -72,11 +88,15 @@ Deno.serve(async (req) => {
       const uniqueMods = [...new Set(modIds)].filter((id) => MODULE_NAMES[id]);
       if (!uniqueMods.length) return json({ error: "no valid modules" }, 400);
 
-      const amount = calcPrice(uniqueMods.length);
+      const listPrice = calcPrice(uniqueMods.length);
+      let refCode: string | null = null;
+      try { refCode = await validReferral(metadata?.ref_code, phone); } catch { refCode = null; }
+      const discount = refCode ? Math.floor(listPrice * REFERRAL_DISCOUNT_PCT / 100) : 0;
+      const amount = listPrice - discount;
       const lineItems = [{
         price_data: {
           currency: "thb",
-          product_data: { name: `JIA Online: ${uniqueMods.map((id) => MODULE_NAMES[id]).join(", ")}` },
+          product_data: { name: `JIA Online: ${uniqueMods.map((id) => MODULE_NAMES[id]).join(", ")}${refCode ? ` (ส่วนลดเพื่อนแนะนำ ${REFERRAL_DISCOUNT_PCT}%)` : ""}` },
           unit_amount: amount * 100,
         },
         quantity: 1,
@@ -105,12 +125,15 @@ Deno.serve(async (req) => {
         mode: "payment",
         success_url: successUrlFinal,
         cancel_url: cancelUrl || "https://cpr.morroo.com",
-        metadata: { type: "online_purchase", phone, modules: uniqueMods.join(","), name, purchase_id: pending.id },
+        metadata: {
+          type: "online_purchase", phone, modules: uniqueMods.join(","), name, purchase_id: pending.id,
+          ...(refCode ? { ref_code: refCode, ref_discount: String(discount) } : {}),
+        },
       });
 
       await supa.from("online_purchases").update({ stripe_session_id: session.id }).eq("id", pending.id);
 
-      return json({ url: session.url, sessionId: session.id });
+      return json({ url: session.url, sessionId: session.id, amount, discount });
     }
 
     // ไม่รับ type อื่นแล้ว — path เดิมเชื่อ items/amount จาก client ตรงๆ (สร้าง session

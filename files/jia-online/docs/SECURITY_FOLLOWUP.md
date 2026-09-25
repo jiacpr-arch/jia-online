@@ -47,6 +47,26 @@ migration ที่ auto-apply
   ยืนยันตัวตนแล้วจาก server) — ยังไม่ได้ตัด PATCH แบบไม่ยืนยันตัวตนออกทั้งหมด (ดูหมายเหตุใน
   `grade-quiz`/`src/App.jsx`) รอ Hub central `exam_results` (unified-identity Phase 10-11) มาแทนที่
 
+## รอบ 25 กันยายน 2569 — หน้าเว็บเลิกอ่าน/แก้ `customers` ตรงด้วย anon key
+
+พบว่า policy บน `customers` / `online_students` ยังเปิดกว้างมาก (`anon_read` SELECT true, `anon_update` UPDATE true,
+`anon_insert`) — ใครมี publishable key ที่อยู่ในบันเดิลก็ดึงชื่อ/เบอร์/อีเมลลูกค้าทั้งหมดได้ และแก้แถวไหนก็ได้
+ช่องโหว่ที่ใช้โจมตีได้จริงจากโค้ดเดิมของหน้าเว็บนี้: `PATCH customers?tel=ilike.*<เบอร์เหยื่อ>` ตั้ง `line_link_code`
+เป็นโค้ดของผู้โจมตี → ส่ง `JIA-LINK-<โค้ด>` เข้า LINE OA → `line-webhook` ผูก LINE ผู้โจมตีเข้ากับลูกค้าเหยื่อ (รับข้อความ/คูปองแทน)
+
+แก้ในรอบนี้ (ฝั่งหน้าเว็บนี้):
+- ✅ ผูกโค้ด LINE ผ่าน RPC `customer_set_line_link` (ต้องมี customer_id+เบอร์ตรงกัน หรือถ้าไม่มี customer_id แก้ได้เฉพาะแถวที่ยัง
+  ไม่เคยผูก LINE) และเช็คสถานะผ่าน `customer_line_linked` (ต้องรู้เบอร์+โค้ด) — หน้าเว็บนี้ไม่ SELECT/PATCH `customers` ตรงแล้ว
+- ✅ ทุกเส้นทางสมัคร (SignupGate/Claim) เก็บ `customer_id` ไว้ในเครื่อง + หน้าร้านไม่เขียนทับ user เดิมอีก
+- ✅ ระบบใหม่ทุกตัว (ชวนเพื่อน, พอร์ทัล HR, ใบกำกับภาษี, รีวิว) ใช้ตาราง RLS default-deny + RPC เท่านั้น
+
+ยังค้าง (ต้องตัดสินใจ/ทำต่อ):
+- ⏳ **ปิด `anon_read` / `anon_update` บน `customers`** — หน้าเว็บนี้ไม่ต้องใช้แล้ว (ยกเว้น INSERT ตอนสมัคร และ PATCH
+  `online_students` ด้วยเบอร์ที่ยังเหลือ) ต้องตรวจแอปอื่นในเครือก่อน: ดู `pg_stat_statements` ว่ายังมี anon query
+  `customers` จากที่อื่นไหม แล้วค่อย `drop policy` (ทำเมื่อพร้อม ไม่อยู่ใน migration ที่ apply อัตโนมัติ)
+- ⏳ `online_students` PATCH ด้วยเบอร์+ชื่อ (คะแนนรายบท/สถานะจบ) — ควรย้ายไปทำใน `grade-quiz` ฝั่ง server
+- ⏳ เปิด **Leaked password protection** ใน Supabase Dashboard (ยังไม่ได้เปิด — ต้องกดเองในแดชบอร์ด)
+
 ## ข้อสอบปลายภาค: บังคับ identity จริง + จำกัดจำนวนครั้ง + เลิกคืนเฉลย — 23 กันยายน 2569
 
 `grade-quiz` (`supabase/functions/grade-quiz/index.ts`) เดิมมีช่องโหว่จริง 2 จุด แก้แล้วในรอบนี้

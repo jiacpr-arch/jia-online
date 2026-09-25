@@ -1,789 +1,19 @@
 import { Analytics } from "@vercel/analytics/react";
 import { track } from "@vercel/analytics";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import GamePage from "./game/GamePage";
 import { shuffled } from "./game/storyEngine";
-
-// ==================== BRAND ====================
-const B = { red: "#C8102E", dkRed: "#9B0020", black: "#1A1A1A", white: "#FFFFFF", cream: "#FFF8F0", gray: "#F5F5F5", ltGray: "#E8E8E8", dkGray: "#666", green: "#22C55E", gold: "#F59E0B" };
-const SERIF = "'Bai Jamjuree', 'Noto Sans Thai', sans-serif"; // ฟอนต์ใบประกาศ (หัวข้อ + ชื่อผู้เรียน)
-
-// ========== CONFIG ==========
-const FREE_LAUNCH = false; // cutover แล้ว (ก.ค. 2569) — บทที่ 1 ฟรี บทที่เหลือเก็บเงินตาม PRICING, Claim CTA เปิดใช้งาน
-const LAUNCH_END = "31 กรกฎาคม 2569";
-const LINE_URL = "https://line.me/R/ti/p/@jiacpr";
-const LINE_QR_URL = "https://qr-official.line.me/sid/L/jiacpr.png";
-// ========== META PIXEL (Facebook Ads) ==========
-// แมป event ภายใน → Meta standard event เพื่อใช้เป็นเป้า optimize โฆษณาได้ตรงๆ
-// (base pixel code + PageView อยู่ใน index.html — dataset "morroo" 966371002896288)
-const FB_EVENT_MAP = {
-  signup_complete: "CompleteRegistration",   // สมัครสำเร็จ = คอนเวอร์ชันหลัก
-  register_complete: "CompleteRegistration", // ลงทะเบียนรับใบประกาศฯ
-  line_oa_added: "Lead",                     // แอด LINE OA แล้ว
-  line_oa_confirm_added: "Lead",             // กดยืนยัน "เพิ่มเพื่อนแล้ว"
-  teaser_quiz_complete: "ViewContent",       // ทำควิซเกริ่นนำจบ (สนใจจริง)
-};
-const fbTrack = (name, props) => {
-  try {
-    if (typeof window === "undefined" || !window.fbq) return;
-    const std = FB_EVENT_MAP[name];
-    if (std) window.fbq("track", std, props || {});
-    else window.fbq("trackCustom", name, props || {}); // เก็บ event ที่เหลือไว้ทำ Custom Audience
-  } catch (e) {}
-};
-const safeTrack = (name, props) => { try { track(name, props); } catch(e) {} try { fbTrack(name, props); } catch(e) {} };
-const genLinkCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
-// token สุ่มต่อท้ายชื่อไฟล์สลิป — bucket เป็น public, ชื่อไฟล์เดิม (ชื่อ+timestamp) เดาได้ง่าย
-const randToken = () => Math.random().toString(36).slice(2, 10);
-const getLinkCode = () => { let code = load("line_link_code", null); if (!code) { code = genLinkCode(); save("line_link_code", code); } return code; };
-// ล้างสถานะผู้เรียนทั้งหมด (เปลี่ยนคนเรียนบนเครื่องเดิม) — ลบทุกคีย์ jia_* ยกเว้นเซสชันแอดมิน
-// กันเคสคนใหม่สืบทอด signed_up/purchased/promo ของคนเก่า แล้วข้ามหน้าสมัคร/รับโค้ดไม่ได้
-const ADMIN_LS_KEYS = new Set(["jia_admin_auth", "jia_admin_key"]);
-const resetLearner = () => {
-  try {
-    const rm = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith("jia_") && !ADMIN_LS_KEYS.has(k)) rm.push(k);
-    }
-    rm.forEach(k => localStorage.removeItem(k));
-  } catch (e) {}
-};
-// ข้อความ prefill ที่ลูกค้ากดส่งเข้า @jiacpr — โค้ด JIA-LINK ต้องอยู่หน้าสุดเสมอ (webhook ภายนอกจับคู่กับ customers.line_link_code → เขียน line_user_id กลับ)
-// นักเรียน pre-course จ่ายเงิน+จองคลาสแล้ว — ข้อความต้องไม่อ้างว่า "ได้รับส่วนลด" (กันเข้าใจผิดเรื่องเงินคืน)
-const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code + "\n" + (isPreCourseStudent()
-  ? "สนใจคอร์ส CPR & AED 🙏 กำลังเรียนทฤษฎีออนไลน์ก่อนเข้าคลาส (pre-course) มีคำถามเรื่องวันอบรมภาคปฏิบัติ สอบถามได้ไหมครับ/คะ"
-  : "สนใจคอร์ส CPR & AED 🙏 เรียนออนไลน์อยู่และได้รับส่วนลดแล้ว อยากนัดวันมาเรียนภาคปฏิบัติ ไม่ทราบว่าสะดวกวันไหนบ้างครับ/ค่ะ"))}`;
-const markLineAdded = (user) => {
-  save("line_added", true); save("line_added_at", new Date().toISOString());
-  safeTrack("line_oa_added"); phCapture("line_oa_added", {});
-  const u = user || load("user", null);
-  if (u?.phone) {
-    const tail = u.phone.replace(/\D/g, "").slice(-9);
-    // ผูก line_link_code ไว้กับเรคคอร์ดลูกค้าก่อน เพื่อให้ line-webhook จับคู่ข้อความ "JIA-LINK-<code>" → เขียน line_user_id กลับได้
-    supaRest("customers", "PATCH", { line_added: true, line_added_at: new Date().toISOString(), line_link_code: getLinkCode() }, `?tel=ilike.*${tail}`);
-  }
-};
-const SUPABASE_URL = "https://tpoiyykbgsgnrdwzgzvn.supabase.co";
-const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
-
-// ========== AUTH GATE (บังคับสมัครหลังจบบท 1) ==========
-const AUTH_GATE_ENABLED = true;          // เปิดด่านบังคับสมัคร (false = กลับไป flow เดิม)
-const LIFF_ID = "2010458255-JAxIKawy";     // LIFF ID จาก LINE Developers (PUBLIC) — channel "JIA CPR Online" / provider JiaTrainingcenter
-// PUBLIC PostHog project key (override ได้ผ่าน env ใน Vercel) — hardcode ไว้เพราะก่อนหน้านี้ env ไม่ได้ตั้ง
-// ทำให้ PostHog เงียบสนิท วัดผลโฆษณาไม่ได้ (โปรเจกต์ "Default project" org JiaLucksa, us.posthog.com)
-const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY || "phc_zYMrFeM7HEGEBUdgeyixzNw24pt5XUom38QAAJfAwgLr";
-const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com";
-const GATE_VARIANT_DEFAULT = "soft"; // soft (แอด LINE แบบข้ามได้ ลด drop) | before-course (ควิซเกริ่นนำ→สมัคร→เข้าคอร์ส) | after-lesson-1
-const FN_URL = (n) => `${SUPABASE_URL}/functions/v1/${n}`;
-// LINE เป็นล็อกอินหลักของทั้ง cpr.morroo.com และ class.jiacpr.com (คนละเว็บ บัญชีเดียวกัน) —
-// เรียก edge function "line-auth" ของ Hub (repo jia-learning-hub) ตรง ๆ จากเบราว์เซอร์ ไม่ใช่ของเว็บนี้เอง
-const HUB_LINE_AUTH_URL = FN_URL("line-auth");
-// ห้ามใส่ Authorization ตรงนี้ — line-auth ตีความ header Bearer ว่าเป็นโหมด "เชื่อมบัญชีที่ล็อกอินอยู่แล้ว"
-// (link mode) ถ้าส่ง publishable key ไปจะถูกตีความเป็น token ผู้ใช้ปลอม แล้วโดนปฏิเสธด้วย 401
-const LINE_AUTH_HEADERS = { "Content-Type": "application/json", apikey: SUPABASE_KEY };
-
-// ========== PRICING ==========
-const PRICING = {
-  single: 35,       // ฿35 ต่อหัวข้อ
-  bundle3: 100,     // ฿100 ต่อ 3 หัวข้อ
-  full: 149,        // ฿149 Full Course + Final Exam
-  freeModule: 1,    // บทที่ 1 ฟรี (CPR ผู้ใหญ่)
-};
-
-// ========== PROMO CODE (Lead Capture) ==========
-const PROMO_ENABLED = true;                 // เปิดระบบ lead-capture (ปิดเพื่อซ่อน CTA ทั้งหมด)
-const PROMO_FREE_MODULES = [1, 2, 3];       // โค้ดปลดล็อก: CPR ผู้ใหญ่ + ทารก + Choking ผู้ใหญ่
-const PROMO_EXPIRY_DAYS = 7;                // โค้ดหมดอายุภายใน 7 วันหลัง claim
-const PROMO_CODE_PREFIX = "LEAD-";          // prefix แยกจาก JIA- (on-site coupon)
-const VOUCHER_ALL_MODULES = [1, 2, 3, 4, 5, 6, 7]; // voucher เต็มคอร์ส: ปลดล็อกทุกบท + แบบทดสอบสุดท้าย
-const STANDING_NEVER_EXPIRES = "2099-12-31T23:59:59Z"; // sentinel: โค้ดกลางที่ตั้งให้ไม่หมดอายุ
-const VOUCHER_SOURCES = [
-  { value: "voucher_sale", label: "ขาย Voucher" },
-  { value: "pre_course",   label: "Pre-course (ก่อนเข้าคลาสจริง)" },
-];
-const LEAD_SOURCES = [
-  { value: "facebook",  label: "Facebook (เพจ JIA หรือกลุ่ม)" },
-  { value: "tiktok",    label: "TikTok" },
-  { value: "instagram", label: "Instagram" },
-  { value: "line_oa",   label: "LINE Official @jiacpr" },
-  { value: "google",    label: "Google ค้นหา" },
-  { value: "friend",    label: "เพื่อน/คนรู้จักแนะนำ" },
-  { value: "workplace", label: "ที่ทำงาน/โรงเรียน" },
-  { value: "youtube",   label: "YouTube" },
-  { value: "event",     label: "งาน/อีเวนต์ออฟไลน์" },
-  { value: "other",     label: "อื่นๆ (โปรดระบุ)" },
-];
-
-// ========== PARTNER COUPON (QR ใบละ 1 สิทธิ์ — ธุรกิจพันธมิตรแจกให้ลูกค้าเรียนคอร์สเต็มฟรี) ==========
-const SITE_URL = "https://cpr.morroo.com";
-const PARTNER_SOURCE = "partner_coupon";
-const genPartnerCode = (prefix) => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = (prefix || "JIA") + "-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
-// LINE ID พาร์ทเนอร์ → ลิงก์เปิดแชต: ใส่ลิงก์เต็มมาก็ใช้ตรงๆ, "@..." = LINE OA, อื่นๆ = LINE ส่วนตัว (เลข ID)
-const partnerLineUrl = (v) => {
-  const s = (v || "").trim();
-  if (!s) return null;
-  if (/^https?:\/\//i.test(s)) return s;
-  if (s.startsWith("@")) return `https://line.me/R/ti/p/${encodeURIComponent(s)}`;
-  return `https://line.me/ti/p/~${encodeURIComponent(s)}`;
-};
-const getPartnerSponsor = () => load("partner_sponsor", null);
-
-const supaRest = async (table, method = "GET", body = null, filters = "") => {
-  const url = `${SUPABASE_URL}/rest/v1/${table}${filters}`;
-  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" };
-  if (method === "POST" || method === "PATCH") h.Prefer = "return=representation";
-  const opts = { method, headers: h };
-  if (body && method !== "GET" && method !== "DELETE") opts.body = JSON.stringify(body);
-  try { const res = await fetch(url, opts); return res.ok ? (await res.text().then(t => t ? JSON.parse(t) : [])) : []; } catch(e) { console.error("Supabase:", e); return []; }
-};
-
-// เรียก SECURITY DEFINER RPC (ใช้กับ lead_promo_codes ที่ปิด anon SELECT/INSERT/UPDATE ตรงแล้ว)
-// ฟังก์ชันคืน TABLE → PostgREST ส่งกลับเป็น array; error → คืน null
-const supaRpc = async (fn, args = {}) => {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
-      method: "POST",
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify(args),
-    });
-    if (!res.ok) return null;
-    const t = await res.text();
-    return t ? JSON.parse(t) : null;
-  } catch (e) { console.error("Supabase RPC:", e); return null; }
-};
-
-// ===== Admin data access ผ่าน server-side admin-api (ใช้ service_role หลังด่านรหัสแอดมิน) =====
-// รหัสแอดมินถูกส่งเป็น x-admin-key ให้ edge function ตรวจฝั่ง server แล้วจึงเข้าถึงข้อมูล
-// (เลิกใช้ anon key อ่าน/เขียนตาราง PII จากฝั่ง client — ตัด client-trust)
-let _adminKey = null;
-try { _adminKey = sessionStorage.getItem("jia_admin_key") || null; } catch (e) {}
-const setAdminKey = (k) => { _adminKey = k || null; try { if (k) sessionStorage.setItem("jia_admin_key", k); else sessionStorage.removeItem("jia_admin_key"); } catch (e) {} };
-const adminRest = async (table, method = "GET", body = null, filters = "") => {
-  try {
-    const res = await fetch(FN_URL("admin-api"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "x-admin-key": _adminKey || "" },
-      body: JSON.stringify({ table, method, filters, body }),
-    });
-    if (!res.ok) return [];
-    const t = await res.text(); return t ? JSON.parse(t) : [];
-  } catch (e) { console.error("adminApi:", e); return []; }
-};
-const adminPing = async (key) => {
-  try {
-    const res = await fetch(FN_URL("admin-api"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "x-admin-key": key || "" },
-      body: JSON.stringify({ table: "__ping" }),
-    });
-    return res.ok;
-  } catch (e) { return false; }
-};
-const genCoupon = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "JIA-"; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
-
-// ออกคูปอง ฿100 ผ่าน RPC ฝั่งเซิร์ฟเวอร์ (class.jiacpr.com's public.issue_online_coupon) แทนการสุ่มโค้ด
-// เองแล้ว POST เข้า promo_codes ตรงจาก client แบบเดิม (Hub ปิด anon insert บนตารางนี้แล้ว — ช่องโหว่เดิม)
-// เซิร์ฟเวอร์ตรวจสิทธิ์จาก customer_id + เบอร์โทรที่ตรงกับ public.customers และต้องมี
-// online_students.completed_at ของ customer นั้นตั้งไว้แล้วจึงจะออกโค้ดให้ (เรียกซ้ำปลอดภัย คืนโค้ดเดิม)
-// คืน null ถ้าออกไม่สำเร็จ (ยังไม่ผ่านเกณฑ์ / ไม่มี customer_id ฯลฯ) — ผู้เรียกต้องรับมือกรณีนี้เอง
-const issueOnlineCoupon = async (customerId, phone) => {
-  const cleanPhone = (phone || "").replace(/\D/g, "");
-  if (!customerId || cleanPhone.length < 9) return null;
-  const res = await supaRpc("issue_online_coupon", { p_customer_id: customerId, p_phone: cleanPhone });
-  return res && res.issued && res.code ? res.code : null;
-};
-
-// แคมเปญคูปองจากเกม — แจกเฉพาะช่วงแคมเปญเท่านั้น (นอกช่วง ชนะเกมจะไม่ออกคูปอง) + คูปองหมดอายุวันสุดท้ายของช่วง
-// ✏️ เพิ่ม/แก้แถวเพื่อเปิดแคมเปญใหม่ (YYYY-MM-DD ตามเวลาไทย) — แคมเปญวันเดียวใช้ start = end
-// key = ลิงก์เฉพาะกิจ: คูปองออกเฉพาะคนที่เข้าผ่าน ?camp=<key> เท่านั้น (คนเข้าเว็บเองไม่ได้) — ไม่ใส่ key = ได้ทุกคนในช่วงวัน
-// unlockCourse = เข้าผ่านลิงก์ในวันแคมเปญ → ปลดคอร์สออนไลน์ครบทุกบท (สิทธิ์ติดเครื่องถาวร เรียนต่อ/สอบ/
-// รับใบประกาศวันหลังได้ — รับสิทธิ์ได้เฉพาะวันแคมเปญเท่านั้น; ด่านสมัคร+ดูวิดีโอ+สอบ ยังบังคับตามปกติ)
-const GAME_VOUCHER_CAMPAIGNS = [
-  { start: "2026-08-06", end: "2026-08-06", event: "แคมเปญ LINE @jiacpr", key: "line0806", unlockCourse: true }, // auto-reply แอด LINE OA 6 ส.ค. — วันเดียว + ผ่านลิงก์เท่านั้น
-  { start: "2026-10-01", end: "2026-10-31", event: "งาน TCAS Fair" },
-];
-const activeGameVoucherCampaign = () => {
-  const t = todayISOTH();
-  return GAME_VOUCHER_CAMPAIGNS.find(c => t >= c.start && t <= c.end && (!c.key || load("game_camp", null) === c.key)) || null;
-};
-const todayISOTH = () => { const t = new Date(Date.now() + 7 * 3600 * 1000); return t.toISOString().slice(0, 10); }; // วันนี้เวลาไทย (UTC+7)
-const thaiShortDate = (iso) => { try { const [y, m, d] = iso.split("-").map(Number); const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; return `${d} ${months[m - 1]} ${(y + 543) % 100}`; } catch (e) { return iso; } };
-const genLeadCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = PROMO_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
-const VOUCHER_CODE_PREFIX = "VCH-"; // voucher เต็มคอร์ส (ขาย/pre-course) — แยก prefix จาก LEAD- (lead-capture ฟรี 3 บท)
-const genVoucherCode = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = VOUCHER_CODE_PREFIX; for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
-const normalizePhone = (s) => (s || "").replace(/\D/g, "");
-const normalizeEmail = (s) => (s || "").trim().toLowerCase();
-const daysUntil = (iso) => { if (!iso) return 0; const ms = new Date(iso).getTime() - Date.now(); return Math.max(0, Math.ceil(ms / 86400000)); };
-const genIdempotencyKey = (email, phone) => `${normalizeEmail(email)}|${normalizePhone(phone)}|${Math.floor(Date.now() / 60000)}`.slice(0, 80);
-const save = (k, v) => { try { localStorage.setItem(`jia_${k}`, JSON.stringify(v)); } catch(e){} };
-const load = (k, d) => { try { const v = localStorage.getItem(`jia_${k}`); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
-
-// ========== QUIZ RANDOMIZATION ==========
-// สุ่มโจทย์จากคลัง + สลับลำดับตัวเลือก พร้อม remap เฉลย ทุกครั้งที่เข้าทำแบบทดสอบ
-const QUIZ_DRAW_N = (mod) => (mod.vid ? 5 : 10); // บทเรียน 5 ข้อ, ข้อสอบสุดท้าย 10 ข้อ
-// เฉลยไม่อยู่ในบันเดิลแล้ว (ย้ายไป edge function grade-quiz) — จำ index คำถามต้นฉบับ (i)
-// และลำดับสุ่มของตัวเลือก (order) ไว้ เพื่อแปลงคำตอบกลับเป็น index ต้นฉบับตอนส่งตรวจ
-const drawQuiz = (mod) =>
-  shuffled(mod.quiz.map((q, i) => ({ ...q, i }))).slice(0, Math.min(QUIZ_DRAW_N(mod), mod.quiz.length)).map((q) => {
-    const order = shuffled(q.c.map((_, i) => i));
-    return { q: q.q, c: order.map((i) => q.c[i]), i: q.i, order };
-  });
-
-// ========== AUTH HELPERS (LIFF / Supabase Auth / PostHog — โหลดแบบ on-demand) ==========
-let _liff = null;
-const loadLiff = async () => {
-  if (_liff) return _liff;
-  if (!LIFF_ID) return null;
-  try { const mod = await import("@line/liff"); const liff = mod.default || mod; await liff.init({ liffId: LIFF_ID }); _liff = liff; return liff; }
-  catch (e) { console.error("liff init", e); return null; }
-};
-let _supa = null;
-const getSupabase = async () => {
-  if (_supa) return _supa;
-  const { createClient } = await import("@supabase/supabase-js");
-  _supa = createClient(SUPABASE_URL, SUPABASE_KEY);
-  return _supa;
-};
-let _ph = null, _phTried = false;
-const getPosthog = async () => {
-  if (_phTried) return _ph;
-  _phTried = true;
-  if (!POSTHOG_KEY) return null;
-  // capture_pageview: true → ได้ $pageview พร้อม utm_* /fbclid อัตโนมัติทุกครั้งที่เปิด (ไว้วัดผลโฆษณา)
-  try { const mod = await import("posthog-js"); const posthog = mod.default || mod; posthog.init(POSTHOG_KEY, { api_host: POSTHOG_HOST, capture_pageview: true }); _ph = posthog; return posthog; }
-  catch (e) { return null; }
-};
-const phCapture = (name, props) => { getPosthog().then(ph => { try { ph && ph.capture(name, props); } catch(e){} }); };
-
-const getGateVariant = () => load("gate_variant", GATE_VARIANT_DEFAULT);
-const isSignedUp = () => { const u = load("user", null); return !!(load("signed_up", false) || u?.line_user_id || u?.auth_user_id); };
-// นักเรียน pre-course = redeem โค้ดที่ source เป็น pre_course (เช่น JIA-STUDENT) — จ่ายค่าคอร์ส
-// on-site เต็มราคาแล้ว ห้ามออก/แสดงคูปองส่วนลด ฿100 ซ้ำ (ไม่งั้นถูกทวงส่วนลด/ขอเงินคืน)
-const isPreCourseStudent = () => !!load("pre_course_student", false);
-
-// UTM: เก็บครั้งแรกที่เข้า ก่อน replaceState จะลบ query ทิ้ง
-const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
-const captureUTM = () => {
-  try {
-    const p = new URLSearchParams(window.location.search); const got = {};
-    UTM_KEYS.forEach(k => { const v = p.get(k); if (v) got[k] = v; });
-    if (Object.keys(got).length && !load("utm", null)) { save("utm", got); save("landing_url", window.location.href.slice(0, 500)); }
-  } catch (e) {}
-};
-const getUTM = () => load("utm", {});
-
-const mergeProgressLocal = (a, b) => {
-  const done = [...new Set([...(a?.done || []), ...(b?.done || [])])].sort((x, y) => x - y);
-  const scores = { ...(a?.scores || {}) };
-  for (const [k, v] of Object.entries(b?.scores || {})) scores[k] = Math.max(Number(scores[k] || 0), Number(v || 0));
-  return { done, scores };
-};
-
-const FN_HEADERS = { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
-
-// บันทึก progress ขึ้น account (เรียนต่อข้ามเครื่อง) — เรียกหลัง save("progress") ทุกครั้งถ้า signedUp
-// มี auth_user_id (ล็อกอิน LINE แล้ว) → ใช้ access token สดจาก supabase-js เสมอ (auto-refresh เอง)
-// แทนที่จะใช้ line_id_token ที่เก็บไว้ตอนล็อกอินซึ่งหมดอายุใน ~1 ชม. แล้ว sync เงียบ ๆ ใช้ไม่ได้อีก
-const syncProgressRemote = async (np) => {
-  try {
-    const u = load("user", null); if (!u) return;
-    if (u.auth_user_id) {
-      const supa = await getSupabase();
-      const { data: { session } } = await supa.auth.getSession();
-      if (session?.access_token) {
-        await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress: np }) });
-        return;
-      }
-    }
-    if (u.line_user_id) { const idt = load("line_id_token", null); if (idt) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", id_token: idt, progress: np }) }); }
-  } catch (e) {}
-};
-
-// ผูกโปรไฟล์กลางที่ Hub (learning_hub.people ผ่าน RPC public.jia_identity) — เรียกตรงจากเบราว์เซอร์ได้เลย
-// เพราะเว็บนี้อยู่ Supabase โปรเจกต์เดียวกับ class.jiacpr.com (tpoiyykbgsgnrdwzgzvn) ไม่ต้องผ่าน /sso หรือ
-// บัตรผ่านแบบที่แอปข้ามโปรเจกต์ (bls/acls) ต้องใช้ — แค่มี Supabase session ของโปรเจกต์นี้ (จาก LINE หรือ
-// อีเมล) ก็เรียก RPC นี้ได้ทันที ให้ชื่อที่ยืนยันแล้ว/บัตรนักเรียนเป็นชุดเดียวกับ Hub และแอปอื่นในเครือ
-// best-effort เสมอ (ไม่มีชื่อให้บันทึกก็แค่คืนโปรไฟล์เปล่า) — พังไม่กระทบ flow ล็อกอินเดิม
-const syncHubIdentity = async (supa, { nameTh = "", phone = "" } = {}) => {
-  try {
-    const { data: me } = await supa.rpc("jia_identity", { action: "me" });
-    if (!me) return null;
-    if (!me.profileComplete && nameTh && nameTh.trim().length >= 2) {
-      const { data: saved } = await supa.rpc("jia_identity", { action: "saveProfile", payload: { nameTh: nameTh.trim(), phone: phone || "", pdpaConsent: true } });
-      return saved || me;
-    }
-    return me;
-  } catch (e) { return null; }
-};
-const pickHub = (p) => (p ? { nameTh: p.nameTh, cardNo: p.cardNo, cardToken: p.cardToken, verifyLevel: p.verifyLevel, nameLocked: p.nameLocked } : undefined);
-
-// เข้าสู่ระบบด้วย LINE — ล็อกอินหลักของทั้ง cpr.morroo.com และ class.jiacpr.com (บัญชีเดียวกัน)
-// ลำดับ: LIFF login (ถ้ายังไม่ได้ล็อกอิน จะนำทางออกจากหน้าแล้วกลับมาทำต่อตอน mount) → line-auth ของ Hub
-// (ยืนยัน id_token กับ LINE จริง คืน token_hash ใช้ครั้งเดียว ไม่ใช่ session ตรง ๆ) → แลกเป็น Supabase
-// session ด้วย verifyOtp ฝั่งเบราว์เซอร์เอง → ผูกลูกค้าเดิม (ถ้าเคยกรอกชื่อ-เบอร์ไว้) เข้ากับบัญชีนี้ก่อน
-// → auth-line-link (เดิม: upsert customers/course_progress + ออกคูปอง + ส่งข้อความต้อนรับ) → resolve
-// ให้ตรงกับ Hub ผ่าน jia_online_account('me') แล้วค่อยบันทึกลง localStorage → sync โปรไฟล์กลาง (บัตรนักเรียน)
-// silent=true = เรียกจากเอฟเฟกต์ auto-link เงียบ ๆ ในแอป LINE — ถ้ายังไม่ได้ล็อกอิน LIFF จะไม่บังคับ redirect
-const signInWithLine = async ({ phone = "", name = "", silent = false } = {}) => {
-  const liff = await loadLiff();
-  if (!liff) return null;
-  if (!liff.isLoggedIn()) {
-    if (silent) return null;
-    save("line_login_pending", { phone, name, gate_variant: getGateVariant() });
-    liff.login({ redirectUri: window.location.href });
-    return null; // เบราว์เซอร์กำลังจะนำทางออกไปหน้า LINE login
-  }
-  let idToken = null; try { idToken = liff.getIDToken(); } catch (e) {}
-  if (!idToken) return null;
-
-  const callLineAuth = async () => {
-    const res = await fetch(HUB_LINE_AUTH_URL, { method: "POST", headers: LINE_AUTH_HEADERS, body: JSON.stringify({ idToken }) });
-    let data = {}; try { data = await res.json(); } catch (e) {}
-    return { ok: res.ok, data };
-  };
-  let result = await callLineAuth();
-  if (!result.ok) {
-    // id_token ที่ LIFF ถืออยู่หมดอายุ (~1 ชม.) หรือ LIFF ค้าง session เก่า — บังคับล็อกอินใหม่หนึ่งครั้ง
-    try { liff.logout(); } catch (e) {}
-    if (silent) return null;
-    save("line_login_pending", { phone, name, gate_variant: getGateVariant() });
-    liff.login({ redirectUri: window.location.href });
-    return null;
-  }
-  if (!result.data?.tokenHash) return null;
-
-  const supa = await getSupabase();
-  const { data: verified, error } = await supa.auth.verifyOtp({ token_hash: result.data.tokenHash, type: "magiclink" });
-  if (error || !verified?.session) return null;
-  const authUserId = verified.session.user.id;
-  const switchedAccount = forgetOtherAccount(authUserId);
-  if (switchedAccount) { phone = ""; name = ""; }
-
-  // ผูกแถวลูกค้าเดิม (สมัครด้วยชื่อ+เบอร์แบบไม่ผ่าน LINE มาก่อน) เข้ากับบัญชี LINE ที่เพิ่งล็อกอิน
-  // ก่อนเรียก auth-line-link เสมอ — ไม่งั้น auth-line-link จะมองว่าเป็นคนละคน (จับคู่ด้วย line_user_id
-  // เท่านั้น โดยตั้งใจ กันคนอื่นยึดบัญชีด้วยการกรอกเบอร์ปลายทาง) แล้วสร้างแถวซ้ำ
-  const localUser = load("user", null);
-  if (localUser?.customer_id && !localUser?.auth_user_id && localUser?.phone) {
-    try { await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: localUser.customer_id, phone: localUser.phone } }); } catch (e) {}
-  }
-
-  save("line_id_token", idToken);
-  let profile = {}; try { profile = await liff.getProfile(); } catch (e) {}
-  let isFriend = true; try { const fs = await liff.getFriendship(); isFriend = !!fs?.friendFlag; } catch (e) {}
-  const usePhone = phone || localUser?.phone || "";
-  const useName = name || localUser?.name || profile.displayName || "";
-  const linkRes = await fetch(FN_URL("auth-line-link"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({
-    id_token: idToken, phone: usePhone, pdpa: true, display_name: useName,
-    utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
-    gate_variant: getGateVariant(),
-    pre_course: isPreCourseStudent(), // ให้ server ข้ามการออกคูปอง ฿100 + ข้อความขายให้นักเรียน pre-course
-  }) });
-  let linkData = {}; try { linkData = await linkRes.json(); } catch (e) {}
-
-  // ยืนยัน/เติมข้อมูลบัญชีให้ตรงกับที่ Hub เห็น (ผูก course_progress.auth_user_id ที่ auth-line-link
-  // ยังไม่ทันเซ็ตด้วย เผื่อแถว course_progress มาจากรอบก่อนที่ migration cross-site ยังไม่ backfill)
-  let meData = {}; try { const { data } = await supa.rpc("jia_online_account", { action: "me" }); meData = data || {}; } catch (e) {}
-  const hubProfile = await syncHubIdentity(supa, { nameTh: meData.name || linkData.name || useName, phone: meData.phone || usePhone });
-
-  const u = {
-    name: meData.name || linkData.name || useName,
-    phone: meData.phone || usePhone,
-    line_user_id: linkData.line_user_id || meData.lineUserId,
-    auth_user_id: authUserId,
-    customer_id: meData.customerId || linkData.customer_id,
-    hub: pickHub(hubProfile),
-  };
-  save("user", u); save("signed_up", true); save("enrolled", true);
-  save("line_added", false); // ยืนยันแอดจริงตอนกด "เพิ่มเพื่อนแล้ว" (ตรวจ cross-provider ไม่ได้)
-  let progress = linkData.progress || load("progress", { done: [], scores: {} });
-  if (meData.progress) progress = mergeProgressLocal(progress, meData.progress);
-  save("progress", progress);
-  if (linkData.coupon && !isPreCourseStudent()) save("coupon", linkData.coupon);
-  save("signup_pending", null); save("line_login_pending", null);
-  safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
-  phCapture("signup_complete", { provider: "line", variant: getGateVariant() });
-  if (switchedAccount) window.location.reload(); // หน้าจอยังถือความก้าวหน้า/ชื่อของบัญชีก่อนอยู่ในหน่วยความจำ
-  return { user: u, progress, isFriend };
-};
-
-// ========== EMAIL IDENTITY (ทางเลือกสำรอง — LINE เป็นหลัก อีเมลเป็นรอง) ==========
-// ไม่สร้างลูกค้าใหม่/ไม่แทนที่ flow สมัครเดิม — ใช้ "ผูก" (attachLocal) เข้ากับแถวลูกค้าที่มีอยู่แล้ว
-// จากการสมัครด้วยชื่อ-เบอร์ (SignupGate/Register/Claim ทุกทาง) เข้ากับ Supabase session จริงที่ยืนยัน
-// อีเมลแล้ว — เหมือนกับที่ signInWithLine ทำก่อนเรียก auth-line-link ทุกอย่าง เพียงแต่ไม่มี auth-line-link
-// ให้เรียก (ฟังก์ชันนั้นผูกกับ id_token ของ LINE เท่านั้น) จึงไม่แตะ customers/online_students/coupon เลย
-// ปลอดภัยกับทุก entry point ที่มีอยู่แล้วโดยไม่ต้องแก้ตรรกะการสร้างลูกค้า/คอร์สที่มีความเสี่ยงสูงกว่า
-const requestEmailIdentityOtp = async (email) => {
-  const supa = await getSupabase();
-  const { error } = await supa.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
-  if (error) throw Error(error.message || "ส่งรหัส OTP ไม่สำเร็จ กรุณาลองใหม่");
-};
-const verifyEmailIdentityOtp = async ({ email, token }) => {
-  const supa = await getSupabase();
-  const { data, error } = await supa.auth.verifyOtp({ email, token, type: "email" });
-  if (error || !data?.session) throw Error("รหัส OTP ไม่ถูกต้องหรือหมดอายุ");
-  const authUserId = data.session.user.id;
-  const switchedAccount = forgetOtherAccount(authUserId);
-  const localUser = load("user", null);
-  if (localUser?.customer_id && !localUser?.auth_user_id && localUser?.phone) {
-    try { await supa.rpc("jia_online_account", { action: "attachLocal", payload: { customerId: localUser.customer_id, phone: localUser.phone } }); } catch (e) {}
-  }
-  let meData = {}; try { const { data: d } = await supa.rpc("jia_online_account", { action: "me" }); meData = d || {}; } catch (e) {}
-  const hubProfile = await syncHubIdentity(supa, { nameTh: localUser?.name || meData.name || "", phone: localUser?.phone || meData.phone || "" });
-  const u = {
-    ...(localUser || {}),
-    name: meData.name || localUser?.name || "",
-    phone: meData.phone || localUser?.phone || "",
-    customer_id: meData.customerId || localUser?.customer_id,
-    auth_user_id: authUserId,
-    hub: pickHub(hubProfile) || localUser?.hub,
-  };
-  save("user", u); save("signup_pending", null);
-  let progress = load("progress", { done: [], scores: {} });
-  if (meData.progress) { progress = mergeProgressLocal(progress, meData.progress); save("progress", progress); }
-  safeTrack("identity_verified", { provider: "email" }); phCapture("identity_verified", { provider: "email" });
-  if (switchedAccount) window.location.reload(); // หน้าจอยังถือความก้าวหน้า/ชื่อของบัญชีก่อนอยู่ในหน่วยความจำ
-  return { user: u, progress };
-};
-
-// ========== ออกจากระบบ (บัญชี JIA บนเครื่องนี้ + ที่ class.jiacpr.com) ==========
-// cpr.morroo.com ลงทะเบียนที่ Hub เป็น client "cpr-online" — หน้า class.jiacpr.com/sso/logout ปิด session ของ Hub
-// (ไม่งั้นคนถัดไปบนเครื่องเดียวกันเข้า Hub แล้วอยู่ในบัญชีเดิม) แล้วพากลับมาที่ return_path บนเว็บนี้
-const HUB_LOGOUT_URL = "https://class.jiacpr.com/sso/logout";
-const HUB_CLIENT_ID = "cpr-online";
-const HUB_REDIRECT_URI = "https://cpr.morroo.com/auth/hub/callback";
-const hasLiffLogin = () => { try { for (let i = 0; i < localStorage.length; i++) { if ((localStorage.key(i) || "").startsWith("LIFF_STORE:")) return true; } } catch (e) {} return false; };
-// ปิด session บัญชีบนเครื่องนี้: Supabase ของเว็บนี้ (scope local — เครื่องอื่นของผู้เรียนไม่หลุด) + LINE Login ของ LIFF
-// นอกแอป LINE (ไม่งั้นคนถัดไปกด "เข้าสู่ระบบด้วย LINE" แล้วได้บัญชี LINE เดิมทันทีโดยไม่ถาม)
-const endAccountSession = async () => {
-  try { const supa = await getSupabase(); await supa.auth.signOut({ scope: "local" }); } catch (e) {}
-  try {
-    if (_liff || hasLiffLogin()) {
-      const liff = await loadLiff();
-      if (liff && !liff.isInClient() && liff.isLoggedIn()) liff.logout();
-    }
-  } catch (e) {}
-};
-// ไปหน้า logout ของ Hub (เฉพาะบนโดเมนจริง — Hub ส่งกลับได้แค่ origin ของ redirect ที่ลงทะเบียนไว้) ที่อื่นแค่โหลดหน้าใหม่
-const goHubLogout = (returnPath = "/") => {
-  if (window.location.origin !== new URL(HUB_REDIRECT_URI).origin) { window.location.reload(); return; }
-  const q = new URLSearchParams({ client_id: HUB_CLIENT_ID, redirect_uri: HUB_REDIRECT_URI, return_path: returnPath });
-  window.location.assign(`${HUB_LOGOUT_URL}?${q.toString()}`);
-};
-// "ออกจากระบบ": ปิดบัญชีทุกที่ แต่เก็บข้อมูลการเรียนในเครื่องไว้ (บทที่ซื้อ/ปลดล็อกอยู่ในเครื่องนี้เท่านั้น — ล้างทิ้ง
-// แล้ว login กลับมาก็ไม่คืน) จำไว้ว่าเป็นของบัญชีไหน (signed_out_account) → บัญชีเดิม login กลับมาเรียนต่อได้ทุกอย่าง,
-// คนอื่น login บนเครื่องนี้ = ล้างข้อมูลของคนก่อนก่อน (forgetOtherAccount) ไม่ให้ชื่อ/เบอร์/ความก้าวหน้าไปปนบัญชีใหม่
-// และกันเอฟเฟกต์ auto-link LINE ในแอป LINE ล็อกอินกลับเองเงียบ ๆ จนกว่าจะกดเข้าสู่ระบบเอง
-const logoutAccount = async () => {
-  const u = load("user", null);
-  await endAccountSession();
-  if (u?.auth_user_id) save("signed_out_account", u.auth_user_id);
-  if (u) save("user", { ...u, auth_user_id: undefined, hub: undefined });
-  save("line_id_token", null);
-  goHubLogout("/");
-};
-// "เริ่มใหม่ / เปลี่ยนคนเรียน": ล้างข้อมูลผู้เรียนในเครื่อง + ปิดบัญชีที่ login อยู่ (เดิมล้างแค่ข้อมูล session ยังค้าง)
-const startOverLearner = async () => {
-  const wasSignedIn = !!load("user", null)?.auth_user_id;
-  await endAccountSession();
-  resetLearner();
-  if (wasSignedIn) goHubLogout("/"); else window.location.reload();
-};
-// เรียกหลัง login สำเร็จ (LINE/อีเมล) ก่อนอ่านข้อมูลในเครื่อง — ข้อมูลในเครื่องเป็นของบัญชีที่เพิ่งออกจากระบบไป
-// และคนที่ login ตอนนี้เป็นคนละบัญชี → ล้างก่อน คืน true (ผู้เรียกต้องทิ้งชื่อ/เบอร์ที่อ่านมาจากข้อมูลเดิมด้วย)
-const forgetOtherAccount = (authUserId) => {
-  const prev = load("signed_out_account", null);
-  if (!prev) return false;
-  if (prev === authUserId) { save("signed_out_account", null); return false; }
-  resetLearner();
-  return true;
-};
-
-// ========== CERTIFICATE EXPORT HELPERS (PDF / รูปภาพ) ==========
-const LOGO_SRC = "/logo.png"; // วางไฟล์โลโก้ไว้ที่ files/jia-online/public/logo.png
-const sanitizeFileName = (name) => (name || "ใบประกาศนียบัตร")
-  .normalize("NFC")
-  .replace(/[\\/:*?"<>|]+/g, "")
-  .replace(/\s+/g, "_")
-  .slice(0, 40) || "certificate";
-// แปลง DOM node เป็น PNG data URL ความละเอียดสูง (retina) ด้วย html-to-image (dynamic import → code-split)
-const captureNodeToPng = async (node) => {
-  const { toPng } = await import("html-to-image");
-  if (document.fonts?.ready) { try { await document.fonts.ready; } catch {} } // รอฟอนต์โหลดเสร็จก่อน capture
-  const opts = { pixelRatio: Math.max(2, window.devicePixelRatio || 1), backgroundColor: "#FFFFFF", cacheBust: true, width: node.offsetWidth, height: node.offsetHeight };
-  try {
-    return await toPng(node, opts);
-  } catch (e) {
-    // ฟอนต์ Google (cross-origin) embed ไม่ได้ → ลองใหม่โดยข้ามการฝังฟอนต์ ใช้ serif fallback แทน เพื่อให้ดาวน์โหลดสำเร็จเสมอ
-    return await toPng(node, { ...opts, skipFonts: true });
-  }
-};
-// แชร์ไฟล์ผ่าน share sheet ของมือถือก่อน (เซฟลง Photos/Files หรือส่ง LINE ได้); ถ้าไม่รองรับ → ดาวน์โหลดแบบ <a download>
-const deliverBlob = async (blob, filename, mime) => {
-  try {
-    const file = new File([blob], filename, { type: mime });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: "JIA Certificate" });
-      return;
-    }
-  } catch (e) {
-    if (e && e.name === "AbortError") return; // ผู้ใช้กดยกเลิก share sheet — ถือว่าปกติ
-    // อื่น ๆ: ตกไปใช้ดาวน์โหลดด้านล่าง
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.style.display = "none";
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
-const dataUrlToBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
-
-// กราฟิกตกแต่งใบประกาศ (กรอบทอง + คลื่นน้ำเงิน + ซีล + ริบบิ้น) — ไม่มีข้อความ วางเป็นเลเยอร์พื้นหลัง
-const CERT_DECO = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 900 636" preserveAspectRatio="none">
-<defs>
-<linearGradient id="cg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1D481"/><stop offset="0.5" stop-color="#C49A48"/><stop offset="1" stop-color="#8C6B22"/></linearGradient>
-<linearGradient id="ch" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#B8862F"/><stop offset="0.5" stop-color="#F3DB8E"/><stop offset="1" stop-color="#B8862F"/></linearGradient>
-<radialGradient id="cs" cx="0.35" cy="0.3" r="0.85"><stop offset="0" stop-color="#F6E3A0"/><stop offset="0.55" stop-color="#C9A24B"/><stop offset="1" stop-color="#8C6B22"/></radialGradient>
-</defs>
-<rect width="900" height="636" fill="#FFFDF7"/>
-<g transform="scale(0.85)">
-<path d="M0,0 L232,0 C168,44 92,40 76,112 C60,176 40,170 0,212 Z" fill="#1B315A"/>
-<path d="M0,0 L198,0 C146,36 88,33 74,108 C58,172 36,156 0,186 Z" fill="#0E1E3C"/>
-<path d="M198,0 C146,36 88,33 74,108 C58,172 36,156 0,186" fill="none" stroke="url(#ch)" stroke-width="5.5"/>
-<path d="M232,0 C168,44 92,40 76,112 C60,176 40,170 0,212" fill="none" stroke="url(#ch)" stroke-width="2.2" opacity="0.8"/>
-</g>
-<g transform="translate(900,636) rotate(180) scale(0.85)">
-<path d="M0,0 L232,0 C168,44 92,40 76,112 C60,176 40,170 0,212 Z" fill="#1B315A"/>
-<path d="M0,0 L198,0 C146,36 88,33 74,108 C58,172 36,156 0,186 Z" fill="#0E1E3C"/>
-<path d="M198,0 C146,36 88,33 74,108 C58,172 36,156 0,186" fill="none" stroke="url(#ch)" stroke-width="5.5"/>
-<path d="M232,0 C168,44 92,40 76,112 C60,176 40,170 0,212" fill="none" stroke="url(#ch)" stroke-width="2.2" opacity="0.8"/>
-</g>
-<rect x="22" y="22" width="856" height="592" fill="none" stroke="url(#cg)" stroke-width="2.5"/>
-<rect x="30" y="30" width="840" height="576" fill="none" stroke="url(#cg)" stroke-width="1" opacity="0.6"/>
-<g stroke="url(#cg)" stroke-width="2" fill="none">
-<path d="M838,30 h34 v34"/><path d="M845,38 h22 v22" stroke-width="1"/>
-<path d="M62,606 h-34 v-34"/><path d="M55,598 h-22 v-22" stroke-width="1"/>
-</g>
-<g fill="url(#cg)" stroke="url(#cg)">
-<line x1="305" y1="376" x2="438" y2="376" stroke="#B8862F" stroke-width="1.4"/><line x1="462" y1="376" x2="595" y2="376" stroke="#B8862F" stroke-width="1.4"/>
-<rect x="445" y="371" width="10" height="10" transform="rotate(45 450 376)"/>
-<circle cx="305" cy="376" r="2.2" stroke="none"/><circle cx="595" cy="376" r="2.2" stroke="none"/>
-</g>
-<g transform="translate(160,500)">
-<circle r="34" fill="url(#cs)" stroke="#8C6B22" stroke-width="1.5"/><circle r="26.5" fill="none" stroke="#FFF4D6" stroke-width="1.1" opacity="0.7"/>
-<rect x="-13" y="-11" width="26" height="22" rx="3" fill="#0E1E3C"/><rect x="-13" y="-11" width="26" height="7" rx="3" fill="#1B315A"/>
-<line x1="-7" y1="-15" x2="-7" y2="-8" stroke="#FFF4D6" stroke-width="2.4" stroke-linecap="round"/><line x1="7" y1="-15" x2="7" y2="-8" stroke="#FFF4D6" stroke-width="2.4" stroke-linecap="round"/>
-<g fill="#FFF4D6"><circle cx="-6" cy="0" r="1.5"/><circle cx="0" cy="0" r="1.5"/><circle cx="6" cy="0" r="1.5"/><circle cx="-6" cy="6" r="1.5"/><circle cx="0" cy="6" r="1.5"/></g>
-</g>
-<g transform="translate(740,500)">
-<circle r="34" fill="url(#cs)" stroke="#8C6B22" stroke-width="1.5"/><circle r="26.5" fill="none" stroke="#FFF4D6" stroke-width="1.1" opacity="0.7"/>
-<path transform="translate(-12,-11)" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="#C8102E"/>
-<polyline points="-10,0 -4,0 -1,-5 2,4 5,-1 8,0 11,0" fill="none" stroke="#FFF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
-</g>
-<g transform="translate(450,500)">
-<path d="M-150,-4 l-26,0 l8,15 l-8,15 l26,0 Z" fill="#8C6B22"/><path d="M150,-4 l26,0 l-8,15 l8,15 l-26,0 Z" fill="#8C6B22"/>
-<rect x="-150" y="-29" width="300" height="58" rx="6" fill="#0E1E3C" stroke="url(#ch)" stroke-width="2.5"/>
-<rect x="-144" y="-23" width="288" height="46" rx="4" fill="none" stroke="url(#ch)" stroke-width="0.8" opacity="0.55"/>
-</g>
-</svg>`;
-
-// ========== PURCHASE HELPERS ==========
-const getPurchased = () => {
-  const stored = load("purchased", null);
-  // สิทธิ์ปลดทุกบทจากแคมเปญวันเดียว (camp_course_unlock เช่น LINE OA 6 ส.ค.) — รวมกับบทที่ปลดจากโค้ด
-  const promoUnlocked = load("camp_course_unlock", false)
-    ? [1, 2, 3, 4, 5, 6, 7]
-    : load("promo_unlocked", []);
-  if (stored && stored.length) return promoUnlocked.length ? [...new Set([...stored, ...promoUnlocked])] : stored;
-  if (load("grandfathered", false)) return [1,2,3,4,5,6,7];
-  // grandfather: เฉพาะ user ที่เข้าใช้งานจริงในช่วง FREE_LAUNCH เท่านั้น จึงคงสิทธิ์เรียนฟรีทุกบท
-  // (ห้ามผูกกับ "enrolled" ซึ่งถูกตั้ง true ทุกครั้งที่สมัคร — จะทำให้ผู้สมัครใหม่หลัง cutover ได้ครบคอร์สฟรี)
-  if (FREE_LAUNCH) { save("grandfathered", true); return [1,2,3,4,5,6,7]; }
-  const base = [PRICING.freeModule];
-  return promoUnlocked.length ? [...new Set([...base, ...promoUnlocked])] : base;
-};
-const savePurchased = (ids) => { save("purchased", ids); };
-// สลิปโอนเงิน: ไม่ปลดล็อกทันทีตอนอัปโหลดแล้ว — รอแอดมินตรวจและตั้ง payment_status = "ชำระแล้ว"
-// ก่อน (เดิมอัปโหลดรูปอะไรก็ได้ก็ปลดล็อกเลย) เก็บรายการรอตรวจไว้ในเครื่อง แล้วเช็คสถานะกับ
-// server ผ่าน RPC get_purchase_by_id (คืนเฉพาะ status+modules ของ id ที่ถือไว้ ไม่เปิดทั้งตาราง)
-const getPendingSlips = () => load("pending_slips", []);
-const savePendingSlips = (list) => save("pending_slips", list);
-const syncPendingSlips = async () => {
-  const pending = getPendingSlips();
-  if (!pending.length) return false;
-  let unlocked = false; const remain = [];
-  for (const p of pending) {
-    const res = await supaRpc("get_purchase_by_id", { p_id: p.id });
-    const row = Array.isArray(res) && res.length ? res[0] : null;
-    if (row?.payment_status === "ชำระแล้ว") {
-      const mods = (row.modules || "").split(",").map(Number).filter(Boolean);
-      savePurchased([...new Set([...(load("purchased", []) || []), ...mods])]);
-      unlocked = true;
-    } else if (row && ["ปฏิเสธ", "ยกเลิก"].includes(row.payment_status)) {
-      // แอดมินปฏิเสธสลิป — เอาออกจากคิวรอ (ผู้เรียนติดต่อทาง LINE ได้)
-    } else {
-      remain.push(p); // ยังรอตรวจ (หรือเช็คไม่สำเร็จ) — เก็บไว้เช็ครอบหน้า
-    }
-  }
-  savePendingSlips(remain);
-  return unlocked;
-};
-const isModuleAccessible = (id, purchased) => purchased.includes(id) || (id === 7 && purchased.filter(x => x <= 6).length === 6);
-const calcPrice = (count) => {
-  if (count >= 6) return PRICING.full;
-  const tiered = count >= 3
-    ? Math.floor(count / 3) * PRICING.bundle3 + (count % 3) * PRICING.single
-    : count * PRICING.single;
-  // อย่าให้เลือกบางหัวข้อแพงกว่าคอร์สเต็ม (เช่น 5 หัวข้อ = 170 > 149)
-  return Math.min(tiered, PRICING.full);
-};
-
-// ========== COURSE DATA ==========
-// ควิซเกริ่นนำหน้าแรก (CPR ผู้ใหญ่ ง่ายๆ เน้นกำลังใจ ไม่มีเกณฑ์ผ่าน) — ตัวล่อก่อนเก็บ LINE
-// img: รูปประกอบ (วางไฟล์จริงทับใน public/teaser/ ภายหลัง) — ถ้าโหลดไม่ได้ใช้ emoji fallback
-const TEASER_QUIZ = [
-  { q: "เจอคนหมดสติล้มอยู่ สิ่งแรกที่ควรทำคืออะไร?", c: ["รีบวิ่งเข้าไปทันที", "ดูความปลอดภัยรอบตัวก่อนเข้าไป", "ถ่ายคลิปไว้ก่อน", "เดินเลี่ยงไป"], a: 1, img: "/teaser/q1.webp", emoji: "⚠️", hint: "ความปลอดภัยของผู้ช่วยมาก่อนเสมอ" },
-  { q: "เบอร์โทรขอรถพยาบาล/แพทย์ฉุกเฉินในไทยคือเบอร์อะไร?", c: ["191", "1669", "1112", "1133"], a: 1, img: "/teaser/q2.webp", emoji: "📞", hint: "จำง่ายๆ 1669 — สายด่วนการแพทย์ฉุกเฉิน" },
-  { q: "การกดหน้าอก CPR ควรกดตรงไหน?", c: ["กลางหน้าอก", "ที่ท้อง", "ที่คอ", "ที่ไหล่"], a: 0, img: "/teaser/q3.webp", emoji: "🫶", hint: "วางส้นมือกลางหน้าอก" },
-  { q: "ควรกดหน้าอกเร็วประมาณเท่าไร?", c: ["ช้าๆ สบายๆ", "100–120 ครั้งต่อนาที", "เร็วที่สุดเท่าที่ทำได้", "ไม่สำคัญ"], a: 1, img: "/teaser/q4.webp", emoji: "🥁", hint: "จังหวะพอๆ กับเพลงเร็ว ~100–120/นาที" },
-  { q: "เครื่อง AED (เครื่องกระตุกหัวใจ) คนทั่วไปใช้ได้ไหม?", c: ["ใช้ได้ เครื่องมีเสียงบอกทุกขั้นตอน", "ใช้ได้เฉพาะหมอ", "อันตราย ห้ามแตะ", "ต้องเรียน 1 ปีก่อน"], a: 0, img: "/teaser/q5.webp", emoji: "❤️‍🩹", hint: "AED ออกแบบให้คนทั่วไปใช้ได้ มีเสียงนำทุกขั้นตอน" },
-];
-
-const COURSE = { title: "CPR & AED ออนไลน์", price: FREE_LAUNCH ? 0 : PRICING.full, modules: [
-  { id: 1, title: "บทที่ 1: CPR ผู้ใหญ่", short: "CPR ผู้ใหญ่", desc: "เทคนิคการช่วยชีวิตผู้ใหญ่ขั้นพื้นฐาน ตามมาตรฐาน 2025", vid: "IbvE4PnW_80", dur: 54, quiz: [
-    { q: "ขั้นตอนแรกก่อนเข้าช่วยเหลือผู้หมดสติคืออะไร?", c: ["ทำ CPR ทันที", "โทร 1669", "ประเมินความปลอดภัยของที่เกิดเหตุ (Scene Safety)", "ใช้ AED"] },
-    { q: "การประเมินการตอบสนอง ทำอย่างไร?", c: ["เขย่าตัวแรงๆ", "ตบบ่าพร้อมตะโกน \"คุณ...คุณ...เป็นยังไงบ้าง\"", "ตรวจชีพจร", "ตบหน้า"] },
-    { q: "ความลึกในการกดหน้าอกผู้ใหญ่คือเท่าไร?", c: ["อย่างน้อย 3 ซม.", "อย่างน้อย 5 ซม. ถึง 6 ซม.", "อย่างน้อย 7 ซม.", "อย่างน้อย 10 ซม."] },
-    { q: "อัตราความเร็วในการกดหน้าอกที่ถูกต้องคือเท่าไร?", c: ["80-100 ครั้ง/นาที", "100-120 ครั้ง/นาที", "120-140 ครั้ง/นาที", "60-80 ครั้ง/นาที"] },
-    { q: "อัตราส่วนกดหน้าอก:ช่วยหายใจ ในผู้ใหญ่?", c: ["15:2", "30:2", "15:1", "30:1"] },
-    { q: "ประเมินการหายใจของผู้ป่วยใช้เวลานานเท่าไร?", c: ["5 วินาที", "ไม่เกิน 10 วินาที", "30 วินาที", "1 นาที"] },
-    { q: "ถ้าผู้ป่วยหายใจเฮือก (gasping) ถือว่าอย่างไร?", c: ["หายใจปกติ ไม่ต้องช่วย", "ไม่ใช่การหายใจปกติ ต้องเริ่ม CPR ทันที", "หายใจดีขึ้นแล้ว", "รอดูอาการก่อน"] },
-    { q: "ควรปล่อยให้หน้าอกคืนตัวสุดหลังกดแต่ละครั้งหรือไม่?", c: ["ไม่ต้อง กดถี่ๆ ไปเลย", "ควร ปล่อยให้อกคืนตัวสุดทุกครั้ง", "ปล่อยแค่ครึ่งเดียวพอ", "ไม่มีผลต่อประสิทธิภาพ"] },
-    { q: "ถ้าไม่มั่นใจเรื่องการเป่าปาก สามารถทำอะไรแทนได้?", c: ["ไม่ต้องช่วยเลย", "กดหน้าอกอย่างเดียวต่อเนื่อง (Hands-only CPR)", "รอรถพยาบาลอย่างเดียว", "เป่าจมูกแทน"] },
-    { q: "ควรสลับคนกดหน้าอกทุกกี่นาที เพื่อคงคุณภาพการกด?", c: ["ทุก 30 วินาที", "ทุก 2 นาที", "ทุก 10 นาที", "ไม่ต้องสลับ"] },
-    { q: "ระหว่างทำ CPR ควรหยุดกดหน้าอกได้นานสุดกี่วินาที?", c: ["ไม่เกิน 10 วินาที", "30 วินาที", "1 นาที", "หยุดได้ตามสะดวก"] },
-    { q: "เมื่อโทร 1669 ควรทำอะไรร่วมด้วยเสมอ?", c: ["วางสายทันทีหลังบอกที่อยู่", "เปิดลำโพงไว้ให้เจ้าหน้าที่แนะนำระหว่างช่วย", "ปิดเสียงโทรศัพท์", "ให้คนอื่นคุยแทน"] },
-  ]},
-  { id: 2, title: "บทที่ 2: CPR ทารก", short: "CPR ทารก", desc: "เทคนิค CPR สำหรับทารก ความแตกต่างจากผู้ใหญ่", vid: "fu65-_ENCLo", dur: 50, quiz: [
-    { q: "การกดหน้าอกทารก ใช้อะไรกด?", c: ["ฝ่ามือ 2 ข้าง", "สันมือ หรือ 2 นิ้วโป้ง", "กำปั้น", "ฝ่ามือ 1 ข้าง"] },
-    { q: "ความลึกในการกดหน้าอกทารกคือเท่าไร?", c: ["2 ซม.", "ประมาณ 4 ซม. หรือ 1.5 นิ้ว (1/3 ของความหนาหน้าอก)", "5 ซม.", "1 ซม."] },
-    { q: "อัตราส่วนกดหน้าอก:เป่าปาก สำหรับทารก (ผู้ช่วย 1 คน)?", c: ["15:2", "30:2", "30:1", "10:2"] },
-    { q: "ถ้ามีผู้ช่วยเหลือ 2 คน อัตราส่วนกด:เป่า เปลี่ยนเป็นเท่าไร?", c: ["30:2", "15:2", "30:1", "10:2"] },
-    { q: "ตำแหน่งกดหน้าอกทารกอยู่ที่ไหน?", c: ["กึ่งกลางหน้าอก ใต้แนวราวนม", "ด้านซ้ายหน้าอก", "บนท้อง", "ที่คอ"] },
-    { q: "ท่านอนของทารกตอนทำ CPR คือแบบไหน?", c: ["นอนหงายบนพื้นแข็ง", "นอนคว่ำ", "อุ้มตั้งขึ้น", "นอนตะแคง"] },
-    { q: "ประเมินการตอบสนองของทารกทำอย่างไร?", c: ["เขย่าตัวแรงๆ", "ดีดฝ่าเท้าเบาๆ พร้อมเรียก ห้ามเขย่า", "จับหัวเขย่า", "ตบหน้า"] },
-    { q: "ทำไมแนวทางล่าสุดจึงเลิกใช้เทคนิค \"2 นิ้ว\" กดหน้าอกทารก?", c: ["ใช้แรงเกินไป", "กดได้ไม่ลึกพอ", "ทำยากเกินไป", "ใช้เวลานานกว่า"] },
-    { q: "ถ้ามือโอบรอบอกทารกด้วย 2 นิ้วโป้งไม่ถึง ใช้วิธีใดแทน?", c: ["ใช้กำปั้น", "ใช้ส้นมือข้างเดียว", "ใช้ฝ่ามือ 2 ข้าง", "งดกดหน้าอก"] },
-    { q: "อัตราเร็วในการกดหน้าอกทารกเทียบกับผู้ใหญ่เป็นอย่างไร?", c: ["ช้ากว่าผู้ใหญ่มาก", "เท่ากับผู้ใหญ่ คือ 100-120 ครั้ง/นาที", "เร็วกว่าผู้ใหญ่เท่าตัว", "ไม่มีมาตรฐาน"] },
-    { q: "การเป่าปากช่วยหายใจทารก ต้องครอบปากผู้ช่วยที่ส่วนไหนของทารก?", c: ["ปากอย่างเดียว", "จมูกอย่างเดียว", "ทั้งปากและจมูกพร้อมกัน", "ไม่ต้องเป่า"] },
-  ]},
-  { id: 3, title: "บทที่ 3: สิ่งอุดกั้นทางเดินหายใจ ผู้ใหญ่", short: "Choking ผู้ใหญ่", desc: "วิธีช่วยเหลือผู้ใหญ่สำลัก แยกแยะอุดกั้นบางส่วนและสมบูรณ์", vid: "_nT-BcNoUzE", dur: 51, quiz: [
-    { q: "การอุดกั้นบางส่วน สังเกตอย่างไร?", c: ["พูดไม่ออก หน้าเขียว", "ผู้ป่วยยังพูดได้ ไอเสียงดัง", "ใช้มือจับคอ", "หมดสติ"] },
-    { q: "การอุดกั้นสมบูรณ์ (อันตรายถึงชีวิต) สังเกตอย่างไร?", c: ["ไอเสียงดัง ยังพูดได้", "พูดไม่ออก ใช้มือจับคอ หน้าเขียว ไอไม่มีเสียง", "หน้าแดง แต่ยังพูดได้", "เจ็บคอเล็กน้อย"] },
-    { q: "ถ้าผู้ป่วยยังไอได้เสียงดัง ควรทำอย่างไร?", c: ["ตบหลังทันที", "กดท้อง Heimlich", "ให้ผู้ป่วยไอต่อไป ห้ามตบหลัง", "โทร 1669"] },
-    { q: "การอุดกั้นสมบูรณ์ ช่วยเหลืออย่างไร (แนวทาง 2025)?", c: ["กดท้อง Heimlich อย่างเดียว", "ตบหลัง 5 ครั้ง สลับกดท้อง 5 ครั้ง จนกว่าสิ่งอุดกั้นจะหลุด", "เป่าปากทันที", "ให้ดื่มน้ำ"] },
-    { q: "วิธี Heimlich Maneuver ตำแหน่งกดท้องอยู่ที่ไหน?", c: ["เหนือสะดือ ต่ำกว่ากระดูกหน้าอก", "กลางหน้าอก", "ที่สะดือพอดี", "ใต้สะดือ"] },
-    { q: "ถ้าผู้ป่วยสำลักจนหมดสติ ต้องทำอย่างไร?", c: ["ทำ Heimlich ต่อ", "วางลงบนพื้น เริ่มทำ CPR ทันที", "ให้ดื่มน้ำ", "นั่งรอรถพยาบาล"] },
-    { q: "ก่อนเป่าปากช่วยหายใจหลังผู้ป่วยสำลักหมดสติ ควรทำอะไรก่อน?", c: ["เป่าเลยไม่ต้องดู", "เปิดปากดูก่อน เขี่ยออกเฉพาะของที่เห็นชัด", "ล้วงนิ้วกวาดในคอทันที", "ให้ดื่มน้ำล้างคอ"] },
-    { q: "ทำไมจึงห้ามล้วงนิ้วกวาดในคอแบบมองไม่เห็น (blind sweep)?", c: ["เสียเวลาเปล่า", "อาจดันสิ่งอุดกั้นลึกลงไปกว่าเดิม", "ทำให้ผู้ป่วยเจ็บ", "ไม่มีเหตุผลพิเศษ"] },
-    { q: "ทำไมการกดหน้าอก (CPR) จึงช่วยคนสำลักที่หมดสติได้ด้วย?", c: ["ไม่ได้ช่วยอะไรเรื่องสำลัก", "แรงกดหน้าอกช่วยดันสิ่งอุดกั้นออกได้ด้วย", "ทำให้ผู้ป่วยตื่นเร็วขึ้นเฉยๆ", "ต้องรอแพทย์เท่านั้น"] },
-    { q: "คนท้องแก่หรืออ้วนมากที่ท้องโตจนโอบรอบเอวไม่ได้ ควรช่วยสำลักอย่างไร?", c: ["กดท้อง Heimlich แรงกว่าปกติ", "เปลี่ยนเป็นกดหน้าอก (Chest Thrust) ที่กระดูกอกส่วนล่างแทน", "งดช่วยเหลือ รอรถพยาบาลอย่างเดียว", "จับนอนคว่ำเคาะหลัง"] },
-  ]},
-  { id: 4, title: "บทที่ 4: สิ่งอุดกั้นทางเดินหายใจ ทารก", short: "Choking ทารก", desc: "วิธีช่วยเหลือทารกสำลัก ตบหลังสลับกดหน้าอก", vid: "pCgxwQUzph0", dur: 32, quiz: [
-    { q: "ถ้าทารกยังร้องได้ ไอเสียงดัง ควรทำอย่างไร?", c: ["ตบหลังทันที", "ปล่อยให้ไอเอาสิ่งอุดกั้นออกเอง ห้ามตบหลัง", "กดท้อง", "จับขาสะบัด"] },
-    { q: "ท่าตบหลังทารก จับทารกอย่างไร?", c: ["อุ้มตั้งขึ้น", "คว่ำหน้าบนแขน ศีรษะต่ำกว่าลำตัว", "วางนอนหงายบนพื้น", "จับตั้งศีรษะขึ้น"] },
-    { q: "ตบหลังทารก ตบตรงไหน กี่ครั้ง?", c: ["กึ่งกลางกระดูกสะบักทั้ง 2 ข้าง จำนวน 5 ครั้ง", "ตบที่ศีรษะ 3 ครั้ง", "ตบที่ก้น 5 ครั้ง", "ตบที่ท้อง 5 ครั้ง"] },
-    { q: "หลังตบหลัง 5 ครั้ง ยังไม่ออก ทำอะไรต่อ?", c: ["ตบหลังต่อ", "พลิกหงาย กดหน้าอก 5 ครั้ง ใต้แนวราวนม", "ใช้นิ้วล้วงคอ", "เป่าปาก"] },
-    { q: "ข้อห้ามในการช่วยทารกสำลัก?", c: ["ห้ามตบหลัง", "ห้ามกดหน้าอก", "ห้ามจับขาสะบัด ห้ามกดท้องแบบผู้ใหญ่ ห้ามล้วงนิ้วเข้าปาก", "ห้ามเป่าปาก"] },
-    { q: "ข้อห้ามข้อใดอันตรายที่สุดต่อคอและสมองทารก?", c: ["ห้ามตบหลังแรงเกินไป", "ห้ามจับขาสะบัดห้อยหัว", "ห้ามอุ้มตอนตบหลัง", "ห้ามเรียกชื่อทารก"] },
-    { q: "ทำไมห้ามกดท้องแบบผู้ใหญ่ (Heimlich) กับทารก?", c: ["ทำได้ยากเกินไป", "เสี่ยงบาดเจ็บตับ/ม้ามของทารก", "ไม่มีผลอะไร", "ใช้เวลานานกว่า"] },
-    { q: "ถ้าทารกยังไอเสียงดังหรือร้องได้อยู่ ควรทำอย่างไร?", c: ["ตบหลังทันที", "ปล่อยให้ไอเอาสิ่งอุดกั้นออกเอง ห้ามตบหลัง", "กดหน้าอกทันที", "ให้ดื่มน้ำ"] },
-  ]},
-  { id: 5, title: "บทที่ 5: Megacode — CPR & AED ผู้ใหญ่", short: "CPR & AED ผู้ใหญ่", desc: "การใช้เครื่อง AED ร่วมกับ CPR และการช่วยจนรอด", vid: "dQ9TcHdhIr0", dur: 217, quiz: [
-    { q: "ตำแหน่งแปะแผ่น AED ที่แนะนำคือ?", c: ["ทั้ง 2 แผ่นบนหน้าอก", "แผ่นแรกใต้ไหปลาร้าขวา แผ่นสองใต้ราวนมซ้ายแนวรักแร้", "แผ่นบนท้อง 2 แผ่น", "แผ่นบนหลัง 2 แผ่น"] },
-    { q: "ก่อนกดปุ่ม Shock ต้องดูอะไร?", c: ["ดูว่าเครื่องเปิดอยู่", "ดูว่าไม่มีใครสัมผัสตัวผู้ป่วย", "ดูว่าแผ่นติดแน่น", "ดูว่าผู้ป่วยหายใจ"] },
-    { q: "ก่อนกดปุ่ม Shock ต้องตะโกนว่าอะไร?", c: ["\"ถอยเลย!\"", "\"หลบออก!\"", "\"ฉันถอย คุณถอย ทุกคนถอย!\"", "\"ห้ามแตะ!\""] },
-    { q: "จะหยุดปั๊มหัวใจได้เมื่อไหร่?", c: ["เมื่อเหนื่อย", "ทีมฉุกเฉินมาถึง / ผู้ป่วยหายใจเอง / ผู้ป่วยรู้สึกตัว", "เมื่อครบ 5 นาที", "เมื่อ AED ช็อกแล้ว"] },
-    { q: "ถ้าผู้ป่วยหายใจเองแล้วแต่ยังไม่รู้สึกตัว ต้องทำอย่างไร?", c: ["ปิดเครื่อง AED แล้วรอ", "กด CPR ต่อ", "จัดท่านอนตะแคงกึ่งคว่ำ (Recovery Position) ดูการหายใจทุก 2 นาที", "ให้ดื่มน้ำ"] },
-    { q: "ถ้าตัวผู้ป่วยเปียกน้ำ ก่อนแปะแผ่น AED ต้องทำอะไรก่อน?", c: ["แปะทับไปเลย รีบๆ", "เช็ดหน้าอกให้แห้งก่อน", "รอให้แห้งเองอย่างเดียว", "ไม่ต้องใช้ AED"] },
-    { q: "ทำไมห้ามแปะแผ่น AED บนตัวที่เปียกน้ำ?", c: ["แผ่นจะหลุดง่าย", "ไฟฟ้าจะวิ่งบนผิวน้ำแทนที่จะผ่านหัวใจ ช็อกไม่ได้ผล", "ทำให้เครื่องพัง", "ไม่มีเหตุผลพิเศษ"] },
-    { q: "หลังเครื่อง AED ช็อกแล้ว ต้องทำอะไรทันที?", c: ["รอดูอาการก่อน", "กดหน้าอกต่อทันที 2 นาที แล้วให้เครื่องวิเคราะห์ใหม่", "ปิดเครื่องพัก", "ช็อกซ้ำทันที"] },
-    { q: "ระหว่างที่ AED กำลังวิเคราะห์จังหวะหัวใจ ต้องทำอะไร?", c: ["กดหน้าอกต่อไปเรื่อยๆ", "ห้ามสัมผัสตัวผู้ป่วยเด็ดขาด", "เป่าปากช่วยหายใจ", "จับชีพจร"] },
-    { q: "ทำไมต้องย้ายผู้ป่วยจากขอบสระที่ลื่นไปพื้นแห้งก่อนเริ่มช่วย?", c: ["เพื่อความสวยงาม", "ขอบสระลื่นและอันตราย ต้องหาที่มั่นคงปลอดภัยก่อน", "ไม่มีเหตุผลพิเศษ", "เพื่อให้คนอื่นมองเห็นง่าย"] },
-  ]},
-  { id: 6, title: "บทที่ 6: Megacode — CPR & AED ทารก/เด็ก", short: "CPR & AED ทารก/เด็ก", desc: "ขั้นตอนการช่วยเหลือและการใช้ AED สำหรับเด็กทารก", vid: "lCbImOmcrNA", dur: 119, quiz: [
-    { q: "เวลากดหน้าอกทารก ควรกดลึกประมาณเท่าไหร่?", c: ["1 เซนติเมตร", "4 เซนติเมตร", "6 เซนติเมตร", "8 เซนติเมตร"] },
-    { q: "ถ้ามีผู้ช่วยเหลือ 2 คน ควรกดหน้าอกกี่ครั้ง แล้วเป่าปากกี่ครั้ง?", c: ["กด 30 ครั้ง เป่า 2 ครั้ง", "กด 15 ครั้ง เป่า 2 ครั้ง", "กด 5 ครั้ง เป่า 1 ครั้ง", "กด 10 ครั้ง เป่า 2 ครั้ง"] },
-    { q: "ตำแหน่งในการติดแผ่น AED สำหรับทารก ที่ดีที่สุดคือข้อใด?", c: ["ติดที่หน้าอกด้านซ้ายและขวา", "ติดที่หน้าอกด้านหน้าและแผ่นหลัง", "ติดที่หน้าผากและท้อง", "ติดที่ท้องและหลัง"] },
-    { q: "ก่อนกดปุ่มช็อก (Shock) ด้วยเครื่อง AED ต้องทำอะไรก่อน?", c: ["ตรวจดูชีพจร", "เป่าลมเพิ่ม 1 ครั้ง", "บอกให้ทุกคนถอยห่างจากตัวเด็ก", "ถอดแผ่น AED ออกก่อน"] },
-    { q: "ถ้าไม่มีแผ่น AED สำหรับเด็ก ควรทำอย่างไร?", c: ["ไม่ต้องช็อก", "ใช้แผ่นผู้ใหญ่ แต่ต้องแน่ใจว่าแผ่นไม่แตะกัน", "รอให้มีคนเอาอุปกรณ์สำหรับเด็กมา", "กด CPR อย่างเดียว ไม่ต้องใช้ AED"] },
-    { q: "ถ้ามีแผ่น AED สำหรับเด็กโดยเฉพาะ ควรใช้แผ่นไหน?", c: ["ใช้แผ่นผู้ใหญ่ดีกว่าเสมอ", "ใช้แผ่นเด็กโดยเฉพาะ", "ใช้แผ่นไหนก็ได้ไม่ต่างกัน", "ไม่ต้องใช้แผ่นเลย"] },
-    { q: "เด็กจมน้ำ ก่อนเริ่มกดหน้าอกควรทำอะไรก่อน (ต่างจากผู้ใหญ่ที่หัวใจหยุดเต้นเฉยๆ)?", c: ["กดหน้าอกเลยไม่ต้องเป่า", "เป่าปากช่วยหายใจ 2 ครั้งก่อน เพราะเป็นภาวะขาดออกซิเจน", "รอให้น้ำไหลออกจากปอดก่อน", "จับพลิกคว่ำเขย่า"] },
-    { q: "เด็กจมน้ำแม้ฟื้นและหายใจเองแล้ว ต้องทำอย่างไรต่อ?", c: ["ปล่อยกลับไปเล่นต่อได้เลย", "ต้องไปตรวจโรงพยาบาลทุกราย เพราะภาวะแทรกซ้อนทางปอดอาจเกิดตามหลัง", "ให้นอนพักที่บ้าน", "ให้ดื่มน้ำอุ่นเยอะๆ"] },
-    { q: "อัตราส่วนกด:เป่า สำหรับเด็ก เมื่อมีผู้ช่วยเหลือ 2 คน?", c: ["30:2", "15:2", "10:1", "5:1"] },
-  ]},
-  { id: 7, title: "แบบทดสอบสุดท้าย", short: "Final Exam", desc: "ทดสอบความรู้ทั้งหมด 6 บท ต้องได้ 80% ขึ้นไปจึงผ่าน", vid: null, dur: null, quiz: [
-    { q: "ขั้นตอนแรกเมื่อพบผู้หมดสติคืออะไร?", c: ["ทำ CPR ทันที", "โทร 1669", "ประเมินความปลอดภัยที่เกิดเหตุ (Scene Safety)", "ใช้ AED"] },
-    { q: "ประเมินการหายใจใช้เวลาเท่าไร?", c: ["5 วินาที", "ไม่เกิน 10 วินาที", "30 วินาที", "1 นาที"] },
-    { q: "อัตราส่วนกด:เป่า ผู้ใหญ่?", c: ["15:2", "30:2", "15:1", "5:1"] },
-    { q: "ความลึกกดหน้าอกผู้ใหญ่?", c: ["3 ซม.", "อย่างน้อย 5 ซม. ถึง 6 ซม.", "7 ซม.", "10 ซม."] },
-    { q: "ความเร็วกดหน้าอก?", c: ["60-80 ครั้ง/นาที", "80-100 ครั้ง/นาที", "100-120 ครั้ง/นาที", "120-150 ครั้ง/นาที"] },
-    { q: "กดหน้าอกทารก ใช้อะไร?", c: ["ฝ่ามือ 2 ข้าง", "สันมือ หรือ 2 นิ้วโป้ง", "กำปั้น", "ฝ่ามือ 1 ข้าง"] },
-    { q: "ผู้ใหญ่สำลักขั้นรุนแรง ทำอย่างไร?", c: ["ให้ดื่มน้ำ", "ตบหลัง 5 ครั้ง สลับกดท้อง 5 ครั้ง", "กดท้อง Heimlich ทันที", "เป่าปาก"] },
-    { q: "ห้ามทำอะไรกับทารกที่สำลัก?", c: ["ห้ามตบหลัง", "ห้ามกดท้อง ห้ามจับขาสะบัด", "ห้ามกดหน้าอก", "ห้ามเป่าปาก"] },
-    { q: "ก่อนกด Shock ต้องตะโกนว่าอะไร?", c: ["\"ถอยเลย!\"", "\"ฉันถอย คุณถอย ทุกคนถอย!\"", "\"หลบออก!\"", "\"ห้ามแตะ!\""] },
-    { q: "จะหยุดปั๊มหัวใจเมื่อไหร่?", c: ["เมื่อเหนื่อย", "เมื่อครบ 5 นาที", "ทีมฉุกเฉินมาถึง / ผู้ป่วยหายใจเอง / ผู้ป่วยรู้สึกตัว", "เมื่อ AED ช็อกแล้ว"] },
-    { q: "ความลึกกดหน้าอกทารก?", c: ["1 ซม.", "ประมาณ 4 ซม. (1/3 ของความหนาหน้าอก)", "6 ซม.", "8 ซม."] },
-    { q: "ตำแหน่งกดหน้าอกทารกอยู่ที่ไหน?", c: ["กึ่งกลางหน้าอก ใต้แนวราวนม", "ด้านซ้ายหน้าอก", "บนท้อง", "ที่คอ"] },
-    { q: "อัตราส่วนกด:เป่า ทารก ผู้ช่วยเหลือ 2 คน?", c: ["30:2", "15:2", "30:1", "10:2"] },
-    { q: "ท่าตบหลังทารกที่ถูกต้องคือแบบไหน?", c: ["อุ้มตั้งขึ้น", "คว่ำหน้าบนแขน ศีรษะต่ำกว่าลำตัว", "วางนอนหงายบนพื้น", "จับตั้งศีรษะขึ้น"] },
-    { q: "ข้อห้ามที่อันตรายที่สุดกับทารกสำลัก?", c: ["ห้ามตบหลัง", "ห้ามจับขาสะบัดห้อยหัว", "ห้ามอุ้ม", "ห้ามเรียกชื่อ"] },
-    { q: "ตำแหน่งแปะแผ่น AED ผู้ใหญ่ที่ถูกต้อง?", c: ["ทั้ง 2 แผ่นบนหน้าอก", "แผ่นแรกใต้ไหปลาร้าขวา แผ่นสองใต้ราวนมซ้ายแนวรักแร้", "แผ่นบนท้อง 2 แผ่น", "แผ่นบนหลัง 2 แผ่น"] },
-    { q: "ถ้าไม่มีแผ่น AED สำหรับเด็ก ควรทำอย่างไร?", c: ["ไม่ต้องช็อก", "ใช้แผ่นผู้ใหญ่ แต่ต้องแน่ใจว่าแผ่นไม่แตะกัน", "รอให้มีอุปกรณ์เด็กมาก่อน", "กด CPR อย่างเดียว"] },
-    { q: "เด็กจมน้ำ ก่อนกดหน้าอกควรทำอะไรก่อน?", c: ["เป่าปากช่วยหายใจ 2 ครั้งก่อน", "กดหน้าอกอย่างเดียว", "รอน้ำไหลออกจากปอดก่อน", "จับพลิกคว่ำเขย่า"] },
-    { q: "คนท้องแก่ที่ท้องโตจนโอบรอบเอวไม่ได้ สำลักขั้นรุนแรง ควรช่วยอย่างไร?", c: ["กดท้อง Heimlich แรงกว่าปกติ", "เปลี่ยนเป็นกดหน้าอก (Chest Thrust) ที่กระดูกอกส่วนล่างแทน", "งดช่วยเหลือ รอรถพยาบาล", "จับนอนคว่ำเคาะหลังแรงๆ"] },
-    { q: "ก่อนเป่าปากช่วยหายใจหลังผู้ป่วยสำลักหมดสติ ควรทำอะไรก่อน?", c: ["เป่าเลยไม่ต้องดู", "เปิดปากดูก่อน เขี่ยออกเฉพาะของที่เห็นชัด", "ล้วงนิ้วกวาดในคอทันที", "ให้ดื่มน้ำล้างคอ"] },
-    { q: "ถ้าไม่มั่นใจเรื่องการเป่าปาก สามารถทำอะไรแทนได้?", c: ["ไม่ต้องช่วยเลย", "กดหน้าอกอย่างเดียวต่อเนื่อง (Hands-only CPR)", "รอรถพยาบาลอย่างเดียว", "เป่าจมูกแทน"] },
-    { q: "ควรสลับคนกดหน้าอกทุกกี่นาที?", c: ["ทุก 30 วินาที", "ทุก 2 นาที", "ทุก 10 นาที", "ไม่ต้องสลับ"] },
-  ]},
-]};
-
-// ==================== ICONS ====================
-const icons = {
-  play: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M8 5v14l11-7z"/></svg>,
-  check: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>,
-  lock: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4" fill="none" stroke={c} strokeWidth="2"/></svg>,
-  star: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
-  cert: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12"/></svg>,
-  arrow: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
-  back: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>,
-  heart: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>,
-  book: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>,
-  qr: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><rect x="2" y="2" width="8" height="8" rx="1"/><rect x="14" y="2" width="8" height="8" rx="1"/><rect x="2" y="14" width="8" height="8" rx="1"/><rect x="14" y="14" width="4" height="4" rx=".5"/></svg>,
-  line: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2C6.48 2 2 5.82 2 10.5c0 2.93 1.95 5.5 4.86 7.15-.19.67-.68 2.42-.78 2.79-.12.46.17.45.36.33.15-.1 2.38-1.62 3.35-2.28.7.1 1.43.16 2.21.16 5.52 0 10-3.82 10-8.5S17.52 2 12 2z"/></svg>,
-  save: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-  replay: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>,
-  warn: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2L1 21h22L12 2zm0 15a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm-1-2h2V10h-2v5z"/></svg>,
-  phone: (s, c) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.57a1 1 0 01-.25 1.02l-2.2 2.2z"/></svg>,
-};
-const I = ({ name, size = 20, color = B.black }) => icons[name]?.(size, color) || null;
-
-// โลโก้ JIA TRAINER CENTER — แสดงรูปจาก public/logo.png ถ้าโหลดไม่ได้ fallback เป็นไอคอน cert เดิม
-const Logo = ({ size = 120 }) => {
-  const [err, setErr] = useState(false);
-  if (err) return (<div style={{ margin: "0 auto", width: size * 0.5, height: size * 0.5, borderRadius: "50%", background: `${B.gold}15`, display: "flex", alignItems: "center", justifyContent: "center" }}><I name="cert" size={size * 0.3} color={B.gold}/></div>);
-  return <img src={LOGO_SRC} alt="JIA TRAINER CENTER" onError={() => setErr(true)} style={{ width: size, height: "auto", maxWidth: "100%", display: "block", margin: "0 auto" }}/>;
-};
-
-// ==================== STYLES ====================
-const css = {
-  btn: (bg, color, full) => ({ background: bg, color, border: "none", borderRadius: 12, padding: "14px 32px", fontSize: 15, fontWeight: 700, cursor: "pointer", transition: "all .2s", ...(full ? { width: "100%", display: "block" } : {}) }),
-  card: { background: B.white, borderRadius: 16, padding: 24, boxShadow: "0 2px 12px rgba(0,0,0,.06)" },
-  header: (bg) => ({ background: bg, color: B.white, padding: "20px 24px", display: "flex", alignItems: "center", gap: 12 }),
-  page: { minHeight: "100vh", background: B.cream },
-  wrap: { maxWidth: 480, margin: "0 auto", padding: "0 20px" },
-};
-
+import {
+  B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
+  REFERRAL_DISCOUNT_PCT, REFERRAL_REWARD_TEXT, captureReferral, getRefCode, referralLink, setCustomerLineLink,
+} from "./lib/core";
+// หน้าแอดมินแยกเป็น chunk ของตัวเอง — ผู้เรียนทั่วไปไม่ต้องดาวน์โหลดโค้ดแอดมิน
+const Admin = lazy(() => import("./admin/Admin"));
+// พอร์ทัล HR (/org/<token>) — chunk แยก โหลดเฉพาะคนเปิดลิงก์ของบริษัท
+const CompanyPortal = lazy(() => import("./portal/CompanyPortal"));
+// จำโค้ดชวนเพื่อน (?ref=) ตั้งแต่โหลดโมดูล — ก่อน render ใด ๆ (effect ของลูกอย่างหน้าร้านรันก่อน effect ของ App)
+captureReferral();
+const PORTAL_TOKEN = typeof window !== "undefined" ? (window.location.pathname.match(/^\/org\/([A-Za-z0-9_-]{24,64})\/?$/) || [])[1] || null : null;
 // ==================== MORROO NETWORK ADS ====================
 const MORROO_ADS = [
   { id: "advice", brand: "Morroo Advice", emoji: "🩺", tag: "AI ปรึกษาสุขภาพ", headline: "ไม่สบายใจ? ถาม AI หมอก่อน", desc: "ปรึกษาอาการกับ AI ภาษาไทย ตอบใน 5 วินาที — ฟรี 3 ครั้ง/วัน", cta: "เริ่มปรึกษาฟรี", url: "https://advice.morroo.com", bg: "#3B82F6", bgLight: "#3B82F612" },
@@ -1041,6 +271,126 @@ function BlogDetail({ slug, goBack, openBlog }) {
 }
 
 // ==================== LANDING ====================
+// ==================== ขอใบกำกับภาษีเต็มรูป ====================
+// ผู้ซื้อ/บริษัทกรอกข้อมูลผู้เสียภาษี → RPC request_tax_invoice (ตรวจเลข 13 หลัก + ผูกการซื้อล่าสุดถ้าเบอร์ตรงและชำระแล้ว)
+// แอดมินออกใบใน FlowAccount แล้วบันทึกเลขที่ในแท็บ "ใบกำกับภาษี" ส่งให้ทางอีเมล/LINE
+const taxIdValid = (v) => { const d = (v || "").replace(/\D/g, ""); if (d.length !== 13) return false; let s = 0; for (let i = 0; i < 12; i++) s += Number(d[i]) * (13 - i); return (11 - (s % 11)) % 10 === Number(d[12]); };
+function TaxInvoicePage({ go, user }) {
+  const lp = load("last_purchase", null);
+  const [f, setF] = useState({ buyerType: "company", name: "", taxId: "", branch: "สำนักงานใหญ่", address: "", email: "", phone: user?.phone || "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState(null);
+  const set = (k) => (e) => { setF({ ...f, [k]: e.target.value }); setErr(""); };
+  const submit = async () => {
+    if (!taxIdValid(f.taxId)) { setErr("เลขประจำตัวผู้เสียภาษีไม่ถูกต้อง (13 หลัก)"); return; }
+    setBusy(true);
+    const r = await supaRpc("request_tax_invoice", { p: { ...f, purchaseId: lp?.purchase_id || null, stripeSessionId: lp?.session_id || null } });
+    setBusy(false);
+    if (!r) { setErr("ส่งคำขอไม่สำเร็จ กรุณาลองใหม่ หรือติดต่อ LINE @jiacpr"); return; }
+    if (r.error) { setErr(r.error); return; }
+    setDone(r); safeTrack("tax_invoice_request", { linked: !!r.linked }); phCapture("tax_invoice_request", { linked: !!r.linked });
+  };
+  const inp = { width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  const field = (k, label, ph, extra = {}) => <div style={{ marginBottom: 12 }}><label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>{label}</label>{extra.area ? <textarea rows={3} value={f[k]} onChange={set(k)} placeholder={ph} style={{ ...inp, resize: "vertical" }}/> : <input value={f[k]} onChange={set(k)} placeholder={ph} inputMode={extra.inputMode} style={inp}/>}</div>;
+  return (<div style={css.page}><div style={css.header(B.red)}><button onClick={() => go("course")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={24} color={B.white}/></button><div style={{ fontSize: 16, fontWeight: 700 }}>ขอใบกำกับภาษีเต็มรูป</div></div>
+    <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
+      {done ? <div style={{ ...css.card, textAlign: "center" }} data-testid="tax-invoice-done">
+        <div style={{ fontSize: 40 }}>✅</div>
+        <div style={{ fontSize: 17, fontWeight: 800, margin: "8px 0" }}>ได้รับคำขอแล้ว</div>
+        <div style={{ fontSize: 13.5, color: B.dkGray, lineHeight: 1.6 }}>ทีมงานจะออกใบกำกับภาษีและส่งให้{f.email ? `ทางอีเมล ${f.email}` : "ทาง LINE/เบอร์โทรที่ให้ไว้"} ภายใน 3 วันทำการ{done.linked ? "" : " (ไม่พบรายการซื้อที่ชำระแล้วของเบอร์นี้ในเครื่อง — ทีมงานจะตรวจสอบยอดให้)"}</div>
+        <button onClick={() => go("course")} style={{ ...css.btn(B.black, B.white, true), marginTop: 16 }}>กลับหน้าบทเรียน</button>
+      </div> : <>
+        <div style={{ ...css.card, marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.6, marginBottom: 14 }}>สำหรับบริษัท/ผู้ที่ต้องการใบกำกับภาษีเต็มรูปของคอร์สออนไลน์ที่ชำระแล้ว{lp ? " — ระบบจะแนบรายการซื้อล่าสุดบนเครื่องนี้ให้อัตโนมัติ" : ""}</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[["company", "นิติบุคคล"], ["person", "บุคคลธรรมดา"]].map(([v, l]) => <button key={v} onClick={() => setF({ ...f, buyerType: v, branch: v === "company" ? (f.branch || "สำนักงานใหญ่") : "" })} style={{ flex: 1, padding: "10px", borderRadius: 10, border: `2px solid ${f.buyerType === v ? B.red : B.ltGray}`, background: f.buyerType === v ? `${B.red}08` : B.white, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
+          </div>
+          {field("name", f.buyerType === "company" ? "ชื่อบริษัท *" : "ชื่อ-นามสกุล *", f.buyerType === "company" ? "เช่น บริษัท ตัวอย่าง จำกัด" : "")}
+          {field("taxId", "เลขประจำตัวผู้เสียภาษี 13 หลัก *", "", { inputMode: "numeric" })}
+          {f.buyerType === "company" && field("branch", "สาขา", "สำนักงานใหญ่ / สาขาที่ 00001")}
+          {field("address", "ที่อยู่ตามทะเบียน *", "เลขที่ ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์", { area: true })}
+          {field("email", "อีเมลรับใบกำกับภาษี", "เช่น account@company.com")}
+          {field("phone", "เบอร์โทรที่ใช้ตอนซื้อ *", "", { inputMode: "tel" })}
+          {err && <div style={{ color: B.red, fontSize: 13, marginBottom: 8 }}>{err}</div>}
+        </div>
+        <button onClick={submit} disabled={busy} style={{ ...css.btn(B.red, B.white, true), opacity: busy ? .6 : 1 }}>{busy ? "กำลังส่ง..." : "ส่งคำขอใบกำกับภาษี"}</button>
+      </>}
+    </div></div>);
+}
+
+// ==================== รีวิวคอร์ส ====================
+// ฟอร์มรีวิว (หน้าใบประกาศ) — ต้องสมัครครบ (customer_id + phone) และเรียนจบ; server ตรวจซ้ำทั้งหมด
+function ReviewForm({ user }) {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [state, setState] = useState(() => (load("review_sent", false) ? "sent" : "idle")); // idle | busy | sent
+  const [err, setErr] = useState("");
+  if (!user?.customer_id || !user?.phone) return null;
+  if (state === "sent") return <div style={{ ...css.card, marginTop: 14, textAlign: "center", fontSize: 13.5, color: B.dkGray }}>ขอบคุณสำหรับรีวิว 🙏 รีวิวจะแสดงบนหน้าเว็บหลังทีมงานตรวจสอบ</div>;
+  const submit = async () => {
+    if (!rating) { setErr("กรุณาให้คะแนนดาว"); return; }
+    setState("busy");
+    const r = await supaRpc("submit_course_review", { p_customer_id: user.customer_id, p_phone: user.phone, p_rating: rating, p_comment: comment });
+    if (r?.ok) { save("review_sent", true); setState("sent"); safeTrack("review_submit", { rating }); phCapture("review_submit", { rating }); }
+    else { setErr(r?.error || "ส่งรีวิวไม่สำเร็จ กรุณาลองใหม่"); setState("idle"); }
+  };
+  return <div data-testid="review-form" style={{ ...css.card, marginTop: 14 }}>
+    <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>รีวิวคอร์สนี้</div>
+    <div style={{ fontSize: 12.5, color: B.dkGray, marginBottom: 10 }}>ความเห็นของคุณช่วยให้คนอื่นตัดสินใจเรียน CPR ได้ง่ายขึ้น</div>
+    <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>{[1, 2, 3, 4, 5].map((n) => <button key={n} aria-label={`${n} ดาว`} onClick={() => { setRating(n); setErr(""); }} style={{ background: "none", border: "none", padding: 2, cursor: "pointer", fontSize: 30, lineHeight: 1, color: n <= rating ? B.gold : B.ltGray }}>★</button>)}</div>
+    <textarea value={comment} onChange={(e) => setComment(e.target.value.slice(0, 600))} rows={3} placeholder="เล่าสั้น ๆ ว่าได้อะไรจากคอร์สนี้ (ไม่บังคับ)" style={{ width: "100%", padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }}/>
+    {err && <div style={{ color: B.red, fontSize: 12.5, marginTop: 6 }}>{err}</div>}
+    <button onClick={submit} disabled={state === "busy"} style={{ ...css.btn(B.black, B.white, true), marginTop: 10, padding: "12px 20px", fontSize: 14 }}>{state === "busy" ? "กำลังส่ง..." : "ส่งรีวิว"}</button>
+  </div>;
+}
+// รีวิวที่อนุมัติแล้วบนหน้าแรก — ยังไม่มีรีวิวเลยก็ซ่อนทั้งส่วน
+function ReviewsSection() {
+  const [d, setD] = useState(null);
+  useEffect(() => { supaRpc("public_course_reviews", { p_limit: 12 }).then((r) => { if (r?.reviews?.length) setD(r); }); }, []);
+  if (!d) return null;
+  return <div style={{ ...css.wrap, paddingTop: 28 }} data-testid="reviews-section">
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
+      <h3 style={{ fontSize: 18, fontWeight: 800 }}>ผู้เรียนว่าอย่างไร</h3>
+      <span style={{ fontSize: 13, color: B.dkGray }}><span style={{ color: B.gold }}>★</span> {d.avg} จาก {d.count} รีวิว</span>
+    </div>
+    <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 6, scrollSnapType: "x mandatory" }}>
+      {d.reviews.map((r, i) => <div key={i} style={{ ...css.card, padding: 16, flex: "0 0 78%", maxWidth: 320, scrollSnapAlign: "start" }}>
+        <div style={{ color: B.gold, fontSize: 15, letterSpacing: 1 }}>{"★".repeat(r.rating)}<span style={{ color: B.ltGray }}>{"★".repeat(5 - r.rating)}</span></div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.6, margin: "6px 0 8px" }}>“{r.comment}”</div>
+        <div style={{ fontSize: 12, color: B.dkGray, fontWeight: 600 }}>— {r.name}</div>
+      </div>)}
+    </div>
+  </div>;
+}
+
+// ==================== คู่มือฉุกเฉิน + ติดตั้งแอป (PWA) ====================
+// ปุ่มติดตั้งโผล่เฉพาะเบราว์เซอร์ที่ยิง beforeinstallprompt (Chrome/Android) — iOS ใช้ "เพิ่มไปยังหน้าจอโฮม" เอง
+let _installEvt = null;
+const _installListeners = new Set();
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); _installEvt = e; _installListeners.forEach((f) => f(true)); });
+  window.addEventListener("appinstalled", () => { _installEvt = null; _installListeners.forEach((f) => f(false)); safeTrack("pwa_installed"); phCapture("pwa_installed", {}); });
+}
+function EmergencyGuideCard({ compact = false }) {
+  const [canInstall, setCanInstall] = useState(!!_installEvt);
+  useEffect(() => { _installListeners.add(setCanInstall); return () => { _installListeners.delete(setCanInstall); }; }, []);
+  const install = async () => {
+    if (!_installEvt) return;
+    _installEvt.prompt();
+    try { const r = await _installEvt.userChoice; safeTrack("pwa_install_prompt", { outcome: r?.outcome }); } catch (e) {}
+    _installEvt = null; setCanInstall(false);
+  };
+  return <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: compact ? 12 : 14 }}>
+    <a href="/emergency.html" onClick={() => { safeTrack("emergency_guide_open"); phCapture("emergency_guide_open", {}); }} style={{ flex: "1 1 200px", display: "flex", alignItems: "center", gap: 10, background: B.white, border: `1px solid ${B.red}33`, borderRadius: 14, padding: "12px 14px", color: B.black, textDecoration: "none" }}>
+      <span style={{ fontSize: 22 }}>🚨</span>
+      <span style={{ flex: 1 }}><span style={{ display: "block", fontSize: 14, fontWeight: 800 }}>คู่มือ CPR ฉุกเฉิน</span><span style={{ display: "block", fontSize: 11.5, color: B.dkGray }}>ขั้นตอน + จังหวะกด 110/นาที · ใช้ได้แม้ออฟไลน์</span></span>
+      <I name="arrow" size={14} color={B.dkGray}/>
+    </a>
+    {canInstall && <button onClick={install} style={{ ...css.btn(B.black, B.white), flex: "0 0 auto", padding: "12px 16px", fontSize: 13 }}>📲 ติดตั้งแอป</button>}
+  </div>;
+}
+
 function Landing({ go, enterCourse, openBlog, goGameRandom }) {
   const [a, setA] = useState(false); useEffect(() => { setTimeout(() => setA(true), 100); }, []);
   return (<div style={css.page}>
@@ -1064,8 +414,10 @@ function Landing({ go, enterCourse, openBlog, goGameRandom }) {
       </div>
     </div>
 
+    <ReviewsSection/>
     {/* CPR HERO — เกมภารกิจพลเมืองดี (เล่นฟรีทุกเคส) */}
     <div style={{ ...css.wrap, paddingTop: 24 }}>
+      <EmergencyGuideCard/>
       <button onClick={() => { safeTrack("game_banner_click", { from: "landing" }); phCapture("game_banner_click", { from: "landing" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 16, padding: 18, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 16px rgba(16,24,47,.35)" }}>
         <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,.14)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 26 }}>🚨</div>
         <div style={{ flex: 1 }}>
@@ -1148,7 +500,8 @@ function Store({ go, setUser }) {
   const buyerReady = buyerName.trim() && normalizePhone(buyerPhone).length >= 9;
   const ensureBuyer = () => {
     if (!buyerReady) { alert("กรุณากรอกชื่อ-นามสกุลและเบอร์โทรที่ถูกต้องก่อนชำระเงิน"); return null; }
-    const u = { name: buyerName.trim(), phone: normalizePhone(buyerPhone) };
+    // รวมกับ user เดิม — เดิมเขียนทับเหลือแค่ชื่อ+เบอร์ ทำให้ customer_id/auth_user_id (ล็อกอิน LINE) หายหลังกดชำระเงิน
+    const u = { ...(load("user", null) || {}), name: buyerName.trim(), phone: normalizePhone(buyerPhone) };
     setUser(u);
     return u;
   };
@@ -1158,6 +511,10 @@ function Store({ go, setUser }) {
   const total = calcPrice(selected.length);
   const isFull = selected.length + purchased.filter(x => x <= 6).length >= 6;
 
+  // มาจากลิงก์ชวนเพื่อน → โชว์ส่วนลดเมื่อจ่ายผ่าน Stripe (ราคาจริงคำนวณใหม่ใน stripe-checkout; โอน+สลิปไม่มีส่วนลดนี้)
+  const [refCode, setRefCode] = useState(null);
+  useEffect(() => { const c = getRefCode(); if (c) supaRpc("referral_code_valid", { p_code: c }).then((ok) => { if (ok === true) setRefCode(c); }); }, []);
+  const refDiscount = refCode ? Math.floor(total * REFERRAL_DISCOUNT_PCT / 100) : 0;
   const [stripePaying, setStripePaying] = useState(false);
   const payWithStripe = async () => {
     const buyer = ensureBuyer();
@@ -1174,7 +531,7 @@ function Store({ go, setUser }) {
         body: JSON.stringify({
           type: "online_purchase",
           items: [{ name: `JIA Online: ${moduleNames.join(", ")}`, amount: total }],
-          metadata: { phone: buyer.phone, modules: selected.join(","), name: buyer.name },
+          metadata: { phone: buyer.phone, modules: selected.join(","), name: buyer.name, ...(refCode ? { ref_code: refCode } : {}) },
           successUrl: window.location.origin + window.location.pathname + "?stripe=success",
           cancelUrl: window.location.origin + window.location.pathname + "?stripe=cancel",
         }),
@@ -1211,6 +568,7 @@ function Store({ go, setUser }) {
           if (Array.isArray(rec) && rec.length) {
             // ไม่ปลดล็อกทันที — เข้าคิวรอแอดมินตรวจสลิป (Course จะ sync สถานะให้อัตโนมัติ)
             savePendingSlips([...getPendingSlips(), { id: rec[0].id, modules: selected, at: Date.now() }]);
+            save("last_purchase", { purchase_id: rec[0].id, modules: selected.join(","), at: Date.now() }); // อ้างอิงตอนขอใบกำกับภาษี
             setSlipDone(true);
           } else {
             alert("บันทึกการแจ้งชำระไม่สำเร็จ กรุณาส่งสลิปทาง LINE แทน");
@@ -1258,9 +616,11 @@ function Store({ go, setUser }) {
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>ชำระออนไลน์ (บัตรเครดิต / PromptPay)</div>
         <button onClick={payWithStripe} disabled={stripePaying || !buyerReady} style={{ ...css.btn("#635BFF", B.white), padding: "14px 32px", fontSize: 15, width: "100%", opacity: (stripePaying || !buyerReady) ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/></svg>
-          {stripePaying ? "กำลังเปิดหน้าชำระเงิน..." : "ชำระผ่าน Stripe"}
+          {stripePaying ? "กำลังเปิดหน้าชำระเงิน..." : refDiscount ? `ชำระผ่าน Stripe ฿${total - refDiscount}` : "ชำระผ่าน Stripe"}
         </button>
+        {refDiscount > 0 && <div data-testid="referral-discount" style={{ fontSize: 12.5, color: B.green, fontWeight: 700, marginTop: 8 }}>🎁 ส่วนลดเพื่อนแนะนำ {REFERRAL_DISCOUNT_PCT}% (−฿{refDiscount}) เมื่อชำระผ่าน Stripe</div>}
         <div style={{ fontSize: 11, color: B.dkGray, marginTop: 8 }}>รองรับ Visa / Mastercard / PromptPay — ปลดล็อคทันที</div>
+        <div style={{ fontSize: 11, color: B.dkGray, marginTop: 4 }}>ต้องการใบกำกับภาษีในนามบริษัท? ขอได้หลังชำระเงินที่หน้าบทเรียน</div>
       </div>
       <div style={{ ...css.card, textAlign: "center", marginBottom: 14, position: "relative" }}>
         <div style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", background: B.white, padding: "0 12px", fontSize: 12, color: B.dkGray }}>หรือ</div>
@@ -1693,10 +1053,11 @@ function SignupGate({ go, setUser }) {
     if (!validate()) return;
     setErr(""); setBusy(true);
     const cleanPhone = phone.replace(/\D/g, "");
-    const userData = { name: name.trim(), phone: cleanPhone };
+    // เก็บ customer_id ไว้ใน user ด้วย — ชวนเพื่อน/รีวิว/ผูก LINE ผ่าน RPC ยืนยันตัวด้วย customer_id + เบอร์
+    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const userData = { name: name.trim(), phone: cleanPhone, customer_id: custId };
     setUser(userData);
     save("signed_up", true); save("enrolled", true);
-    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const linkCode = getLinkCode();
     supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, source: "online-course", line_link_code: linkCode, pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), gate_variant: getGateVariant(), landing_url: load("landing_url", null), ...getUTM() });
     supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, status: "กำลังเรียน" });
@@ -2003,9 +1364,9 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       // ผูกกับ online_students เสมอ (ไม่ว่าจะเคยสมัครมาก่อนหรือไม่) เพื่อให้พนักงานค้นหาคะแนนย้อนหลังได้
       const u = load("user", null);
       if (!u) {
-        setUser({ name, phone });
-        save("signed_up", true);
         const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+        setUser({ name, phone, customer_id: custId });
+        save("signed_up", true);
         supaRest("customers", "POST", { id: custId, name, tel: phone, source: "online-course", line_link_code: getLinkCode(), pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), gate_variant: getGateVariant(), landing_url: load("landing_url", null), ...getUTM() });
         supaRest("online_students", "POST", { customer_id: custId, name, phone, status: "กำลังเรียน", company: row.company || null, pre_course: preCourseStudent });
       } else if (row.company || preCourseStudent) {
@@ -2341,6 +1702,15 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
     const finalMod = COURSE.modules[COURSE.modules.length - 1];
     setActive(finalMod.id); beginQuiz(finalMod);
   }, [examGate, user?.auth_user_id]);
+  // มาจากปุ่ม "ทำข้อสอบปลายภาคใหม่" (ใบประกาศหมดอายุ) → เปิดข้อสอบปลายภาคให้เลย (ยังไม่ล็อกอิน → ด่านเข้าสู่ระบบก่อน)
+  useEffect(() => {
+    if (!load("autostart_final", false)) return;
+    save("autostart_final", false);
+    const finalMod = COURSE.modules[COURSE.modules.length - 1];
+    if (!isModuleAccessible(finalMod.id, getPurchased())) return;
+    if (!isAuthed()) { setExamGate(true); return; }
+    setActive(finalMod.id); beginQuiz(finalMod);
+  }, []);
   // มีสลิปรอตรวจ → เช็คสถานะกับ server ตอนเปิดหน้าคอร์ส แอดมินอนุมัติแล้วจะปลดล็อกให้ทันที
   const [, setSlipSync] = useState(0);
   useEffect(() => { (async () => { if (await syncPendingSlips()) setSlipSync(x => x + 1); })(); }, []);
@@ -2533,7 +1903,11 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
           <button onClick={async () => { await syncPendingSlips(); setSlipSync(x => x + 1); }} style={{ background: "none", border: `1px solid ${B.gold}`, borderRadius: 8, padding: "4px 10px", fontSize: 12, color: "#8a6d1a", cursor: "pointer", whiteSpace: "nowrap" }}>เช็คสถานะ</button>
         </div>
       )}
+      {progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id) && <CourseCertNotice go={go}/>}
       {COURSE.modules.map(m => { const owns = hasMod(m.id); const ok = unlocked(m.id); const dn = done(m.id); const fin = !m.vid; const needBuy = !owns && !FREE_LAUNCH && m.id <= 6; const gateLock = gateOn && !signedUp && m.id >= 2 && (progress.done.includes(m.id - 1) || FREE_LAUNCH); return (<button key={m.id} onClick={() => { if (needBuy) { go("store"); return; } if (!ok) { if (gateLock) go("signupgate"); else if (fin) alert("กรุณาเรียนและผ่านแบบทดสอบให้ครบทั้ง 6 บทก่อน จึงจะทำแบบทดสอบสุดท้ายได้"); return; } if (fin && !isAuthed()) { setExamGate(true); return; } setActive(m.id); if (fin) beginQuiz(m); else if (dn) setReviewMode(true); }} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: 14, marginBottom: 8, background: needBuy ? `${B.gold}06` : B.white, border: dn ? `2px solid ${B.green}` : needBuy ? `1px dashed ${B.gold}` : "2px solid transparent", borderRadius: 14, cursor: (ok || needBuy || gateLock) ? "pointer" : "not-allowed", opacity: (ok || needBuy || gateLock) ? 1 : .5, textAlign: "left" }}><div style={{ minWidth: 42, height: 42, borderRadius: 11, background: dn ? B.green : needBuy ? `${B.gold}18` : fin ? `${B.gold}18` : `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center" }}>{dn ? <I name="check" size={18} color={B.white}/> : needBuy ? <I name="lock" size={16} color={B.gold}/> : !ok ? <I name="lock" size={16} color={gateLock ? "#06C755" : B.dkGray}/> : fin ? <I name="cert" size={18} color={B.gold}/> : <I name="play" size={16} color={B.red}/>}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div><div style={{ fontSize: 12, color: needBuy ? B.gold : gateLock ? "#06994A" : B.dkGray, marginTop: 2 }}>{dn ? (fin ? `✓ ผ่านแล้ว (${progress.scores[m.id]}%)` : `✓ ผ่านแล้ว • กดเพื่อดูวิดีโอซ้ำ`) : needBuy ? `฿${PRICING.single} — กดเพื่อซื้อ` : gateLock ? "🔓 สมัครฟรีเพื่อปลดล็อก" : (fin && !ok) ? "🔒 เรียนให้ครบทุกบทก่อน จึงทำแบบทดสอบได้" : m.vid ? `วิดีโอ + ${QUIZ_DRAW_N(m)} คำถาม` : `${QUIZ_DRAW_N(m)} คำถาม • ต้องได้ 80%`}</div></div>{needBuy ? <span style={{ fontSize: 14, fontWeight: 700, color: B.gold }}>฿{PRICING.single}</span> : ok && !dn ? <I name="arrow" size={14} color={B.dkGray}/> : ok && dn && m.vid ? <I name="replay" size={14} color={B.green}/> : null}</button>); })}
+      {user?.customer_id && user?.phone && progress.done.length > 0 && <ReferralCard user={user} compact/>}
+      <EmergencyGuideCard compact/>
+      {(load("last_purchase", null) || (load("purchased", []) || []).some((x) => x > 1)) && <button onClick={() => go("taxinvoice")} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 12.5, textDecoration: "underline", cursor: "pointer", marginTop: 12, padding: 0 }}>ต้องการใบกำกับภาษีเต็มรูป? ขอได้ที่นี่</button>}
       {PROMO_ENABLED && !FREE_LAUNCH && !load("promo_redeemed", false) && purchased.filter(x => x <= 6).length < 3 && <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ width: "100%", marginTop: 8, padding: "14px 16px", background: `${B.gold}12`, border: `1px dashed ${B.gold}`, borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
         <I name="star" size={20} color={B.gold}/>
         <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.black }}>ปลดล็อก {PROMO_FREE_MODULES.length} บทฟรีด้วยโค้ดส่วนลด <span style={{ fontWeight: 400, color: B.dkGray }}>— ใช้เวลา 30 วิ</span></div>
@@ -2557,53 +1931,164 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
 // (ยังไม่ login) หรือ Hub ยังไม่พร้อม ก็ไม่แสดงอะไร
 const HUB_URL = "https://class.jiacpr.com";
 const HUB_COURSE_ID = "cpr";
-function HubCertificateCard() {
-  const [state, setState] = useState(null);
+// ใบประกาศกลางของ Hub: โหลดสถานะ + "ขอรับอัตโนมัติ" ครั้งเดียวเมื่อมีสิทธิ์ (ผ่านข้อสอบปลายภาคที่ยืนยันตัวตนแล้ว)
+// ไม่ต้องรอผู้เรียนกดปุ่มเอง — ใบนี้คือใบที่ตรวจสอบได้จริง (QR บนใบประกาศชี้ไปหน้า verify ของ Hub)
+// ขอรับอัตโนมัติไม่สำเร็จ (เช่น โปรไฟล์ Hub ยังไม่ครบ) → การ์ดยังมีปุ่มให้กดขอรับเองพร้อมข้อความ error ตามเดิม
+const useHubCertificate = () => {
+  const [state, setState] = useState(null); // null | { cert, claimable }
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const load = async () => {
+  const autoTried = useRef(false);
+  const fetchMine = useCallback(async () => {
     try {
       const supa = await getSupabase();
       const { data: { session } } = await supa.auth.getSession();
-      if (!session) { setState(null); return; }
+      if (!session) { setState(null); return null; }
       const { data, error } = await supa.rpc("jia_person_certificates", { action: "mine", payload: {} });
-      if (error || !data) { setState(null); return; }
-      setState({
-        cert: (data.certificates || []).find((c) => c.courseId === HUB_COURSE_ID && c.status === "issued") || null,
+      if (error || !data) { setState(null); return null; }
+      const mine = (data.certificates || []).filter((c) => c.courseId === HUB_COURSE_ID);
+      const next = {
+        cert: mine.find((c) => c.status === "issued") || null,
+        // ใบล่าสุดไม่ว่าสถานะไหน (หมดอายุแล้วก็ยังต้องรู้ เพื่อเตือนให้สอบใหม่รับใบใหม่)
+        latest: mine.filter((c) => c.expiresAt).sort((a, b) => new Date(b.issuedAt || 0) - new Date(a.issuedAt || 0))[0] || null,
         claimable: (data.claimable || []).some((c) => c.courseId === HUB_COURSE_ID),
-      });
-    } catch (e) { setState(null); }
-  };
-  useEffect(() => { load(); }, []);
-  if (!state || (!state.cert && !state.claimable)) return null;
-  const claim = async () => {
-    setBusy(true); setErr("");
+      };
+      setState(next);
+      return next;
+    } catch (e) { setState(null); return null; }
+  }, []);
+  const claim = useCallback(async ({ silent = false } = {}) => {
+    setBusy(true); if (!silent) setErr("");
     try {
       const supa = await getSupabase();
       const { error } = await supa.rpc("jia_person_certificates", { action: "claim", payload: { courseId: HUB_COURSE_ID } });
-      if (error) setErr(error.message || "ขอรับใบประกาศไม่สำเร็จ");
-      await load();
-    } catch (e) { setErr("ขอรับใบประกาศไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+      if (error) { if (!silent) setErr(error.message || "ขอรับใบประกาศไม่สำเร็จ"); }
+      else { safeTrack("hub_cert_claimed", { auto: silent }); phCapture("hub_cert_claimed", { auto: silent }); }
+      await fetchMine();
+    } catch (e) { if (!silent) setErr("ขอรับใบประกาศไม่สำเร็จ ลองใหม่อีกครั้ง"); }
     finally { setBusy(false); }
-  };
+  }, [fetchMine]);
+  useEffect(() => {
+    (async () => {
+      const s = await fetchMine();
+      if (s && !s.cert && s.claimable && !autoTried.current) { autoTried.current = true; await claim({ silent: true }); }
+    })();
+  }, [fetchMine, claim]);
+  return { state, busy, err, claim };
+};
+const hubVerifyUrl = (cert) => (cert?.verifyPath ? HUB_URL + cert.verifyPath : null);
+const thaiDate = (iso) => { try { return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }); } catch (e) { return ""; } };
+// ใบประกาศใกล้หมดอายุ/หมดแล้ว (อิงวันหมดอายุของใบกลางที่ Hub) — ใช้โชว์แถบเตือนต่ออายุ
+const CERT_RENEW_WARN_DAYS = 45;
+const certRenewState = (cert) => {
+  if (!cert?.expiresAt) return null;
+  const days = Math.ceil((new Date(cert.expiresAt).getTime() - Date.now()) / 86400000);
+  if (days < 0) return { expired: true, days };
+  if (days <= CERT_RENEW_WARN_DAYS) return { expired: false, days };
+  return null;
+};
+
+// แถบเตือนใบประกาศใกล้หมดอายุ / หมดอายุแล้ว — หมดแล้วพาไปสอบปลายภาคใหม่ (grade-quiz ส่งผลเข้า Hub → รับใบใหม่อัตโนมัติ)
+function RenewBanner({ renew, go }) {
+  const retake = () => { save("autostart_final", true); safeTrack("cert_renew_click", { expired: renew.expired }); phCapture("cert_renew_click", { expired: renew.expired }); go("course"); };
+  const bg = renew.expired ? `${B.red}10` : `${B.gold}14`, bd = renew.expired ? `${B.red}55` : `${B.gold}66`;
+  return <div data-testid="cert-renew-banner" style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 12, padding: "12px 14px", marginTop: 12, fontSize: 13, lineHeight: 1.55, color: B.black }}>
+    {renew.expired
+      ? <><strong>ใบประกาศของคุณหมดอายุแล้ว</strong> — ทักษะ CPR ลดลงได้เร็วถ้าไม่ได้ทบทวน ทำข้อสอบปลายภาคใหม่ให้ผ่านเพื่อรับใบประกาศฉบับใหม่ (ทบทวนวิดีโอก่อนได้)</>
+      : <><strong>ใบประกาศจะหมดอายุในอีก {renew.days} วัน</strong> — ทบทวนวิดีโอไว้ให้พร้อม เมื่อครบกำหนดแล้วทำข้อสอบปลายภาคใหม่เพื่อรับใบฉบับใหม่ (หรือต่อยอดด้วยคอร์สภาคปฏิบัติ On-site)</>}
+    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+      {renew.expired
+        ? <button onClick={retake} style={{ ...css.btn(B.red, B.white), padding: "10px 16px", fontSize: 13 }}>ทำข้อสอบปลายภาคใหม่ →</button>
+        : <button onClick={() => go("course")} style={{ ...css.btn(B.black, B.white), padding: "10px 16px", fontSize: 13 }}>ทบทวนบทเรียน</button>}
+      <button onClick={() => go("booking")} style={{ ...css.btn(B.white, B.black), padding: "10px 16px", fontSize: 13, border: `1px solid ${B.ltGray}` }}>จองคอร์ส On-site</button>
+    </div>
+  </div>;
+}
+
+// หน้าบทเรียน: เรียนจบแล้วเท่านั้น — เตือนต่ออายุ (ถ้าใกล้/เลยกำหนด) + ขอรับใบกลางให้อัตโนมัติแม้ไม่ได้เปิดหน้าใบประกาศ
+function CourseCertNotice({ go }) {
+  const hub = useHubCertificate();
+  const renew = hub.state?.claimable ? null : certRenewState(hub.state?.cert || hub.state?.latest);
+  return renew ? <div style={{ marginBottom: 12 }}><RenewBanner renew={renew} go={go}/></div> : null;
+}
+
+function HubCertificateCard({ hub }) {
+  const { state, busy, err, claim } = hub;
+  if (!state || (!state.cert && !state.claimable)) return null;
   const box = { display: "block", background: `${B.green}14`, border: `1px solid ${B.green}66`, borderRadius: 12, padding: "12px 14px", marginTop: 12, color: B.black, textDecoration: "none", fontSize: 12.5, lineHeight: 1.5 };
   if (state.cert) {
     const c = state.cert;
-    const exp = c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "";
-    return <a href={HUB_URL + c.verifyPath} target="_blank" rel="noreferrer" style={box} data-testid="hub-certificate">
-      <strong>ใบประกาศออนไลน์กลาง JIA</strong> · เลขที่ <span style={{ fontFamily: "monospace" }}>{c.number}</span>{exp ? ` · หมดอายุ ${exp}` : ""}
+    const exp = c.expiresAt ? thaiDate(c.expiresAt) : "";
+    return <a href={hubVerifyUrl(c)} target="_blank" rel="noreferrer" style={box} data-testid="hub-certificate">
+      <strong>ใบประกาศออนไลน์กลาง JIA</strong> · เลขที่ <span style={{ fontFamily: "monospace" }}>{c.number}</span>{exp ? ` · ใช้ได้ถึง ${exp}` : ""}
+      <br/>นายจ้าง/HR สแกน QR บนใบประกาศ หรือเปิดลิงก์นี้เพื่อตรวจสอบได้ทันที
       <br/><span style={{ fontWeight: 700 }}>ตรวจสอบ / เปิดใบที่ class.jiacpr.com ↗</span>
     </a>;
   }
   return <div style={box} data-testid="hub-certificate-claim">
     <strong>ผ่านข้อสอบปลายภาคแล้ว</strong> — รับใบประกาศออนไลน์กลางของ JIA (ตรวจสอบได้ด้วย QR) ชื่อบนใบมาจากบัตรนักเรียน JIA ของคุณ
-    <div style={{ marginTop: 8 }}><button onClick={claim} disabled={busy} style={{ background: B.green, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 700, cursor: "pointer" }}>{busy ? "กำลังขอรับ…" : "ขอรับใบประกาศกลาง"}</button></div>
+    <div style={{ marginTop: 8 }}><button onClick={() => claim()} disabled={busy} style={{ background: B.green, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 700, cursor: "pointer" }}>{busy ? "กำลังขอรับ…" : "ขอรับใบประกาศกลาง"}</button></div>
     {err && <div style={{ color: "#b3261e", marginTop: 6 }}>{err}</div>}
   </div>;
 }
 
+// QR ตรวจสอบใบประกาศ (SVG) — สร้างฝั่ง client จากลิงก์ verify ของ Hub
+function VerifyQR({ url, size = 84 }) {
+  const [svg, setSvg] = useState("");
+  useEffect(() => {
+    if (!url) return;
+    let alive = true;
+    import("qrcode").then((mod) => (mod.default || mod).toString(url, { type: "svg", margin: 0, errorCorrectionLevel: "M" })).then((s) => { if (alive) setSvg(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, [url]);
+  if (!svg) return null;
+  return <div style={{ width: size, height: size }} dangerouslySetInnerHTML={{ __html: svg.replace("<svg", `<svg width="${size}" height="${size}"`) }}/>;
+}
+
+// ==================== REFERRAL CARD (ชวนเพื่อน) ====================
+// ต้องมี customer_id + เบอร์ (สมัครแล้ว) — server ยืนยันความเป็นเจ้าของแล้วคืนโค้ดเดิม/สร้างใหม่ + ยอดเพื่อนที่สมัคร/ซื้อ
+function ReferralCard({ user, compact = false }) {
+  const u = user || load("user", null);
+  const [info, setInfo] = useState(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!u?.customer_id || !u?.phone) return;
+    supaRpc("referral_my_code", { p_customer_id: u.customer_id, p_phone: u.phone }).then((d) => {
+      if (d?.code) { save("my_ref_code", d.code); setInfo(d); }
+    });
+  }, [u?.customer_id, u?.phone]);
+  if (!info) return null;
+  const link = referralLink(info.code);
+  const text = `มาเรียน CPR & AED ออนไลน์ด้วยกัน ช่วยชีวิตคนใกล้ตัวได้จริง 💪 เข้าลิงก์นี้ได้ส่วนลด ${REFERRAL_DISCOUNT_PCT}% ตอนซื้อคอร์ส`;
+  const share = async () => {
+    safeTrack("referral_share", { code: info.code }); phCapture("referral_share", { code: info.code });
+    try { if (navigator.share) { await navigator.share({ title: "JIA CPR Online", text, url: link }); return; } } catch (e) { if (e?.name === "AbortError") return; }
+    window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text), "_blank");
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
+  return <div data-testid="referral-card" style={{ background: `${B.gold}10`, border: `1px solid ${B.gold}55`, borderRadius: 16, padding: compact ? 14 : 18, marginTop: 14 }}>
+    <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>🎁 ชวนเพื่อนเรียน CPR</div>
+    <div style={{ fontSize: 12.5, color: B.dkGray, lineHeight: 1.6 }}>เพื่อนที่เข้าผ่านลิงก์ของคุณได้ส่วนลด <strong style={{ color: B.black }}>{REFERRAL_DISCOUNT_PCT}%</strong> ตอนซื้อคอร์ส · {REFERRAL_REWARD_TEXT}</div>
+    <div style={{ display: "flex", gap: 8, alignItems: "center", background: B.white, border: `1px solid ${B.ltGray}`, borderRadius: 10, padding: "8px 10px", marginTop: 10 }}>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{link.replace(/^https:\/\//, "")}</span>
+      <button onClick={copy} style={{ background: B.gray, border: "none", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>{copied ? "คัดลอกแล้ว" : "คัดลอก"}</button>
+    </div>
+    <button onClick={share} style={{ ...css.btn("#06C755", B.white, true), marginTop: 10, padding: "12px 20px", fontSize: 14 }}>แชร์ลิงก์ให้เพื่อน</button>
+    <div style={{ display: "flex", justifyContent: "space-around", marginTop: 10, fontSize: 12, color: B.dkGray, textAlign: "center" }}>
+      <div><div style={{ fontSize: 18, fontWeight: 800, color: B.black }}>{info.signups || 0}</div>เพื่อนสมัคร</div>
+      <div><div style={{ fontSize: 18, fontWeight: 800, color: B.black }}>{info.purchases || 0}</div>เพื่อนซื้อคอร์ส</div>
+    </div>
+  </div>;
+}
+
 function Certificate({ user, go }) {
-  const d = new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
+  const hub = useHubCertificate();
+  const hubCert = hub.state?.cert || null;
+  const verifyUrl = hubVerifyUrl(hubCert);
+  // ต่ออายุ: Hub ออกใบใหม่ให้ได้เมื่อใบเดิมหมดอายุแล้ว + สอบปลายภาคผ่านใหม่ (ใบที่ยังไม่หมดอายุ claim ซ้ำจะได้ใบเดิม)
+  const renew = hub.state?.claimable ? null : certRenewState(hubCert || hub.state?.latest);
+  // มีใบกลางแล้ว → ใช้วันที่ออกใบจริงของ Hub (เดิมโชว์ "วันนี้" ทุกครั้งที่เปิดหน้า)
+  const d = hubCert?.issuedAt ? new Date(hubCert.issuedAt) : new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   // นักเรียน pre-course จ่ายค่าคอร์ส on-site เต็มราคาแล้ว — ใบประกาศต้องไม่โชว์ "ส่วนลด ฿100"
   // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน)
   const preCourseStudent = isPreCourseStudent();
@@ -2667,16 +2152,16 @@ function Certificate({ user, go }) {
     safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true }); phCapture("line_oa_clicked", { variant: "certificate", has_link_code: true });
     const u = user || load("user", null);
     const tail = u?.phone ? u.phone.replace(/\D/g, "").slice(-9) : null;
-    // ผูกโค้ดนี้กับเรคคอร์ดลูกค้า เพื่อให้ webhook จับคู่ได้แน่นอน
-    if (tail) supaRest("customers", "PATCH", { line_link_code: lc }, `?tel=ilike.*${tail}`);
+    // ผูกโค้ดนี้กับเรคคอร์ดลูกค้า เพื่อให้ webhook จับคู่ได้แน่นอน (ผ่าน RPC — ไม่แตะตาราง customers ตรง)
+    if (tail) setCustomerLineLink(u, lc);
     setLinkWaiting(true);
     if (pollRef.current) clearInterval(pollRef.current);
     let tries = 0;
     pollRef.current = setInterval(async () => {
       tries++;
       if (tail) {
-        const rows = await supaRest("customers", "GET", null, `?tel=ilike.*${tail}&select=line_user_id&limit=1`);
-        if (Array.isArray(rows) && rows[0]?.line_user_id) {
+        // ต้องรู้ทั้งเบอร์ + โค้ดผูก (อยู่ในเครื่องนี้เท่านั้น) — ไม่อ่านตาราง customers ด้วย anon key อีกต่อไป
+        if (await supaRpc("customer_line_linked", { p_phone: u.phone, p_code: lc }) === true) {
           clearInterval(pollRef.current); pollRef.current = null;
           save("line_linked", true); save("line_added", true);
           setLineLinked(true); setLinkWaiting(false);
@@ -2716,13 +2201,20 @@ function Certificate({ user, go }) {
             <div style={{ borderTop: "1.5px solid #C49A48", marginTop: 4, paddingTop: 4, fontSize: 11.5, lineHeight: 1.25, color: B.dkGray }}>ศูนย์ฝึกอบรม CPR &amp; AED</div>
           </div>
           <div style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 10.5, letterSpacing: .5, color: "#8A7A55" }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
+          {verifyUrl && <div data-testid="cert-verify-qr" style={{ position: "absolute", top: 44, right: 58, width: 112, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "8px 6px 6px", boxSizing: "border-box" }}>
+            <div style={{ display: "flex", justifyContent: "center" }}><VerifyQR url={verifyUrl} size={84}/></div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#0E1E3C", marginTop: 4, lineHeight: 1.2 }}>สแกนเพื่อตรวจสอบ</div>
+            <div style={{ fontSize: 9.5, color: B.dkGray, fontFamily: "monospace", lineHeight: 1.3 }}>{hubCert.number}</div>
+            {hubCert.expiresAt && <div style={{ fontSize: 9.5, color: B.dkGray, lineHeight: 1.3 }}>ใช้ได้ถึง {thaiDate(hubCert.expiresAt)}</div>}
+          </div>}
         </div>
       </div>
     </div>
     {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — ขอบคุณผู้มอบคอร์สนี้ + ให้ช่องทางติดต่อกลับ (ไม่แตะรูปใบประกาศ) */}
     {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
     {/* ใบประกาศออนไลน์กลาง JIA (ตรวจสอบได้ที่ Hub) — เพิ่มจากใบของเว็บนี้ ไม่แทน */}
-    <HubCertificateCard/>
+    {renew && <RenewBanner renew={renew} go={go}/>}
+    <HubCertificateCard hub={hub}/>
     <div style={{ marginTop: 16 }}><AccountCard user={user}/></div>
     {/* บัตรนักเรียน JIA กลาง (class.jiacpr.com) — มีเมื่อล็อกอิน LINE/อีเมลจริงแล้วเท่านั้น ใบเก่ายังใช้ได้ปกติ */}
     {user?.hub?.cardNo && <a href="https://class.jiacpr.com/card" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: B.gray, borderRadius: 12, padding: "12px 14px", marginTop: 12, textDecoration: "none", color: B.black }}>
@@ -2771,7 +2263,9 @@ function Certificate({ user, go }) {
       </div>
       )}
     </>)}
-    <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>
+    {/* ชวนเพื่อน (มีโค้ดของตัวเอง) — ยังสมัครไม่ครบ (ไม่มี customer_id) ใช้ปุ่มแชร์แบบเดิม */}
+    {(user?.customer_id && user?.phone) ? <ReferralCard user={user}/> : <button onClick={() => { const txt = "ฉันผ่านคอร์ส CPR & AED ออนไลน์แล้ว! เรียนฟรีที่ cpr.morroo.com"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn("#06C755", B.white, true), marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>แชร์ให้เพื่อนเรียนด้วย</button>}
+    <ReviewForm user={user}/>
     <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
     <button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 10, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button>
     <button onClick={() => { if(confirm("ต้องการเริ่มใหม่ / เปลี่ยนคนเรียน?")) startOverLearner(); }} style={{ ...css.btn(B.gray, B.dkGray, true), marginTop: 8, fontSize: 13 }}>เริ่มใหม่ / เปลี่ยนคนเรียน</button>
@@ -2972,1834 +2466,6 @@ function Booking({ go }) {
   );
 }
 
-// ==================== ADMIN ====================
-// รหัสแอดมินถูกตรวจฝั่ง server (edge function admin-api ตั้ง ADMIN_API_KEY) — ไม่มีความลับในบันเดิลแล้ว
-const ADMIN_SESSION_KEY = "jia_admin_auth";
-
-const TABS = [
-  { key: "pipeline",        label: "Pipeline (jiaroo)", custom: true },
-  { key: "dashboard",       label: "Dashboard",         custom: true },
-  { key: "team",            label: "ทีมเซลล์",         custom: true },
-  { key: "online_students", label: "นักเรียนออนไลน์", cols: ["name","phone","email","company","pre_course","status","final_score","coupon_code","registered_at"] },
-  { key: "customers",       label: "ลูกค้าทั้งหมด",   cols: ["name","tel","email","source","created_at"] },
-  { key: "bookings",        label: "การจอง On-site", cols: ["name","tel","course_name","start_date","time_slot","total_people","final_price","payment_status","created_at"] },
-  { key: "sales_tracking",  label: "ติดตามขาย",      cols: ["name","phone","score","coupon_code","follow_status","completed_date"] },
-  { key: "online_purchases",label: "การซื้อออนไลน์", cols: ["phone","modules","amount","payment_status","slip_url"] },
-  { key: "lead_promo_codes",label: "โค้ดส่วนลด Lead", cols: ["code","name","phone","email","line_id","source","company","unlock_modules","multi_use","created_at","expires_at","redeemed_at","email_sent_status"] },
-  { key: "voucher_issue",   label: "ออก Voucher",      custom: true },
-  { key: "partner_coupons", label: "คูปองพาร์ทเนอร์ (QR)", custom: true },
-  { key: "company_report",  label: "รายงานคะแนน (บริษัท)", custom: true },
-  { key: "game_chars",      label: "รูปตัวละครเกม",   custom: true },
-];
-
-// ==================== JIAROO CRM ====================
-const JIAROO_TENANT = "jiaroo";
-const STAGES = [
-  { key: "new",       label: "ใหม่",         color: "#94A3B8" },
-  { key: "called",    label: "โทรแล้ว",     color: "#3B82F6" },
-  { key: "scheduled", label: "นัดคุย",       color: "#8B5CF6" },
-  { key: "quoted",    label: "เสนอราคา",    color: "#F59E0B" },
-  { key: "deciding",  label: "รอตัดสินใจ",  color: "#EAB308" },
-  { key: "won",       label: "ปิดดีล",       color: "#22C55E" },
-  { key: "lost",      label: "ไม่สนใจ",     color: "#94A3B8" },
-];
-const STAGE_BY_KEY = Object.fromEntries(STAGES.map(s => [s.key, s]));
-const fmtDT = (v) => v ? new Date(v).toLocaleString("th-TH", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "—";
-
-function Pipeline() {
-  const [leads, setLeads] = useState([]);
-  const [team, setTeam] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [filterAssignee, setFilterAssignee] = useState(() => load("pipeline_filter", "mine"));
-  const [stuckOnly, setStuckOnly] = useState(false);
-  const [filterTag, setFilterTag] = useState("all");
-  const [selected, setSelected] = useState(null);
-  const [showNew, setShowNew] = useState(false);
-  const [dragOverStage, setDragOverStage] = useState(null);
-  const [meId, setMeId] = useState(() => load("pipeline_me", ""));
-  const [toast, setToast] = useState(null);
-
-  const showToast = (msg, kind = "ok") => {
-    setToast({ msg, kind });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    const [l, t] = await Promise.all([
-      adminRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=updated_at.desc&limit=2000`),
-      adminRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&active=eq.true&order=name.asc`),
-    ]);
-    setLeads(Array.isArray(l) ? l : []);
-    setTeam(Array.isArray(t) ? t : []);
-    setLoading(false);
-  }, []);
-  useEffect(() => { reload(); }, [reload]);
-
-  // Auto-refresh every 30s to catch newly claimed leads / new leads
-  useEffect(() => {
-    const id = setInterval(reload, 30000);
-    return () => clearInterval(id);
-  }, [reload]);
-
-  useEffect(() => { save("pipeline_filter", filterAssignee); }, [filterAssignee]);
-  useEffect(() => { save("pipeline_me", meId); }, [meId]);
-
-  const me = team.find(t => t.id === meId);
-
-  const hoursSince = (iso) => iso ? (Date.now() - new Date(iso).getTime()) / 3600000 : 0;
-  const isStuck = (l) => l.stage !== "won" && l.stage !== "lost" && hoursSince(l.updated_at) >= 24;
-  const parseTags = (s) => (s || "").split(/[,\s]+/).map(t => t.trim()).filter(Boolean);
-  const tagColor = (t) => {
-    let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
-    const palette = ["#3B82F6","#8B5CF6","#EC4899","#F59E0B","#10B981","#06B6D4","#EF4444","#84CC16"];
-    return palette[Math.abs(h) % palette.length];
-  };
-  const allTags = Array.from(new Set(leads.flatMap(l => parseTags(l.tags)))).sort();
-
-  const filtered = leads.filter(l => {
-    if (filterAssignee === "mine") {
-      if (!meId || l.assignee_id !== meId) return false;
-    } else if (filterAssignee === "unassigned") {
-      if (l.assignee_id) return false;
-    } else if (filterAssignee !== "all") {
-      if (l.assignee_id !== filterAssignee) return false;
-    }
-    if (stuckOnly && !isStuck(l)) return false;
-    if (filterTag !== "all") {
-      const tags = parseTags(l.tags);
-      if (!tags.includes(filterTag)) return false;
-    }
-    if (search) {
-      const s = search.toLowerCase();
-      const hay = [l.name, l.display_name, l.phone, l.email, l.notes, l.tags].filter(Boolean).join(" ").toLowerCase();
-      if (!hay.includes(s)) return false;
-    }
-    return true;
-  });
-
-  const byStage = STAGES.reduce((acc, s) => { acc[s.key] = filtered.filter(l => l.stage === s.key); return acc; }, {});
-  const teamById = Object.fromEntries(team.map(t => [t.id, t]));
-
-  const moveStage = async (lead, newStage) => {
-    if (lead.stage === newStage) return;
-    const prev = lead.stage;
-    setLeads(rs => rs.map(r => r.id === lead.id ? { ...r, stage: newStage } : r));
-    await adminRest("jiaroo_leads", "PATCH", { stage: newStage }, `?id=eq.${lead.id}`);
-    await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: prev, to: newStage }, created_by: me?.name || "admin" });
-  };
-
-  // Optimistic claim — only succeeds if lead is still unassigned
-  const claim = async (e, lead) => {
-    e.stopPropagation();
-    if (!meId) { showToast("เลือก \"ฉันคือ\" ก่อน", "warn"); return; }
-    if (lead.assignee_id) { showToast("มีคนรับไปแล้ว", "warn"); return; }
-    const result = await adminRest("jiaroo_leads", "PATCH", { assignee_id: meId }, `?id=eq.${lead.id}&assignee_id=is.null`);
-    if (Array.isArray(result) && result.length > 0) {
-      setLeads(rs => rs.map(r => r.id === lead.id ? { ...r, assignee_id: meId } : r));
-      await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "claim", data: { by: meId, name: me?.name }, created_by: me?.name || "admin" });
-      showToast(`✓ รับ ${lead.name || lead.display_name || "lead"} แล้ว`, "ok");
-    } else {
-      showToast("ช้าไป! คนอื่นรับไปก่อนแล้ว", "warn");
-      reload();
-    }
-  };
-
-  const newCount = leads.filter(l => !l.assignee_id && l.stage === "new").length;
-
-  const exportCSV = () => {
-    const cols = ["display_name","name","phone","email","stage","assignee","tags","product_interest","deal_value","source","last_message_preview","created_at","updated_at"];
-    const esc = (v) => {
-      if (v == null) return "";
-      const s = String(v).replace(/"/g, '""');
-      return /[",\n]/.test(s) ? `"${s}"` : s;
-    };
-    const rows = filtered.map(l => cols.map(c => {
-      if (c === "assignee") return esc(teamById[l.assignee_id]?.name);
-      if (c === "stage") return esc(STAGE_BY_KEY[l.stage]?.label || l.stage);
-      return esc(l[c]);
-    }).join(","));
-    const csv = "﻿" + cols.join(",") + "\n" + rows.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `jiaroo_leads_${new Date().toISOString().slice(0,10)}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <div>
-      {/* "Me" selector — each sales picks themselves once */}
-      <div style={{ background: meId ? `${B.green}10` : `${B.gold}10`, border: `1px solid ${meId ? B.green : B.gold}40`, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: meId ? B.green : B.gold }}>{meId ? "👤 ฉันคือ" : "⚠ เลือกชื่อตัวเองก่อนเริ่มรับลูกค้า"}</div>
-        <select value={meId} onChange={e => setMeId(e.target.value)} style={{ padding: "8px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white, fontWeight: 600 }}>
-          <option value="">— เลือก —</option>
-          {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        {me?.picture_url && <img src={me.picture_url} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover" }}/>}
-        {newCount > 0 && <div style={{ marginLeft: "auto", background: B.red, color: B.white, padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700 }}>🔔 {newCount} lead รอรับ</div>}
-      </div>
-
-      <div style={{ background: B.white, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / โน้ต / แท็ก" style={{ flex: "1 1 220px", padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
-        <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
-          <option value="mine">ของฉัน</option>
-          <option value="unassigned">ยังไม่มีคนรับ</option>
-          <option value="all">ทั้งหมด</option>
-          <optgroup label="— ตามคน —">
-            {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </optgroup>
-        </select>
-        <button onClick={() => setStuckOnly(s => !s)} style={{ background: stuckOnly ? B.red : B.white, color: stuckOnly ? B.white : B.red, border: `1px solid ${B.red}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🔥 ค้างเกิน 24 ชม</button>
-        {allTags.length > 0 && (
-          <select value={filterTag} onChange={e => setFilterTag(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
-            <option value="all">ทุกแท็ก</option>
-            {allTags.map(t => <option key={t} value={t}>🏷 {t}</option>)}
-          </select>
-        )}
-        <button onClick={exportCSV} disabled={!filtered.length} style={{ background: B.white, color: B.green, border: `1px solid ${B.green}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", opacity: filtered.length ? 1 : 0.5 }}>⬇ CSV</button>
-        <button onClick={() => setShowNew(true)} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ เพิ่ม Lead</button>
-        <button onClick={reload} style={{ background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, cursor: "pointer" }}>↻</button>
-        <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {leads.length} leads</div>
-      </div>
-
-      {loading ? (
-        <div style={{ background: B.white, padding: 40, borderRadius: 12, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>
-      ) : (
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 12 }}>
-          {STAGES.map(s => (
-            <div key={s.key}
-              onDragOver={e => { e.preventDefault(); if (dragOverStage !== s.key) setDragOverStage(s.key); }}
-              onDragLeave={() => setDragOverStage(null)}
-              onDrop={e => {
-                e.preventDefault();
-                const id = e.dataTransfer.getData("text/plain");
-                const lead = leads.find(l => l.id === id);
-                if (lead) moveStage(lead, s.key);
-                setDragOverStage(null);
-              }}
-              style={{ minWidth: 260, flex: "0 0 260px", background: dragOverStage === s.key ? `${s.color}22` : B.gray, borderRadius: 12, padding: 10, transition: "background .15s", outline: dragOverStage === s.key ? `2px dashed ${s.color}` : "none" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "0 4px" }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: s.color }}/>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>{s.label}</div>
-                <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{byStage[s.key].length}</div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "calc(100vh - 320px)", overflowY: "auto" }}>
-                {byStage[s.key].length === 0 ? (
-                  <div style={{ fontSize: 12, color: B.dkGray, padding: 12, textAlign: "center" }}>—</div>
-                ) : byStage[s.key].map(l => {
-                  const a = l.assignee_id ? teamById[l.assignee_id] : null;
-                  const isMine = l.assignee_id === meId;
-                  const unclaimed = !l.assignee_id;
-                  const h = hoursSince(l.updated_at);
-                  const closed = l.stage === "won" || l.stage === "lost";
-                  const ageColor = closed ? null : h >= 72 ? B.red : h >= 24 ? B.gold : null;
-                  const ageLabel = h < 1 ? "เพิ่ง" : h < 24 ? `${Math.floor(h)} ชม` : `${Math.floor(h / 24)} วัน`;
-                  return (
-                    <div key={l.id}
-                      draggable
-                      onDragStart={e => { e.dataTransfer.setData("text/plain", l.id); e.dataTransfer.effectAllowed = "move"; }}
-                      onClick={() => setSelected(l)}
-                      style={{ background: B.white, borderRadius: 10, padding: 10, cursor: "grab", boxShadow: "0 1px 3px rgba(0,0,0,.05)", borderLeft: `3px solid ${s.color}`, position: "relative", outline: isMine ? `2px solid ${B.green}` : "none" }}>
-                      {ageColor && <div title={`อัปเดตล่าสุด ${ageLabel}ที่แล้ว`} style={{ position: "absolute", top: 8, right: 8, background: ageColor, color: B.white, padding: "1px 6px", borderRadius: 999, fontSize: 9, fontWeight: 700 }}>{h >= 72 ? "🔥" : "⚠"} {ageLabel}</div>}
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", paddingRight: ageColor ? 60 : 0 }}>
-                        {l.picture_url && <img src={l.picture_url} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}/>}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name || l.display_name || "(ไม่มีชื่อ)"}</div>
-                          {l.phone && <div style={{ fontSize: 11, color: B.dkGray }}>{l.phone}</div>}
-                        </div>
-                      </div>
-                      {l.last_message_preview && <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>💬 {l.last_message_preview}</div>}
-                      {parseTags(l.tags).length > 0 && (
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
-                          {parseTags(l.tags).slice(0, 4).map(t => (
-                            <span key={t} style={{ background: `${tagColor(t)}20`, color: tagColor(t), padding: "2px 8px", borderRadius: 999, fontSize: 10, fontWeight: 600 }}>{t}</span>
-                          ))}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 6 }}>
-                        {unclaimed ? (
-                          <button onClick={e => claim(e, l)} disabled={!meId} style={{ background: meId ? B.red : B.ltGray, color: B.white, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: meId ? "pointer" : "not-allowed", flex: 1 }}>🤚 รับ Lead</button>
-                        ) : (
-                          <span style={{ fontSize: 11, color: isMine ? B.green : B.dkGray, fontWeight: isMine ? 700 : 400 }}>{isMine ? "✓ ของฉัน" : `👤 ${a?.name || "—"}`}</span>
-                        )}
-                        <span style={{ fontSize: 10, color: B.dkGray }}>{fmtDT(l.updated_at)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {toast && (
-        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: toast.kind === "warn" ? B.gold : B.green, color: B.white, padding: "12px 24px", borderRadius: 999, fontSize: 14, fontWeight: 700, boxShadow: "0 4px 16px rgba(0,0,0,.2)", zIndex: 2000 }}>{toast.msg}</div>
-      )}
-
-      {selected && <LeadDetail lead={selected} team={team} onClose={() => setSelected(null)} onChange={reload} onStage={moveStage}/>}
-      {showNew && <LeadNew team={team} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); reload(); }}/>}
-    </div>
-  );
-}
-
-function LeadDetail({ lead, team, onClose, onChange, onStage }) {
-  const [form, setForm] = useState({
-    name: lead.name || "",
-    phone: lead.phone || "",
-    email: lead.email || "",
-    notes: lead.notes || "",
-    tags: lead.tags || "",
-    product_interest: lead.product_interest || "",
-    deal_value: lead.deal_value || "",
-    assignee_id: lead.assignee_id || "",
-    stage: lead.stage,
-  });
-  const [events, setEvents] = useState([]);
-  const [messages, setMessages] = useState([]);
-  const [tab, setTab] = useState("chat");
-  const [saving, setSaving] = useState(false);
-  const [noteText, setNoteText] = useState("");
-  const [noteSaving, setNoteSaving] = useState(false);
-
-  const reloadEvents = useCallback(() => {
-    adminRest("jiaroo_lead_events", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.desc&limit=100`).then(r => setEvents(Array.isArray(r) ? r : []));
-  }, [lead.id]);
-
-  useEffect(() => {
-    reloadEvents();
-    adminRest("jiaroo_messages", "GET", null, `?lead_id=eq.${lead.id}&order=created_at.asc&limit=500`).then(r => setMessages(Array.isArray(r) ? r : []));
-  }, [lead.id, reloadEvents]);
-
-  const addNote = async () => {
-    const txt = noteText.trim();
-    if (!txt) return;
-    setNoteSaving(true);
-    await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "note", data: { text: txt }, created_by: "admin" });
-    setNoteText("");
-    setNoteSaving(false);
-    reloadEvents();
-  };
-
-  const save = async () => {
-    setSaving(true);
-    const patch = {
-      name: form.name || null, phone: form.phone || null, email: form.email || null,
-      notes: form.notes || null, tags: form.tags || null,
-      product_interest: form.product_interest || null,
-      deal_value: form.deal_value === "" ? null : Number(form.deal_value),
-      assignee_id: form.assignee_id || null,
-      stage: form.stage,
-    };
-    await adminRest("jiaroo_leads", "PATCH", patch, `?id=eq.${lead.id}`);
-    if (form.stage !== lead.stage) {
-      await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "stage_change", data: { from: lead.stage, to: form.stage }, created_by: "admin" });
-    }
-    if (form.assignee_id !== (lead.assignee_id || "")) {
-      await adminRest("jiaroo_lead_events", "POST", { lead_id: lead.id, type: "assign", data: { from: lead.assignee_id, to: form.assignee_id || null }, created_by: "admin" });
-    }
-    setSaving(false);
-    onChange();
-    onClose();
-  };
-
-  const del = async () => {
-    if (!confirm("ลบ lead นี้?")) return;
-    await adminRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
-    onChange();
-    onClose();
-  };
-
-  const convertToTeam = async () => {
-    if (!confirm(`แปลง "${lead.display_name || lead.name}" เป็นสมาชิกทีมเซลล์?\n\nLead นี้จะถูกลบ และเมื่อคนนี้ทักเข้ามาอีก ระบบจะไม่สร้าง lead ใหม่`)) return;
-    await adminRest("jiaroo_team", "POST", {
-      tenant_slug: JIAROO_TENANT,
-      name: lead.display_name || lead.name || "(ไม่มีชื่อ)",
-      picture_url: lead.picture_url || null,
-      line_user_id: lead.line_user_id || null,
-      phone: lead.phone || null,
-      email: lead.email || null,
-      role: "sales",
-      active: true,
-    });
-    await adminRest("jiaroo_leads", "DELETE", null, `?id=eq.${lead.id}`);
-    onChange();
-    onClose();
-  };
-
-  const Fld = (k, label, type = "text") => (
-    <div style={{ marginBottom: 10 }}>
-      <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{label}</label>
-      {type === "textarea" ? (
-        <textarea value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} rows={3} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: "inherit" }}/>
-      ) : (
-        <input type={type} value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}/>
-      )}
-    </div>
-  );
-
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: B.white, width: "100%", maxWidth: 480, height: "100%", overflowY: "auto", padding: 20, boxSizing: "border-box" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>{lead.display_name || lead.name || "Lead"}</div>
-          <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: B.dkGray }}>×</button>
-        </div>
-        {lead.line_user_id && <div style={{ fontSize: 11, color: B.dkGray, marginBottom: 10 }}>LINE: {lead.line_user_id}</div>}
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>Stage</label>
-          <select value={form.stage} onChange={e => setForm({ ...form, stage: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
-            {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </select>
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>มอบหมาย</label>
-          <select value={form.assignee_id} onChange={e => setForm({ ...form, assignee_id: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
-            <option value="">— ยังไม่มอบหมาย —</option>
-            {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-
-        {Fld("name", "ชื่อ")}
-        {Fld("phone", "เบอร์")}
-        {Fld("email", "อีเมล")}
-        {Fld("product_interest", "สนใจสินค้า/คอร์ส")}
-        {Fld("deal_value", "มูลค่าดีล (บาท)", "number")}
-        {Fld("tags", "แท็ก (คั่นด้วย ,)")}
-        {Fld("notes", "โน้ต", "textarea")}
-
-        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-          <button onClick={save} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
-          <button onClick={del} style={{ background: B.white, color: B.red, border: `1px solid ${B.red}`, borderRadius: 8, padding: "12px 14px", fontSize: 13, cursor: "pointer" }}>ลบ</button>
-        </div>
-
-        {lead.line_user_id && (
-          <button onClick={convertToTeam} style={{ width: "100%", background: B.white, color: B.dkGray, border: `1px dashed ${B.ltGray}`, borderRadius: 8, padding: "10px", fontSize: 13, cursor: "pointer", marginTop: 8 }}>
-            👤 ทำให้เป็นทีมเซลล์ (ไม่ใช่ลูกค้า)
-          </button>
-        )}
-
-        <div style={{ marginTop: 24 }}>
-          <div style={{ display: "flex", borderBottom: `1px solid ${B.ltGray}`, marginBottom: 12 }}>
-            {[
-              { k: "chat", l: `💬 แชท (${messages.length})` },
-              { k: "notes", l: `📝 โน้ต (${events.filter(e => e.type === "note").length})` },
-              { k: "timeline", l: `📋 Timeline (${events.length})` },
-            ].map(t => (
-              <button key={t.k} onClick={() => setTab(t.k)} style={{ background: "transparent", border: "none", padding: "8px 14px", fontSize: 13, fontWeight: tab === t.k ? 700 : 400, color: tab === t.k ? B.red : B.dkGray, borderBottom: `2px solid ${tab === t.k ? B.red : "transparent"}`, cursor: "pointer", marginBottom: -1 }}>{t.l}</button>
-            ))}
-          </div>
-
-          {tab === "chat" && (
-            messages.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray, padding: 20, textAlign: "center" }}>ยังไม่มีข้อความ</div> : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 480, overflowY: "auto", background: `${B.gray}80`, borderRadius: 10, padding: 12 }}>
-                {(() => {
-                  let lastDate = "";
-                  return messages.map(m => {
-                    const dateStr = new Date(m.created_at).toLocaleDateString("th-TH", { day: "2-digit", month: "short" });
-                    const showDate = dateStr !== lastDate;
-                    lastDate = dateStr;
-                    const inbound = m.direction === "in";
-                    return (
-                      <div key={m.id}>
-                        {showDate && <div style={{ textAlign: "center", fontSize: 10, color: B.dkGray, padding: "8px 0 4px" }}>— {dateStr} —</div>}
-                        <div style={{ display: "flex", justifyContent: inbound ? "flex-start" : "flex-end" }}>
-                          <div style={{ maxWidth: "78%", background: inbound ? B.white : `${B.green}20`, color: B.black, borderRadius: 12, padding: "8px 12px", fontSize: 13, wordBreak: "break-word", boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
-                            <div style={{ whiteSpace: "pre-wrap" }}>{m.text || `[${m.message_type}]`}</div>
-                            <div style={{ fontSize: 9, color: B.dkGray, marginTop: 4, textAlign: "right" }}>{new Date(m.created_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}</div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            )
-          )}
-
-          {tab === "notes" && (
-            <div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="เขียนโน้ตเกี่ยวกับลูกค้า เช่น คุยอะไรไปแล้ว สิ่งที่ต้องตามต่อ..." rows={2} style={{ flex: 1, padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }}/>
-                <button onClick={addNote} disabled={!noteText.trim() || noteSaving} style={{ background: B.red, color: B.white, border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: noteText.trim() ? "pointer" : "not-allowed", opacity: noteText.trim() && !noteSaving ? 1 : 0.5, alignSelf: "stretch" }}>{noteSaving ? "..." : "เพิ่ม"}</button>
-              </div>
-              {events.filter(e => e.type === "note").length === 0 ? (
-                <div style={{ fontSize: 12, color: B.dkGray, padding: 20, textAlign: "center" }}>ยังไม่มีโน้ต — เริ่มจดบันทึกได้เลย</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {events.filter(e => e.type === "note").map(ev => (
-                    <div key={ev.id} style={{ padding: 10, background: `${B.gold}10`, border: `1px solid ${B.gold}40`, borderRadius: 8 }}>
-                      <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{ev.data?.text || ""}</div>
-                      <div style={{ color: B.dkGray, fontSize: 11, marginTop: 6 }}>{fmtDT(ev.created_at)} {ev.created_by ? `• ${ev.created_by}` : ""}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {tab === "timeline" && (
-            events.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray, padding: 20, textAlign: "center" }}>ยังไม่มีกิจกรรม</div> : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {events.map(ev => {
-                  const d = ev.data || {};
-                  let label = ev.type;
-                  if (ev.type === "stage_change") label = `เปลี่ยน stage: ${STAGE_BY_KEY[d.from]?.label || d.from} → ${STAGE_BY_KEY[d.to]?.label || d.to}`;
-                  else if (ev.type === "assign") label = "เปลี่ยนผู้รับผิดชอบ";
-                  else if (ev.type === "claim") label = `${d.name || "ใครบางคน"} กดรับ lead`;
-                  else if (ev.type === "created") label = `สร้าง lead (${d.source || ""})`;
-                  else if (ev.type === "follow") label = "เพิ่มเพื่อน LINE";
-                  else if (ev.type === "unfollow") label = "บล็อก / ลบเพื่อน";
-                  else if (ev.type === "note") label = `📝 โน้ต: ${(d.text || "").slice(0, 80)}${(d.text || "").length > 80 ? "..." : ""}`;
-                  return (
-                    <div key={ev.id} style={{ padding: 8, background: B.gray, borderRadius: 8, fontSize: 12 }}>
-                      <div style={{ fontWeight: 600 }}>{label}</div>
-                      <div style={{ color: B.dkGray, fontSize: 11 }}>{fmtDT(ev.created_at)} {ev.created_by ? `• ${ev.created_by}` : ""}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LeadNew({ team, onClose, onCreated }) {
-  const [form, setForm] = useState({ name: "", phone: "", email: "", source: "manual", assignee_id: "", notes: "" });
-  const [saving, setSaving] = useState(false);
-  const submit = async () => {
-    if (!form.name && !form.phone) { alert("กรอกชื่อหรือเบอร์อย่างน้อย 1"); return; }
-    setSaving(true);
-    const res = await adminRest("jiaroo_leads", "POST", {
-      tenant_slug: JIAROO_TENANT,
-      name: form.name || null,
-      phone: form.phone || null,
-      email: form.email || null,
-      source: form.source,
-      assignee_id: form.assignee_id || null,
-      notes: form.notes || null,
-      stage: "new",
-    });
-    const id = Array.isArray(res) && res[0]?.id;
-    if (id) await adminRest("jiaroo_lead_events", "POST", { lead_id: id, type: "created", data: { source: form.source }, created_by: "admin" });
-    setSaving(false);
-    onCreated();
-  };
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: B.white, borderRadius: 12, padding: 20, width: "100%", maxWidth: 400 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>เพิ่ม Lead ใหม่</div>
-        {["name","phone","email"].map(k => (
-          <div key={k} style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{k === "name" ? "ชื่อ" : k === "phone" ? "เบอร์" : "อีเมล"}</label>
-            <input value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}/>
-          </div>
-        ))}
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>แหล่งที่มา</label>
-          <select value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
-            <option value="manual">เพิ่มเอง</option>
-            <option value="line">LINE OA</option>
-            <option value="facebook">Facebook</option>
-            <option value="phone">โทรเข้า</option>
-            <option value="referral">แนะนำ</option>
-            <option value="website">เว็บไซต์</option>
-          </select>
-        </div>
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>มอบหมาย</label>
-          <select value={form.assignee_id} onChange={e => setForm({ ...form, assignee_id: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
-            <option value="">— ยังไม่มอบหมาย —</option>
-            {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>โน้ต</label>
-          <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box", fontFamily: "inherit" }}/>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={onClose} style={{ flex: 1, background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "12px", fontSize: 14, cursor: "pointer" }}>ยกเลิก</button>
-          <button onClick={submit} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "..." : "เพิ่ม"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Dashboard() {
-  const [leads, setLeads] = useState([]);
-  const [team, setTeam] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [range, setRange] = useState(30);
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    const sinceISO = new Date(Date.now() - range * 86400000).toISOString();
-    const [l, t, e] = await Promise.all([
-      adminRest("jiaroo_leads", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&limit=5000`),
-      adminRest("jiaroo_team",  "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=name.asc`),
-      adminRest("jiaroo_lead_events", "GET", null, `?created_at=gte.${sinceISO}&order=created_at.desc&limit=200`),
-    ]);
-    setLeads(Array.isArray(l) ? l : []);
-    setTeam(Array.isArray(t) ? t : []);
-    setEvents(Array.isArray(e) ? e : []);
-    setLoading(false);
-  }, [range]);
-  useEffect(() => { reload(); }, [reload]);
-
-  if (loading) return <div style={{ background: B.white, padding: 40, borderRadius: 12, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>;
-
-  const sinceMs = Date.now() - range * 86400000;
-  const inRange = leads.filter(l => new Date(l.created_at).getTime() >= sinceMs);
-  const won = leads.filter(l => l.stage === "won");
-  const lost = leads.filter(l => l.stage === "lost");
-  const closed = won.length + lost.length;
-  const conv = closed > 0 ? Math.round((won.length / closed) * 100) : 0;
-  const totalValue = won.reduce((s, l) => s + (Number(l.deal_value) || 0), 0);
-  const teamById = Object.fromEntries(team.map(t => [t.id, t]));
-
-  const byStage = STAGES.map(s => ({ ...s, count: leads.filter(l => l.stage === s.key).length }));
-  const maxStage = Math.max(1, ...byStage.map(b => b.count));
-
-  const bySource = leads.reduce((acc, l) => { const k = l.source || "—"; acc[k] = (acc[k] || 0) + 1; return acc; }, {});
-  const sourceRows = Object.entries(bySource).sort((a, b) => b[1] - a[1]);
-
-  const byAssignee = team.map(t => {
-    const my = leads.filter(l => l.assignee_id === t.id);
-    return { name: t.name, total: my.length, won: my.filter(l => l.stage === "won").length, lost: my.filter(l => l.stage === "lost").length };
-  }).filter(r => r.total > 0).sort((a, b) => b.total - a.total);
-  const unassigned = leads.filter(l => !l.assignee_id).length;
-  const stuckCount = leads.filter(l => l.stage !== "won" && l.stage !== "lost" && (Date.now() - new Date(l.updated_at).getTime()) / 3600000 >= 24).length;
-
-  const stat = (label, val, color) => (
-    <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-      <div style={{ fontSize: 11, color: B.dkGray }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 800, color, marginTop: 4 }}>{val}</div>
-    </div>
-  );
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontSize: 13, color: B.dkGray }}>ภาพรวม jiaroo CRM</div>
-        <select value={range} onChange={e => setRange(Number(e.target.value))} style={{ padding: "8px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
-          <option value={7}>7 วันล่าสุด</option>
-          <option value={30}>30 วันล่าสุด</option>
-          <option value={90}>90 วันล่าสุด</option>
-          <option value={365}>1 ปีล่าสุด</option>
-        </select>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 16 }}>
-        {stat("Leads ทั้งหมด", leads.length, B.black)}
-        {stat(`Leads ใหม่ (${range}d)`, inRange.length, B.red)}
-        {stat("ปิดดีลได้", won.length, B.green)}
-        {stat("Conversion", `${conv}%`, B.gold)}
-        {stat("มูลค่ารวม", "฿" + totalValue.toLocaleString(), B.green)}
-        {stat("ยังไม่มอบหมาย", unassigned, unassigned > 0 ? B.red : B.dkGray)}
-        {stat("ค้างเกิน 24 ชม", stuckCount, stuckCount > 0 ? B.red : B.dkGray)}
-      </div>
-
-      <div style={{ background: B.white, borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Leads ตาม Stage</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {byStage.map(s => (
-            <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 100, fontSize: 12 }}>{s.label}</div>
-              <div style={{ flex: 1, background: B.gray, borderRadius: 6, height: 22, position: "relative", overflow: "hidden" }}>
-                <div style={{ width: `${(s.count / maxStage) * 100}%`, background: s.color, height: "100%", borderRadius: 6, transition: "width .3s" }}/>
-              </div>
-              <div style={{ width: 40, fontSize: 13, fontWeight: 700, textAlign: "right" }}>{s.count}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginBottom: 12 }}>
-        <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>แหล่งที่มา</div>
-          {sourceRows.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>—</div> : sourceRows.map(([k, v]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${B.gray}`, fontSize: 13 }}>
-              <span>{k}</span>
-              <span style={{ fontWeight: 700 }}>{v}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>ผลงานทีม</div>
-          {byAssignee.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีการมอบหมาย</div> : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead><tr style={{ color: B.dkGray, fontSize: 11 }}>
-                <th style={{ textAlign: "left", padding: "4px 0" }}>ชื่อ</th>
-                <th style={{ textAlign: "right", padding: "4px 0" }}>ทั้งหมด</th>
-                <th style={{ textAlign: "right", padding: "4px 0", color: B.green }}>ปิดได้</th>
-                <th style={{ textAlign: "right", padding: "4px 0", color: B.dkGray }}>เสีย</th>
-              </tr></thead>
-              <tbody>
-                {byAssignee.map(r => (
-                  <tr key={r.name} style={{ borderTop: `1px solid ${B.gray}` }}>
-                    <td style={{ padding: "6px 0", fontWeight: 600 }}>{r.name}</td>
-                    <td style={{ textAlign: "right" }}>{r.total}</td>
-                    <td style={{ textAlign: "right", color: B.green, fontWeight: 600 }}>{r.won}</td>
-                    <td style={{ textAlign: "right", color: B.dkGray }}>{r.lost}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
-      <div style={{ background: B.white, borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>กิจกรรมล่าสุด ({events.length})</div>
-        {events.length === 0 ? <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีกิจกรรมในช่วงเวลานี้</div> : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
-            {events.slice(0, 50).map(ev => {
-              const lead = leads.find(l => l.id === ev.lead_id);
-              const data = ev.data || {};
-              let desc = ev.type;
-              if (ev.type === "stage_change") desc = `${STAGE_BY_KEY[data.from]?.label || data.from} → ${STAGE_BY_KEY[data.to]?.label || data.to}`;
-              else if (ev.type === "assign") desc = `มอบหมายให้ ${teamById[data.to]?.name || "ใครก็ตาม"}`;
-              else if (ev.type === "created") desc = `สร้าง (${data.source || ""})`;
-              else if (ev.type === "claim") desc = `${data.name || "ใครบางคน"} กดรับ`;
-              else if (ev.type === "note") desc = `📝 ${(data.text || "").slice(0, 60)}${(data.text || "").length > 60 ? "..." : ""}`;
-              else if (ev.type === "follow") desc = "เพิ่มเพื่อน LINE";
-              else if (ev.type === "unfollow") desc = "บล็อก / ลบเพื่อน";
-              return (
-                <div key={ev.id} style={{ display: "flex", gap: 8, padding: 8, background: B.gray, borderRadius: 6, fontSize: 12 }}>
-                  <div style={{ minWidth: 90, color: B.dkGray, fontSize: 11 }}>{fmtDT(ev.created_at)}</div>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontWeight: 600 }}>{lead ? (lead.name || lead.display_name || "—") : "(ลบแล้ว)"}</span>
-                    <span style={{ color: B.dkGray, marginLeft: 6 }}>{desc}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TeamManager() {
-  const [team, setTeam] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [showNew, setShowNew] = useState(false);
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    const r = await adminRest("jiaroo_team", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&order=active.desc,name.asc`);
-    setTeam(Array.isArray(r) ? r : []);
-    setLoading(false);
-  }, []);
-  useEffect(() => { reload(); }, [reload]);
-
-  const toggleActive = async (m) => {
-    await adminRest("jiaroo_team", "PATCH", { active: !m.active }, `?id=eq.${m.id}`);
-    reload();
-  };
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontSize: 14, color: B.dkGray }}>{team.filter(t => t.active).length} active / {team.length} ทั้งหมด</div>
-        <button onClick={() => setShowNew(true)} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ เพิ่มสมาชิก</button>
-      </div>
-      <div style={{ background: B.white, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-        {loading ? <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div> :
-         team.length === 0 ? <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>ยังไม่มีสมาชิก — กด "+ เพิ่มสมาชิก"</div> : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr style={{ background: B.gray }}>
-              {["ชื่อ","อีเมล","เบอร์","บทบาท","สถานะ",""].map(h => <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: B.dkGray, fontSize: 12, borderBottom: `1px solid ${B.ltGray}` }}>{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {team.map(m => (
-                <tr key={m.id} style={{ borderBottom: `1px solid ${B.ltGray}`, opacity: m.active ? 1 : 0.5 }}>
-                  <td style={{ padding: "10px 12px", fontWeight: 600 }}>{m.name}</td>
-                  <td style={{ padding: "10px 12px" }}>{m.email || "—"}</td>
-                  <td style={{ padding: "10px 12px" }}>{m.phone || "—"}</td>
-                  <td style={{ padding: "10px 12px" }}>{m.role}</td>
-                  <td style={{ padding: "10px 12px" }}>{m.active ? "✓ active" : "ปิดอยู่"}</td>
-                  <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
-                    <button onClick={() => setEditing(m)} style={{ background: "transparent", color: B.red, border: "none", cursor: "pointer", fontSize: 12, marginRight: 8 }}>แก้ไข</button>
-                    <button onClick={() => toggleActive(m)} style={{ background: "transparent", color: B.dkGray, border: "none", cursor: "pointer", fontSize: 12 }}>{m.active ? "ปิด" : "เปิด"}</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      {(showNew || editing) && <TeamForm member={editing} onClose={() => { setShowNew(false); setEditing(null); }} onSaved={() => { setShowNew(false); setEditing(null); reload(); }}/>}
-    </div>
-  );
-}
-
-function TeamForm({ member, onClose, onSaved }) {
-  const [form, setForm] = useState({
-    name: member?.name || "",
-    email: member?.email || "",
-    phone: member?.phone || "",
-    role: member?.role || "sales",
-  });
-  const [saving, setSaving] = useState(false);
-  const submit = async () => {
-    if (!form.name) { alert("กรอกชื่อ"); return; }
-    setSaving(true);
-    if (member) {
-      await adminRest("jiaroo_team", "PATCH", { name: form.name, email: form.email || null, phone: form.phone || null, role: form.role }, `?id=eq.${member.id}`);
-    } else {
-      await adminRest("jiaroo_team", "POST", { tenant_slug: JIAROO_TENANT, name: form.name, email: form.email || null, phone: form.phone || null, role: form.role, active: true });
-    }
-    setSaving(false);
-    onSaved();
-  };
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: B.white, borderRadius: 12, padding: 20, width: "100%", maxWidth: 380 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>{member ? "แก้ไขสมาชิก" : "เพิ่มสมาชิก"}</div>
-        {[["name","ชื่อ"],["email","อีเมล"],["phone","เบอร์"]].map(([k, l]) => (
-          <div key={k} style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>{l}</label>
-            <input value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}/>
-          </div>
-        ))}
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 11, color: B.dkGray, display: "block", marginBottom: 4 }}>บทบาท</label>
-          <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 13, background: B.white }}>
-            <option value="sales">sales</option>
-            <option value="manager">manager</option>
-            <option value="admin">admin</option>
-          </select>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={onClose} style={{ flex: 1, background: B.white, color: B.dkGray, border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "12px", fontSize: 14, cursor: "pointer" }}>ยกเลิก</button>
-          <button onClick={submit} disabled={saving} style={{ flex: 1, background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "..." : "บันทึก"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminLogin({ onAuth }) {
-  const [pw, setPw] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    if (!pw) { setErr("กรุณากรอกรหัสผ่าน"); return; }
-    setErr(""); setBusy(true);
-    const ok = await adminPing(pw); // ตรวจรหัสฝั่ง server
-    setBusy(false);
-    if (ok) {
-      setAdminKey(pw);
-      sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
-      onAuth();
-    } else {
-      setErr("รหัสผ่านไม่ถูกต้อง หรือระบบยังไม่ได้ตั้งค่า ADMIN_API_KEY");
-    }
-  };
-  return (
-    <div style={{ ...css.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ ...css.card, maxWidth: 380, width: "100%" }}>
-        <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ width: 64, height: 64, borderRadius: "50%", background: `${B.red}15`, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-            <I name="lock" size={28} color={B.red}/>
-          </div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>JIA Admin</h2>
-          <p style={{ fontSize: 13, color: B.dkGray, marginTop: 6 }}>กรอกรหัสผ่านเพื่อเข้าระบบ</p>
-        </div>
-        <input
-          type="password"
-          value={pw}
-          onChange={e => { setPw(e.target.value); setErr(""); }}
-          onKeyDown={e => e.key === "Enter" && submit()}
-          placeholder="รหัสผ่าน"
-          autoFocus
-          style={{ width: "100%", padding: "14px 16px", border: `1px solid ${B.ltGray}`, borderRadius: 10, fontSize: 15, marginBottom: 10, boxSizing: "border-box" }}
-        />
-        {err && <div style={{ color: B.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
-        <button onClick={submit} disabled={busy} style={{ ...css.btn(B.red, B.white, true), opacity: busy ? 0.6 : 1 }}>{busy ? "กำลังตรวจสอบ…" : "เข้าระบบ →"}</button>
-        <div style={{ textAlign: "center", marginTop: 16 }}>
-          <a href="/" style={{ fontSize: 12, color: B.dkGray }}>← กลับหน้าหลัก</a>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== VOUCHER ISSUE (ออกโค้ดเต็มคอร์สให้ลูกค้าจ่ายเงินแล้ว/บริษัท) ====================
-function VoucherIssuePanel() {
-  const [form, setForm] = useState({ name: "", phone: "", company: "", source: "voucher_sale" });
-  const [issuing, setIssuing] = useState(false);
-  const [err, setErr] = useState("");
-  const [issued, setIssued] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(""); };
-
-  const issue = async () => {
-    setErr("");
-    if (!form.name.trim()) { setErr("กรุณากรอกชื่อลูกค้า"); return; }
-    const phone = normalizePhone(form.phone);
-    if (phone.length < 9) { setErr("กรุณากรอกเบอร์โทรที่ถูกต้อง"); return; }
-    setIssuing(true);
-    try {
-      const code = genVoucherCode();
-      const expires = new Date(); expires.setFullYear(expires.getFullYear() + 2); // voucher จ่ายเงินแล้ว ไม่ควรหมดอายุเร็วแบบโค้ด lead-capture
-      const payload = {
-        code, name: form.name.trim(), phone, email: "", source: form.source,
-        company: form.company.trim() || null,
-        unlock_modules: VOUCHER_ALL_MODULES,
-        expires_at: expires.toISOString(),
-      };
-      const res = await adminRest("lead_promo_codes", "POST", payload);
-      if (!Array.isArray(res) || !res.length) { setErr("ออกโค้ดไม่สำเร็จ (เบอร์นี้อาจมีโค้ดที่ยังไม่ใช้อยู่แล้ว ลองค้นในแท็บ \"โค้ดส่วนลด Lead\")"); setIssuing(false); return; }
-      setIssued({ code, ...form, phone });
-      setForm({ name: "", phone: "", company: form.company, source: form.source });
-    } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
-    setIssuing(false);
-  };
-
-  const copyCode = () => {
-    if (!issued) return;
-    navigator.clipboard?.writeText(issued.code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-  };
-
-  return (
-    <div style={{ maxWidth: 480 }}>
-      <div style={{ background: B.white, borderRadius: 14, padding: 20, marginBottom: 16 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>ออก Voucher ปลดล็อกเต็มคอร์ส</h3>
-        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>สำหรับลูกค้าที่จ่ายเงินมาแล้ว (ขาย voucher โดยตรง หรือบริษัทซื้อให้พนักงานเรียน pre-course) — โค้ดปลดล็อกทุกบท ไม่หมดอายุเร็ว</p>
-
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ประเภท</label>
-          <select value={form.source} onChange={e => F("source", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}>
-            {VOUCHER_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อลูกค้า *</label>
-          <input type="text" value={form.name} onChange={e => F("name", e.target.value)} placeholder="เช่น สมชาย ใจดี" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทร *</label>
-          <input type="tel" value={form.phone} onChange={e => F("phone", e.target.value)} placeholder="เช่น 081-234-5678" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-        </div>
-        <div style={{ marginBottom: 4 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>บริษัท (ถ้ามี — ใช้กรองรายงานคะแนนทีหลัง)</label>
-          <input type="text" value={form.company} onChange={e => F("company", e.target.value)} placeholder="เช่น บริษัท เอบีซี จำกัด" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-        </div>
-        {err && <div style={{ color: B.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
-        <button onClick={issue} disabled={issuing} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: issuing ? .6 : 1 }}>{issuing ? "กำลังออกโค้ด..." : "ออกโค้ด →"}</button>
-      </div>
-
-      {issued && (
-        <div style={{ background: `${B.gold}12`, border: `2px solid ${B.gold}`, borderRadius: 14, padding: 20, textAlign: "center" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>ออกโค้ดสำเร็จ — ส่งให้ {issued.name} ({issued.phone})</div>
-          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 3, fontFamily: "monospace", margin: "8px 0" }}>{issued.code}</div>
-          <button onClick={copyCode} style={{ ...css.btn(B.white, B.black, true), border: `1px solid ${B.ltGray}`, fontSize: 13, padding: "8px 20px" }}>{copied ? "คัดลอกแล้ว ✓" : "คัดลอกโค้ด"}</button>
-          <div style={{ fontSize: 11, color: B.dkGray, marginTop: 10 }}>ลูกค้านำโค้ดนี้ไปกรอกที่หน้า "มีโค้ดส่วนลด" ในแอป</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ==================== STANDING CODE (โค้ดกลางใช้ซ้ำได้ ตั้งวันหมดอายุได้ — นักเรียน pre-course) ====================
-function StandingCodePanel() {
-  const [codes, setCodes] = useState([]);
-  const [counts, setCounts] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ code: "", company: "", expires: "" });
-  const [creating, setCreating] = useState(false);
-  const [err, setErr] = useState("");
-  const [copiedCode, setCopiedCode] = useState("");
-
-  const refresh = async () => {
-    setLoading(true);
-    const rows = await adminRest("lead_promo_codes", "GET", null, "?multi_use=eq.true&select=code,unlock_modules,company,created_at,expires_at&order=created_at.desc");
-    const list = Array.isArray(rows) ? rows : [];
-    setCodes(list);
-    if (list.length) {
-      const inList = list.map(r => encodeURIComponent(r.code)).join(",");
-      const ev = await adminRest("lead_capture_events", "GET", null, `?event_type=eq.redeemed&code=in.(${inList})&select=code`);
-      const c = {};
-      (Array.isArray(ev) ? ev : []).forEach(e => { c[e.code] = (c[e.code] || 0) + 1; });
-      setCounts(c);
-    }
-    setLoading(false);
-  };
-  useEffect(() => { refresh(); }, []);
-
-  const create = async () => {
-    setErr("");
-    const code = form.code.trim().toUpperCase();
-    if (!/^[A-Z0-9][A-Z0-9-]{3,19}$/.test(code)) { setErr("ตั้งชื่อโค้ด 4-20 ตัว ใช้ A-Z, 0-9 และขีดกลาง เช่น JIA-STUDENT"); return; }
-    // เว้นว่าง = ไม่หมดอายุ (ใช้ค่า sentinel ปี 2099) — ถ้ากรอกวันที่ ให้หมดอายุปลายวันนั้น (23:59:59)
-    let expiresAt = STANDING_NEVER_EXPIRES;
-    if (form.expires) {
-      const d = new Date(`${form.expires}T23:59:59`);
-      if (isNaN(d.getTime())) { setErr("วันหมดอายุไม่ถูกต้อง"); return; }
-      if (d.getTime() < Date.now()) { setErr("วันหมดอายุต้องเป็นวันในอนาคต"); return; }
-      expiresAt = d.toISOString();
-    }
-    setCreating(true);
-    try {
-      const res = await adminRest("lead_promo_codes", "POST", {
-        code, email: "", phone: `standing:${code}`, name: "โค้ดกลางนักเรียน Pre-course",
-        source: "pre_course", company: form.company.trim() || null,
-        unlock_modules: VOUCHER_ALL_MODULES,
-        expires_at: expiresAt, multi_use: true,
-      });
-      if (!Array.isArray(res) || !res.length) { setErr("สร้างไม่สำเร็จ (ชื่อโค้ดนี้อาจมีอยู่แล้ว)"); setCreating(false); return; }
-      setForm({ code: "", company: "", expires: "" });
-      refresh();
-    } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
-    setCreating(false);
-  };
-
-  const copy = (code) => {
-    navigator.clipboard?.writeText(code).then(() => { setCopiedCode(code); setTimeout(() => setCopiedCode(""), 2000); });
-  };
-
-  return (
-    <div style={{ maxWidth: 480, marginTop: 20 }}>
-      <div style={{ background: B.white, borderRadius: 14, padding: 20 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>โค้ดกลาง (ใช้ซ้ำได้)</h3>
-        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>โค้ดเดียวแจกนักเรียนได้ทุกคน ทุกวัน — สำหรับให้นักเรียนที่จองคลาสจริงเรียนออนไลน์มาก่อน (ปลดล็อกทุกบท) แต่ละคนยังต้องกรอกชื่อ+เบอร์ตอนใช้โค้ด จึงตามดูคะแนนรายคนได้ตามปกติ ตั้งวันหมดอายุได้ (เว้นว่าง = ไม่หมดอายุ)</p>
-
-        {loading ? <div style={{ fontSize: 13, color: B.dkGray }}>กำลังโหลด...</div> : codes.length === 0 ? (
-          <div style={{ fontSize: 13, color: B.dkGray, marginBottom: 12 }}>ยังไม่มีโค้ดกลางในระบบ</div>
-        ) : codes.map(r => {
-          const never = !r.expires_at || new Date(r.expires_at).getFullYear() >= 2099;
-          const expired = !never && new Date(r.expires_at) < new Date();
-          return (
-          <div key={r.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${B.gray}`, opacity: expired ? .55 : 1 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", letterSpacing: 1 }}>
-                {r.code}
-                {expired && <span style={{ fontSize: 10, fontWeight: 700, color: B.red, marginLeft: 8, verticalAlign: "middle" }}>หมดอายุแล้ว</span>}
-              </div>
-              <div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>
-                ใช้ไปแล้ว <strong>{counts[r.code] || 0}</strong> คน{r.company ? ` • ${r.company}` : ""} • สร้าง {new Date(r.created_at).toLocaleDateString("th-TH")}
-                {" • "}{never ? "ไม่หมดอายุ" : `หมดอายุ ${new Date(r.expires_at).toLocaleDateString("th-TH")}`}
-              </div>
-            </div>
-            <button onClick={() => copy(r.code)} style={{ ...css.btn(B.white, B.black), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "6px 14px" }}>{copiedCode === r.code ? "คัดลอกแล้ว ✓" : "คัดลอก"}</button>
-          </div>
-          );
-        })}
-
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${B.gray}` }}>
-          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>สร้างโค้ดกลางใหม่</label>
-          <input type="text" value={form.code} onChange={e => { setForm(p => ({ ...p, code: e.target.value.toUpperCase() })); setErr(""); }} placeholder="เช่น JIA-STUDENT" autoCapitalize="characters"
-            style={{ width: "100%", padding: "12px 14px", border: `2px solid ${err ? B.red : B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}/>
-          <input type="text" value={form.company} onChange={e => setForm(p => ({ ...p, company: e.target.value }))} placeholder="บริษัท (ถ้ามี — ใช้กรองรายงานคะแนน)"
-            style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", marginBottom: 10 }}/>
-          <label style={{ fontSize: 12, color: B.dkGray, display: "block", marginBottom: 6 }}>วันหมดอายุ (เว้นว่าง = ไม่หมดอายุ)</label>
-          <input type="date" value={form.expires} onChange={e => { setForm(p => ({ ...p, expires: e.target.value })); setErr(""); }}
-            style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-          {err && <div style={{ color: B.red, fontSize: 13, marginTop: 8 }}>{err}</div>}
-          <button onClick={create} disabled={creating || !form.code.trim()} style={{ ...css.btn(B.red, B.white, true), marginTop: 12, opacity: (creating || !form.code.trim()) ? .6 : 1 }}>{creating ? "กำลังสร้าง..." : "สร้างโค้ดกลาง →"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== PARTNER COUPON (QR ใบละ 1 สิทธิ์ — ธุรกิจพันธมิตรแจกให้ลูกค้าเรียนคอร์สเต็มฟรี) ====================
-function PartnerCouponPanel({ onPrint }) {
-  const [groups, setGroups] = useState([]); // [{ company, rows: [...] }]
-  const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(null); // company ที่กำลังดูรายชื่อคนใช้
-  const [editing, setEditing] = useState(null); // company ที่กำลังแก้ไขช่องทางติดต่อ
-  const [editForm, setEditForm] = useState({ sponsor_line: "", sponsor_phone: "", sponsor_value: "" });
-  const [savingEdit, setSavingEdit] = useState(false);
-
-  const [form, setForm] = useState({ company: "", prefix: "", sponsor_line: "", sponsor_phone: "", sponsor_value: String(PRICING.full), count: "50", expires: "" });
-  const [creating, setCreating] = useState(false);
-  const [err, setErr] = useState("");
-  const [created, setCreated] = useState(null); // ชุดที่เพิ่งสร้าง { company, rows }
-
-  const F = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErr(""); };
-
-  const refresh = async () => {
-    setLoading(true);
-    const res = await adminRest("lead_promo_codes", "GET", null, "?source=eq.partner_coupon&select=code,company,name,redeemed_at,redeemed_phone,expires_at,created_at,sponsor_line,sponsor_phone,sponsor_value&order=created_at.desc&limit=5000");
-    const list = Array.isArray(res) ? res : [];
-    const byCompany = new Map();
-    for (const r of list) {
-      if (!byCompany.has(r.company)) byCompany.set(r.company, []);
-      byCompany.get(r.company).push(r);
-    }
-    setGroups([...byCompany.entries()].map(([company, rows]) => ({ company, rows })));
-    setLoading(false);
-  };
-  useEffect(() => { refresh(); }, []);
-
-  const create = async () => {
-    setErr("");
-    const company = form.company.trim();
-    const prefix = form.prefix.trim().toUpperCase();
-    const n = parseInt(form.count, 10) || 0;
-    if (!company) { setErr("กรุณากรอกชื่อพาร์ทเนอร์"); return; }
-    if (!/^[A-Z0-9]{2,8}$/.test(prefix)) { setErr("รหัสย่อ 2-8 ตัว ใช้ A-Z, 0-9 เท่านั้น เช่น OMNOI"); return; }
-    if (n < 1 || n > 200) { setErr("จำนวนใบต้องอยู่ระหว่าง 1-200"); return; }
-    const sponsorValue = parseInt(form.sponsor_value, 10) || PRICING.full;
-    let expiresAt;
-    if (form.expires) {
-      const d = new Date(`${form.expires}T23:59:59`);
-      if (isNaN(d.getTime()) || d.getTime() < Date.now()) { setErr("วันหมดอายุไม่ถูกต้อง (ต้องเป็นวันในอนาคต)"); return; }
-      expiresAt = d.toISOString();
-    } else {
-      const d = new Date(); d.setFullYear(d.getFullYear() + 1);
-      expiresAt = d.toISOString();
-    }
-    setCreating(true);
-    const buildRows = () => {
-      const codes = new Set();
-      while (codes.size < n) codes.add(genPartnerCode(prefix));
-      return [...codes].map(code => ({
-        code, email: "", phone: `coupon:${code}`, name: `คูปองพาร์ทเนอร์ ${company}`,
-        source: PARTNER_SOURCE, company, unlock_modules: VOUCHER_ALL_MODULES,
-        expires_at: expiresAt, multi_use: false,
-        sponsor_line: form.sponsor_line.trim() || null,
-        sponsor_phone: form.sponsor_phone.trim() || null,
-        sponsor_value: sponsorValue,
-      }));
-    };
-    try {
-      // PostgREST insert หลายแถวเป็น atomic — ถ้าโค้ดชนกัน (ความน่าจะเป็นต่ำมาก) สุ่มชุดใหม่ลองอีกครั้งเดียว
-      let res = await adminRest("lead_promo_codes", "POST", buildRows());
-      if (!Array.isArray(res) || !res.length) res = await adminRest("lead_promo_codes", "POST", buildRows());
-      if (!Array.isArray(res) || !res.length) { setErr("สร้างคูปองไม่สำเร็จ กรุณาลองใหม่"); setCreating(false); return; }
-      setCreated({ company, rows: res });
-      await refresh();
-    } catch (ex) { console.error(ex); setErr("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
-    setCreating(false);
-  };
-
-  const startEdit = (g) => {
-    const latest = g.rows[0] || {};
-    setEditing(g.company);
-    setEditForm({ sponsor_line: latest.sponsor_line || "", sponsor_phone: latest.sponsor_phone || "", sponsor_value: String(latest.sponsor_value || PRICING.full) });
-  };
-  const saveEdit = async (company) => {
-    setSavingEdit(true);
-    await adminRest("lead_promo_codes", "PATCH", {
-      sponsor_line: editForm.sponsor_line.trim() || null,
-      sponsor_phone: editForm.sponsor_phone.trim() || null,
-      sponsor_value: parseInt(editForm.sponsor_value, 10) || PRICING.full,
-    }, `?source=eq.partner_coupon&company=eq.${encodeURIComponent(company)}`);
-    setSavingEdit(false);
-    setEditing(null);
-    refresh();
-  };
-
-  const printGroup = (g, onlyUnused) => {
-    const latest = g.rows[0] || {};
-    const rows = onlyUnused ? g.rows.filter(r => !r.redeemed_at && new Date(r.expires_at) > new Date()) : g.rows;
-    if (!rows.length) { alert("ไม่มีคูปองที่พิมพ์ได้ในเงื่อนไขนี้"); return; }
-    onPrint({ company: g.company, rows, sponsor: { line: latest.sponsor_line, phone: latest.sponsor_phone, value: latest.sponsor_value } });
-  };
-
-  return (
-    <div style={{ maxWidth: 720 }}>
-      <div style={{ background: B.white, borderRadius: 14, padding: 20, marginBottom: 16 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>สร้างคูปองพาร์ทเนอร์ (QR ใบละ 1 สิทธิ์)</h3>
-        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>ธุรกิจพันธมิตร (เช่น ออฟฟิศอ้อมน้อย) แจกคูปองให้ลูกค้า สแกนแล้วเรียนคอร์สเต็มฟรีทันที — คนละ 1 ใบ 1 สิทธิ์ หลังใช้จะเห็น LINE/เบอร์ที่กรอกไว้นี้บนหน้าเว็บ</p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อพาร์ทเนอร์ *</label>
-            <input type="text" value={form.company} onChange={e => F("company", e.target.value)} placeholder="เช่น ออฟฟิศอ้อมน้อย" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-          </div>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>รหัสย่อ (ใช้ขึ้นต้นโค้ด) *</label>
-            <input type="text" value={form.prefix} onChange={e => F("prefix", e.target.value.toUpperCase())} placeholder="เช่น OMNOI" autoCapitalize="characters" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", fontFamily: "monospace", textTransform: "uppercase" }}/>
-          </div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>LINE (ID หรือลิงก์)</label>
-            <input type="text" value={form.sponsor_line} onChange={e => F("sponsor_line", e.target.value)} placeholder="เช่น @omnoi หรือลิงก์ line.me" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-          </div>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เบอร์โทร</label>
-            <input type="tel" value={form.sponsor_phone} onChange={e => F("sponsor_phone", e.target.value)} placeholder="เช่น 081-234-5678" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-          </div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 4 }}>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>มูลค่าที่โชว์ (฿)</label>
-            <input type="number" value={form.sponsor_value} onChange={e => F("sponsor_value", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-          </div>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>จำนวนใบ (1-200)</label>
-            <input type="number" value={form.count} onChange={e => F("count", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-          </div>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>วันหมดอายุ (เว้นว่าง = 1 ปี)</label>
-            <input type="date" value={form.expires} onChange={e => F("expires", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
-          </div>
-        </div>
-        {err && <div style={{ color: B.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
-        <button onClick={create} disabled={creating} style={{ ...css.btn(B.red, B.white, true), marginTop: 16, opacity: creating ? .6 : 1 }}>{creating ? "กำลังสร้าง..." : "สร้างชุดคูปอง →"}</button>
-      </div>
-
-      {created && (
-        <div style={{ background: `${B.gold}12`, border: `2px solid ${B.gold}`, borderRadius: 14, padding: 20, marginBottom: 16, textAlign: "center" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>สร้างคูปองพาร์ทเนอร์ {created.company} สำเร็จ {created.rows.length} ใบ</div>
-          <button onClick={() => printGroup({ company: created.company, rows: created.rows }, false)} style={{ ...css.btn(B.gold, B.black, true), fontSize: 14 }}>พิมพ์ชุดนี้ →</button>
-        </div>
-      )}
-
-      {loading ? <div style={{ fontSize: 13, color: B.dkGray }}>กำลังโหลด...</div> : groups.length === 0 ? (
-        <div style={{ fontSize: 13, color: B.dkGray }}>ยังไม่มีคูปองพาร์ทเนอร์ในระบบ</div>
-      ) : groups.map(g => {
-        const total = g.rows.length;
-        const used = g.rows.filter(r => r.redeemed_at).length;
-        const expired = g.rows.filter(r => !r.redeemed_at && new Date(r.expires_at) < new Date()).length;
-        const left = total - used - expired;
-        const latest = g.rows[0] || {};
-        return (
-          <div key={g.company} style={{ background: B.white, borderRadius: 14, padding: 18, marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 800 }}>{g.company}</div>
-                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>
-                  ทั้งหมด {total} · ใช้แล้ว <strong style={{ color: B.green }}>{used}</strong> · เหลือ <strong style={{ color: B.gold }}>{left}</strong>{expired > 0 && <> · หมดอายุ {expired}</>}
-                </div>
-                <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>LINE: {latest.sponsor_line || "—"} · โทร: {latest.sponsor_phone || "—"} · มูลค่า ฿{latest.sponsor_value || PRICING.full}</div>
-              </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button onClick={() => printGroup(g, true)} style={{ ...css.btn(B.gold, B.black), fontSize: 12, padding: "8px 12px" }}>พิมพ์ใบที่ยังไม่ใช้</button>
-                <button onClick={() => printGroup(g, false)} style={{ ...css.btn(B.white, B.black), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>พิมพ์ทั้งหมด</button>
-                <button onClick={() => setExpanded(expanded === g.company ? null : g.company)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>{expanded === g.company ? "ซ่อนรายชื่อ" : "ดูรายชื่อคนใช้"}</button>
-                <button onClick={() => startEdit(g)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>แก้ไขช่องทางติดต่อ</button>
-              </div>
-            </div>
-
-            {editing === g.company && (
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${B.gray}` }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
-                  <input type="text" value={editForm.sponsor_line} onChange={e => setEditForm(p => ({ ...p, sponsor_line: e.target.value }))} placeholder="LINE" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
-                  <input type="tel" value={editForm.sponsor_phone} onChange={e => setEditForm(p => ({ ...p, sponsor_phone: e.target.value }))} placeholder="เบอร์โทร" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
-                  <input type="number" value={editForm.sponsor_value} onChange={e => setEditForm(p => ({ ...p, sponsor_value: e.target.value }))} placeholder="มูลค่า ฿" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
-                </div>
-                <button onClick={() => saveEdit(g.company)} disabled={savingEdit} style={{ ...css.btn(B.red, B.white), fontSize: 12, padding: "8px 16px" }}>{savingEdit ? "กำลังบันทึก..." : "บันทึก"}</button>
-                <button onClick={() => setEditing(null)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 16px", marginLeft: 8 }}>ยกเลิก</button>
-                <div style={{ fontSize: 11, color: B.dkGray, marginTop: 6 }}>ใช้กับคูปองทุกใบของพาร์ทเนอร์นี้ (คูปองที่พิมพ์ไปแล้วไม่ต้องพิมพ์ใหม่ — QR เดิมยังใช้ได้ แค่หน้าเว็บจะโชว์ข้อมูลใหม่)</div>
-              </div>
-            )}
-
-            {expanded === g.company && (
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${B.gray}` }}>
-                {g.rows.filter(r => r.redeemed_at).length === 0 ? (
-                  <div style={{ fontSize: 12, color: B.dkGray }}>ยังไม่มีใครใช้คูปองนี้</div>
-                ) : g.rows.filter(r => r.redeemed_at).map(r => (
-                  <div key={r.code} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${B.gray}`, fontSize: 12.5 }}>
-                    <span>{r.name} · {r.redeemed_phone}</span>
-                    <span style={{ color: B.dkGray }}>{new Date(r.redeemed_at).toLocaleString("th-TH")}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ==================== PARTNER COUPON CARD (การ์ดคูปอง 1 ใบ — ใช้ทั้งพิมพ์และบันทึกรูป) ====================
-// ขั้นตอนใช้คูปอง — โชว์เป็นวงกลมเลข 1-2-3 พร้อม label สั้นใต้แต่ละวง (อ่านง่ายกว่าข้อความยาว)
-const PARTNER_COUPON_STEPS = ["สแกน QR", "กรอกชื่อ-เบอร์", "เรียนได้ทันที"];
-
-function PartnerCouponCard({ row, svg, cardRef }) {
-  const expiryTh = row.expires_at ? thaiShortDate(String(row.expires_at).slice(0, 10)) : "-";
-  const value = row.sponsor_value || PRICING.full;
-  return (
-    <div ref={cardRef} style={{ width: "90mm", height: "62mm", boxSizing: "border-box", border: "1px dashed #B8862F", borderRadius: "3mm", background: "#FFFDF7", display: "flex", overflow: "hidden", position: "relative", breakInside: "avoid", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", fontFamily: "'Noto Sans Thai', sans-serif" }}>
-      {/* แผงซ้าย: QR เด่นชัดในกรอบขาวขอบทอง + คำกำกับ "สแกนรับสิทธิ์ฟรี" ใต้ QR โดยตรง */}
-      <div style={{ width: "34mm", flexShrink: 0, background: "#FDF3E7", borderRight: "0.6mm solid #F3DB8E", boxSizing: "border-box", padding: "2.4mm", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1mm" }}>
-        <div className="partner-coupon-qr" style={{ width: "30mm", height: "30mm", background: "#fff", border: "0.35mm solid #F3DB8E", borderRadius: "1.5mm", boxSizing: "border-box", padding: "0.8mm", boxShadow: "0 0.4mm 1mm rgba(0,0,0,.08)" }} dangerouslySetInnerHTML={{ __html: svg || "" }}/>
-        <div style={{ fontSize: "6.8pt", fontWeight: 800, color: "#C8102E", textAlign: "center", lineHeight: 1.15 }}>สแกนรับสิทธิ์ฟรี</div>
-        <div style={{ fontFamily: "monospace", fontSize: "6pt", fontWeight: 600, letterSpacing: ".3px", wordBreak: "break-all", color: "#8a6d1a", textAlign: "center" }}>{row.code}</div>
-      </div>
-      {/* แผงขวา: หัวเรื่อง+ป้ายมูลค่า, รายละเอียดคอร์ส, ขั้นตอน, ติดต่อ */}
-      <div style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "2.6mm 3mm", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: "0.8mm", columnGap: "1.5mm" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "1.3mm" }}>
-            <Logo size={24}/>
-            <div style={{ fontSize: "10.5pt", fontWeight: 900, color: "#C8102E", whiteSpace: "nowrap" }}>คูปองเรียนฟรี</div>
-          </div>
-          <div style={{ background: "#F59E0B", color: "#1A1A1A", borderRadius: 999, padding: "0.6mm 2.4mm", textAlign: "center", flexShrink: 0 }}>
-            <div style={{ fontSize: "4.6pt", fontWeight: 700, letterSpacing: ".3px", lineHeight: 1 }}>มูลค่า</div>
-            <div style={{ fontSize: "8.2pt", fontWeight: 900, lineHeight: 1.1 }}>฿{value}</div>
-          </div>
-        </div>
-        <div style={{ height: "0.4mm", background: "#F3DB8E", margin: "1.3mm 0" }}/>
-        <div style={{ fontSize: "7.6pt", color: "#333", lineHeight: 1.3 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
-        <div style={{ fontSize: "7.8pt", fontWeight: 700, color: "#1A1A1A", marginTop: "1.2mm" }}>มอบโดย {row.company}</div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.8mm", gap: "1mm" }}>
-          {PARTNER_COUPON_STEPS.map((label, i) => (
-            <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5mm", flex: 1, minWidth: 0 }}>
-              <div style={{ width: "3.4mm", height: "3.4mm", borderRadius: "50%", background: "#C8102E", color: "#fff", fontSize: "4.2pt", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
-              <div style={{ fontSize: "5.6pt", color: "#555", textAlign: "center", lineHeight: 1.15 }}>{label}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ marginTop: "auto", paddingTop: "1.5mm" }}>
-          <div style={{ fontSize: "6.3pt", color: "#666" }}>ใช้ได้ถึง {expiryTh} · 1 คูปอง/1 คน</div>
-          <div style={{ fontSize: "6.5pt", color: "#333", fontWeight: 600, marginTop: "0.8mm" }}>ติดต่อ {row.company}{row.sponsor_line ? ` · LINE ${row.sponsor_line}` : ""}{row.sponsor_phone ? ` · โทร ${row.sponsor_phone}` : ""}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== PARTNER COUPON PRINT SHEET (แทนที่หน้าแอดมินทั้งหน้าตอนพิมพ์ — ไม่ใช้ window.open) ====================
-function PartnerCouponPrintSheet({ job, onClose }) {
-  const [svgs, setSvgs] = useState({}); // code -> svg string
-  const [ready, setReady] = useState(false);
-  const cardRefs = useRef({});
-  const [savingCode, setSavingCode] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const mod = await import("qrcode");
-      const QR = mod.default || mod;
-      const entries = await Promise.all(job.rows.map(async (r) => {
-        const url = `${SITE_URL}/?promo=${r.code}&utm_source=partner&utm_medium=qr&utm_campaign=${encodeURIComponent((r.code.split("-")[0] || "").toLowerCase())}`;
-        const s = await QR.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M" });
-        return [r.code, s];
-      }));
-      if (!cancelled) { setSvgs(Object.fromEntries(entries)); setReady(true); }
-    })();
-    return () => { cancelled = true; };
-  }, [job]);
-
-  const saveImage = async (row) => {
-    const el = cardRefs.current[row.code];
-    if (!el || savingCode) return;
-    setSavingCode(row.code);
-    try {
-      const dataUrl = await captureNodeToPng(el);
-      await deliverBlob(await dataUrlToBlob(dataUrl), `coupon_${row.code}.png`, "image/png");
-    } catch (e) { alert("บันทึกรูปไม่สำเร็จ"); }
-    setSavingCode(null);
-  };
-
-  const PER_PAGE = 8;
-  const pages = [];
-  for (let i = 0; i < job.rows.length; i += PER_PAGE) pages.push(job.rows.slice(i, i + PER_PAGE));
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#E5E5E5" }}>
-      <style>{`@page { size: A4 portrait; margin: 10mm } @media print { .no-print { display: none !important } body { background: #fff } } .partner-coupon-qr svg { display: block; width: 100%; height: 100%; }`}</style>
-      <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 10, background: B.black, color: B.white, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <button onClick={onClose} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}><I name="back" size={22} color={B.white}/></button>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>พิมพ์คูปองพาร์ทเนอร์ — {job.company} ({job.rows.length} ใบ)</div>
-        <button onClick={() => window.print()} disabled={!ready} style={{ ...css.btn(B.gold, B.black), fontSize: 13, padding: "8px 18px", opacity: ready ? 1 : .5, marginLeft: "auto" }}>{ready ? "พิมพ์" : "กำลังสร้าง QR..."}</button>
-      </div>
-      {pages.map((pageRows, pi) => (
-        <div key={pi} style={{ background: "#fff", width: "210mm", minHeight: "277mm", margin: "10mm auto", padding: "10mm", boxSizing: "border-box", breakAfter: "page" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "90mm 90mm", gap: "6mm", justifyContent: "center" }}>
-            {pageRows.map(row => (
-              <div key={row.code} style={{ position: "relative" }}>
-                <PartnerCouponCard row={row} svg={svgs[row.code]} cardRef={el => { cardRefs.current[row.code] = el; }}/>
-                <button className="no-print" onClick={() => saveImage(row)} disabled={savingCode === row.code}
-                  style={{ position: "absolute", top: -22, right: 0, background: B.white, border: `1px solid ${B.ltGray}`, borderRadius: 6, fontSize: 10, padding: "3px 6px", cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,.15)" }}>
-                  {savingCode === row.code ? "..." : "บันทึกรูป"}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ==================== COMPANY SCORE REPORT (สำหรับ HR ดูคะแนน pre-course) ====================
-function CompanyReport() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [company, setCompany] = useState("");
-  const [companies, setCompanies] = useState([]);
-
-  useEffect(() => {
-    (async () => {
-      const res = await adminRest("online_students", "GET", null, "?company=not.is.null&select=company&order=company.asc");
-      const uniq = [...new Set((Array.isArray(res) ? res : []).map(r => r.company).filter(Boolean))];
-      setCompanies(uniq);
-      if (uniq.length && !company) setCompany(uniq[0]);
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!company) { setRows([]); return; }
-    (async () => {
-      setLoading(true);
-      const res = await adminRest("online_students", "GET", null, `?company=eq.${encodeURIComponent(company)}&select=name,phone,status,final_score,chapter_scores,registered_at,completed_at&order=registered_at.desc`);
-      setRows(Array.isArray(res) ? res : []);
-      setLoading(false);
-    })();
-  }, [company]);
-
-  const chapterCols = COURSE.modules.filter(m => m.vid); // บทที่ 1-6 (ไม่รวมแบบทดสอบสุดท้าย)
-
-  const exportCSV = () => {
-    if (!rows.length) return;
-    const header = ["name", "phone", "status", ...chapterCols.map(m => m.short), "final_score", "registered_at", "completed_at"].join(",");
-    const esc = (v) => { if (v == null) return ""; const s = String(v).replace(/"/g, '""'); return /[",\n]/.test(s) ? `"${s}"` : s; };
-    const body = rows.map(r => [r.name, r.phone, r.status, ...chapterCols.map(m => (r.chapter_scores || {})[m.id] ?? ""), r.final_score ?? "", r.registered_at, r.completed_at].map(esc).join(",")).join("\n");
-    const csv = "﻿" + header + "\n" + body;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `jia_company_${company}_${new Date().toISOString().slice(0,10)}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-        <select value={company} onChange={e => setCompany(e.target.value)} style={{ padding: "10px 14px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 14 }}>
-          {!companies.length && <option value="">— ยังไม่มีบริษัทในระบบ —</option>}
-          {companies.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <button onClick={exportCSV} disabled={!rows.length} style={{ ...css.btn(B.white, B.black, true), border: `1px solid ${B.ltGray}`, fontSize: 13, padding: "8px 16px", opacity: rows.length ? 1 : .5 }}>Export CSV</button>
-      </div>
-
-      {loading ? <div style={{ padding: 20, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div> : (
-        <div style={{ overflowX: "auto", background: B.white, borderRadius: 12 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: B.gray, textAlign: "left" }}>
-                <th style={{ padding: "10px 12px" }}>ชื่อ</th>
-                <th style={{ padding: "10px 12px" }}>เบอร์โทร</th>
-                {chapterCols.map(m => <th key={m.id} style={{ padding: "10px 12px", textAlign: "center" }}>{m.short}</th>)}
-                <th style={{ padding: "10px 12px", textAlign: "center" }}>สอบสุดท้าย</th>
-                <th style={{ padding: "10px 12px" }}>สถานะ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i} style={{ borderTop: `1px solid ${B.ltGray}` }}>
-                  <td style={{ padding: "10px 12px", fontWeight: 600 }}>{r.name}</td>
-                  <td style={{ padding: "10px 12px" }}>{r.phone}</td>
-                  {chapterCols.map(m => {
-                    const s = (r.chapter_scores || {})[m.id];
-                    return <td key={m.id} style={{ padding: "10px 12px", textAlign: "center", color: s == null ? B.ltGray : s >= 80 ? B.green : B.red }}>{s == null ? "—" : `${s}%`}</td>;
-                  })}
-                  <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700 }}>{r.final_score != null ? `${r.final_score}%` : "—"}</td>
-                  <td style={{ padding: "10px 12px" }}>{r.status}</td>
-                </tr>
-              ))}
-              {!rows.length && <tr><td colSpan={4 + chapterCols.length} style={{ padding: 20, textAlign: "center", color: B.dkGray }}>ยังไม่มีนักเรียนของบริษัทนี้</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ==================== ADMIN: รูปตัวละครเกม CPR HERO ====================
-// อัปโหลดรูป override ให้ตัวละครในเกม (แทน pixel art มาตรฐาน) โดยไม่ต้อง deploy ใหม่:
-// ไฟล์ขึ้น Supabase storage ผ่าน admin-api (service role) + จด URL ในตาราง game_character_images
-// ฝั่งเกมโหลดตารางนี้ตอนเปิดเกมแล้วใช้รูปแทนอัตโนมัติ — ลบรายการ = กลับไปใช้รูปมาตรฐาน
-const GAME_CHARS = [
-  { id: "aunt_kaew", name: "ป้าแก้ว" },
-  { id: "helper_oat", name: "พี่โอ๊ต" },
-  { id: "guard_dam", name: "ลุงดำ รปภ." },
-  { id: "dispatcher_prom", name: "หมอพร้อม 1669" },
-];
-const GAME_POSES = [
-  { id: "idle", label: "นิ่ง" }, { id: "talk", label: "พูด" }, { id: "panic", label: "ตกใจ" },
-  { id: "stern", label: "ดุ" }, { id: "happy", label: "ยิ้ม" },
-];
-// ย่อรูปให้สูงไม่เกิน 800px + แปลงเป็น webp (คงพื้นหลังโปร่งใส) → base64 ไม่รวม data: prefix
-const prepCharImage = (file) => new Promise((resolve, reject) => {
-  const img = new Image();
-  img.onload = () => {
-    const scale = Math.min(1, 800 / img.height);
-    const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
-    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    cv.getContext("2d").drawImage(img, 0, 0, w, h);
-    const dataUrl = cv.toDataURL("image/webp", 0.95);
-    URL.revokeObjectURL(img.src);
-    resolve(dataUrl.split(",")[1]);
-  };
-  img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error("bad image")); };
-  img.src = URL.createObjectURL(file);
-});
-const adminUploadCharImage = async (charId, poseKey, base64) => {
-  try {
-    const res = await fetch(FN_URL("admin-api"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "x-admin-key": _adminKey || "" },
-      body: JSON.stringify({ storage_upload: { charId, file: `${poseKey}-${Date.now()}.webp`, base64, contentType: "image/webp" } }),
-    });
-    const d = await res.json().catch(() => ({}));
-    return res.ok && d?.url ? d.url : null;
-  } catch (e) { return null; }
-};
-
-function GameCharacterImages() {
-  const [rows, setRows] = useState([]);
-  const [busy, setBusy] = useState(null); // key `${charId}/${pose}` ที่กำลังอัป/ลบ
-  const [msg, setMsg] = useState(null);
-  const reload = useCallback(async () => {
-    const data = await adminRest("game_character_images", "GET", null, "?select=*");
-    setRows(Array.isArray(data) ? data : []);
-  }, []);
-  useEffect(() => { reload(); }, [reload]);
-  const map = Object.fromEntries(rows.map(r => [`${r.char_id}/${r.pose}`, r.url]));
-  const flash = (t, ok) => { setMsg({ t, ok }); setTimeout(() => setMsg(null), 4000); };
-
-  const upload = async (charId, poseKey, file) => {
-    if (!file) return;
-    const key = `${charId}/${poseKey}`;
-    setBusy(key);
-    try {
-      const base64 = await prepCharImage(file);
-      if (base64.length > 2800000) { flash("ไฟล์ใหญ่เกินไป (เกิน ~2MB หลังย่อ)", false); setBusy(null); return; }
-      const url = await adminUploadCharImage(charId, poseKey, base64);
-      if (!url) { flash("อัปโหลดไม่สำเร็จ — เช็คอินเทอร์เน็ตหรือรหัสแอดมิน", false); setBusy(null); return; }
-      // upsert แบบสองจังหวะ (ลบของเดิมก่อนแล้วเพิ่มใหม่) — admin-api proxy ไม่รองรับ on_conflict
-      await adminRest("game_character_images", "DELETE", null, `?char_id=eq.${charId}&pose=eq.${poseKey}`);
-      await adminRest("game_character_images", "POST", { char_id: charId, pose: poseKey, url });
-      await reload();
-      flash("อัปโหลดสำเร็จ — เกมใช้รูปใหม่ทันที (ไม่ต้อง deploy)", true);
-    } catch (e) { flash("อ่านไฟล์รูปไม่ได้", false); }
-    setBusy(null);
-  };
-  const revert = async (charId, poseKey) => {
-    if (!confirm("ลบรูปที่อัปโหลด แล้วกลับไปใช้รูปมาตรฐานของเกม?")) return;
-    setBusy(`${charId}/${poseKey}`);
-    await adminRest("game_character_images", "DELETE", null, `?char_id=eq.${charId}&pose=eq.${poseKey}`);
-    await reload();
-    setBusy(null);
-  };
-
-  const Cell = ({ charId, pose }) => {
-    const mainKey = `${charId}/${pose.id}`;
-    const talkKey = `${charId}/${pose.id}_talk`;
-    const preview = map[mainKey] || `/images/characters/${charId}/${pose.id}.webp`;
-    return (
-      <div style={{ background: B.white, borderRadius: 12, padding: 10, border: `2px solid ${map[mainKey] ? B.green : B.ltGray}`, textAlign: "center", width: 128 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{pose.label} <span style={{ color: B.dkGray, fontWeight: 400 }}>({pose.id})</span></div>
-        <div style={{ height: 110, display: "flex", alignItems: "center", justifyContent: "center", background: "#10182F", borderRadius: 8, marginBottom: 6 }}>
-          <img src={preview} alt={mainKey} style={{ maxHeight: 104, maxWidth: 104, imageRendering: "pixelated" }} onError={e => { e.currentTarget.style.opacity = .25; }}/>
-        </div>
-        {map[mainKey] && <div style={{ fontSize: 10, color: B.green, fontWeight: 700, marginBottom: 4 }}>✓ ใช้รูปที่อัปโหลด</div>}
-        <label style={{ display: "block", background: B.red, color: B.white, borderRadius: 8, padding: "6px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: busy === mainKey ? .5 : 1 }}>
-          {busy === mainKey ? "กำลังอัป..." : "อัปรูปหลัก"}
-          <input type="file" accept="image/*" style={{ display: "none" }} disabled={!!busy}
-            onChange={e => { upload(charId, pose.id, e.target.files?.[0]); e.target.value = ""; }}/>
-        </label>
-        <label style={{ display: "block", background: B.gray, color: B.dkGray, borderRadius: 8, padding: "5px 0", fontSize: 11, fontWeight: 600, cursor: "pointer", marginTop: 4, opacity: busy === talkKey ? .5 : 1 }}>
-          {busy === talkKey ? "กำลังอัป..." : map[talkKey] ? "เฟรมปากอ้า ✓" : "เฟรมปากอ้า (ไม่บังคับ)"}
-          <input type="file" accept="image/*" style={{ display: "none" }} disabled={!!busy}
-            onChange={e => { upload(charId, `${pose.id}_talk`, e.target.files?.[0]); e.target.value = ""; }}/>
-        </label>
-        {(map[mainKey] || map[talkKey]) && (
-          <button onClick={() => { if (map[mainKey]) revert(charId, pose.id); if (map[talkKey]) revert(charId, `${pose.id}_talk`); }} disabled={!!busy}
-            style={{ marginTop: 4, width: "100%", background: "transparent", border: `1px solid ${B.ltGray}`, borderRadius: 8, padding: "4px 0", fontSize: 11, color: B.dkGray, cursor: "pointer" }}>
-            ใช้รูปมาตรฐาน
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <div>
-      <div style={{ background: `${B.gold}12`, border: `1px solid ${B.gold}40`, borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 13, lineHeight: 1.7 }}>
-        🎮 รูปตัวละครเกม CPR HERO — อัปโหลดรูปใหม่แทน pixel art มาตรฐานได้ทันที ไม่ต้อง deploy
-        <div style={{ fontSize: 12, color: B.dkGray }}>แนะนำ: รูปพื้นหลังโปร่งใส (PNG/WebP) สัดส่วนแนวตั้ง ~4:5 · ระบบย่อให้สูงไม่เกิน 800px อัตโนมัติ · "เฟรมปากอ้า" ใช้สลับตอนตัวละครพูด มีหรือไม่มีก็ได้</div>
-      </div>
-      {msg && <div style={{ background: msg.ok ? `${B.green}15` : `${B.red}12`, color: msg.ok ? "#15803D" : B.red, borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 13, fontWeight: 600 }}>{msg.t}</div>}
-      {GAME_CHARS.map(ch => (
-        <div key={ch.id} style={{ marginBottom: 22 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>{ch.name} <span style={{ fontSize: 12, color: B.dkGray, fontWeight: 400 }}>({ch.id})</span></div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {GAME_POSES.map(p => <Cell key={p.id} charId={ch.id} pose={p}/>)}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Admin() {
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1");
-  const [tab, setTab] = useState("pipeline");
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [stats, setStats] = useState({ total: 0, finished: 0, in_progress: 0, customers: 0, line_linked: 0, bookings: 0, new_24h: 0, new_7d: 0 });
-  // "เห็นแล้วล่าสุด" — ใช้ไฮไลต์นักเรียนที่สมัครหลังจากครั้งที่เปิดดูรอบก่อน
-  const [studentsSeenAt, setStudentsSeenAt] = useState(() => load("admin_students_seen_at", null));
-  // คูปองพาร์ทเนอร์ที่กำลังเปิดพิมพ์ — โชว์แผ่นพิมพ์แทนที่หน้าแอดมินทั้งหน้า (ไม่ใช้ window.open/print trick)
-  const [printJob, setPrintJob] = useState(null);
-
-  const currentTab = TABS.find(t => t.key === tab);
-  const isCustomTab = !!currentTab?.custom;
-
-  const fetchTab = useCallback(async (key) => {
-    const t = TABS.find(x => x.key === key);
-    if (t?.custom) { setRows([]); return; }
-    setLoading(true);
-    const orderCol = key === "online_students" ? "registered_at"
-      : key === "bookings" || key === "customers" || key === "lead_promo_codes" ? "created_at"
-      : key === "sales_tracking" ? "completed_date"
-      : "id";
-    const data = await adminRest(key, "GET", null, `?order=${orderCol}.desc.nullslast&limit=1000`);
-    setRows(Array.isArray(data) ? data : []);
-    setLoading(false);
-  }, []);
-
-  const fetchStats = useCallback(async () => {
-    const [students, customers, bookings] = await Promise.all([
-      adminRest("online_students", "GET", null, "?select=status,registered_at&limit=10000"),
-      adminRest("customers", "GET", null, "?select=id,line_user_id&limit=10000"),
-      adminRest("bookings", "GET", null, "?select=id&limit=10000"),
-    ]);
-    const s = Array.isArray(students) ? students : [];
-    const cust = Array.isArray(customers) ? customers : [];
-    const now = Date.now();
-    const since = (ms) => s.filter(x => x.registered_at && (now - new Date(x.registered_at).getTime()) <= ms).length;
-    setStats({
-      total: s.length,
-      finished: s.filter(x => (x.status || "").startsWith("จบคอร์ส")).length,
-      in_progress: s.filter(x => x.status === "กำลังเรียน").length,
-      customers: cust.length,
-      line_linked: cust.filter(x => x.line_user_id).length,
-      bookings: Array.isArray(bookings) ? bookings.length : 0,
-      new_24h: since(24 * 60 * 60 * 1000),
-      new_7d: since(7 * 24 * 60 * 60 * 1000),
-    });
-  }, []);
-
-  useEffect(() => { if (authed) { fetchTab(tab); } }, [authed, tab, fetchTab]);
-  useEffect(() => { if (authed) { fetchStats(); } }, [authed, fetchStats]);
-
-  if (!authed) return <AdminLogin onAuth={() => setAuthed(true)}/>;
-  if (printJob) return <PartnerCouponPrintSheet job={printJob} onClose={() => setPrintJob(null)}/>;
-
-  const logout = () => {
-    sessionStorage.removeItem(ADMIN_SESSION_KEY);
-    setAuthed(false);
-  };
-
-  const filtered = rows.filter(r => {
-    if (q) {
-      const s = q.toLowerCase();
-      const hay = [r.name, r.phone, r.tel, r.email, r.coupon_code, r.code, r.line_id, r.source].filter(Boolean).join(" ").toLowerCase();
-      if (!hay.includes(s)) return false;
-    }
-    if (statusFilter !== "all") {
-      const st = r.status || r.payment_status || r.follow_status || "";
-      if (statusFilter === "finished" && !st.startsWith("จบคอร์ส")) return false;
-      if (statusFilter === "in_progress" && st !== "กำลังเรียน") return false;
-      if (statusFilter === "pending_pay" && st !== "รอชำระ" && st !== "แจ้งชำระแล้ว") return false;
-      if (statusFilter === "paid" && st !== "ชำระแล้ว") return false;
-    }
-    return true;
-  });
-
-  const exportCSV = () => {
-    if (!filtered.length) return;
-    const cols = currentTab.cols;
-    const header = cols.join(",");
-    const escape = (v) => {
-      if (v == null) return "";
-      const s = String(v).replace(/"/g, '""');
-      return /[",\n]/.test(s) ? `"${s}"` : s;
-    };
-    const body = filtered.map(r => cols.map(c => escape(r[c])).join(",")).join("\n");
-    const csv = "﻿" + header + "\n" + body;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `jia_${tab}_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // สลิปอยู่ใน bucket private แล้ว — ลิงก์ public เดิมเปิดไม่ได้ ต้องขอ signed URL ผ่าน admin-api
-  const openSlip = async (url) => {
-    try {
-      const res = await fetch(FN_URL("admin-api"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "x-admin-key": _adminKey || "" },
-        body: JSON.stringify({ sign_slip: { url } }),
-      });
-      const d = await res.json();
-      if (d?.url) window.open(d.url, "_blank", "noopener"); else alert("เปิดสลิปไม่สำเร็จ: " + (d?.error || res.status));
-    } catch (e) { alert("เปิดสลิปไม่สำเร็จ"); }
-  };
-  const fmt = (v) => {
-    if (v == null || v === "") return "—";
-    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 16).replace("T", " ");
-    if (typeof v === "string" && v.includes("/slips/")) return <button onClick={() => openSlip(v)} style={{ background: "none", border: "none", padding: 0, color: B.red, textDecoration: "underline", cursor: "pointer", fontSize: "inherit" }}>ดูสลิป</button>;
-    if (typeof v === "string" && v.startsWith("http")) return <a href={v} target="_blank" rel="noopener noreferrer" style={{ color: B.red, textDecoration: "underline" }}>ดูสลิป</a>;
-    return String(v);
-  };
-
-  // นักเรียนใหม่ = แถวที่สมัครหลังจาก timestamp ที่เปิดดูครั้งก่อน (เก็บใน localStorage)
-  const seenMs = studentsSeenAt ? new Date(studentsSeenAt).getTime() : null;
-  const isNewStudent = (r) => tab === "online_students" && seenMs != null && r.registered_at && new Date(r.registered_at).getTime() > seenMs;
-  const newSinceSeen = tab === "online_students" ? rows.filter(isNewStudent).length : 0;
-  const markStudentsSeen = () => {
-    const ts = new Date().toISOString();
-    save("admin_students_seen_at", ts);
-    setStudentsSeenAt(ts);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: B.gray }}>
-      <div style={{ background: B.black, color: B.white, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <I name="lock" size={20} color={B.white}/>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>JIA Admin</div>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => { fetchTab(tab); fetchStats(); }} style={{ background: "transparent", color: B.white, border: `1px solid ${B.white}40`, borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>↻ รีเฟรช</button>
-          <button onClick={logout} style={{ background: B.red, color: B.white, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>ออกจากระบบ</button>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}>
-        {/* Stat cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
-          {[
-            { label: "นักเรียนทั้งหมด", value: stats.total, color: B.red },
-            { label: "🆕 ใหม่ 24 ชม.", value: stats.new_24h, color: B.gold },
-            { label: "🆕 ใหม่ 7 วัน", value: stats.new_7d, color: B.gold },
-            { label: "จบคอร์สแล้ว", value: stats.finished, color: B.green },
-            { label: "กำลังเรียน", value: stats.in_progress, color: B.gold },
-            { label: "ลูกค้าทั้งหมด", value: stats.customers, color: B.black },
-            { label: "🟢 ผูก LINE แล้ว", value: stats.line_linked, color: "#06C755" },
-            { label: "การจอง On-site", value: stats.bookings, color: B.dkGray },
-          ].map(c => (
-            <div key={c.label} style={{ background: B.white, borderRadius: 12, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-              <div style={{ fontSize: 11, color: B.dkGray }}>{c.label}</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: c.color, marginTop: 4 }}>{c.value}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Tabs */}
-        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
-          {TABS.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)} style={{ background: tab === t.key ? B.red : B.white, color: tab === t.key ? B.white : B.dkGray, border: `1px solid ${tab === t.key ? B.red : B.ltGray}`, borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{t.label}</button>
-          ))}
-        </div>
-
-        {/* Custom tabs (Pipeline / Dashboard / Team / Voucher / Company report) */}
-        {tab === "pipeline" && <Pipeline/>}
-        {tab === "dashboard" && <Dashboard/>}
-        {tab === "team" && <TeamManager/>}
-        {tab === "voucher_issue" && <><VoucherIssuePanel/><StandingCodePanel/></>}
-        {tab === "partner_coupons" && <PartnerCouponPanel onPrint={setPrintJob}/>}
-        {tab === "company_report" && <CompanyReport/>}
-        {tab === "game_chars" && <GameCharacterImages/>}
-
-        {/* Search & filter (for table tabs only) */}
-        {!isCustomTab && (
-        <>
-        <div style={{ background: B.white, borderRadius: 12, padding: 12, marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / อีเมล / คูปอง" style={{ flex: "1 1 220px", padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
-          {tab === "online_students" && (
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
-              <option value="all">ทุกสถานะ</option>
-              <option value="finished">จบคอร์สแล้ว</option>
-              <option value="in_progress">กำลังเรียน</option>
-            </select>
-          )}
-          {(tab === "bookings" || tab === "online_purchases") && (
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "10px 12px", border: `1px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, background: B.white }}>
-              <option value="all">ทุกสถานะการชำระ</option>
-              <option value="pending_pay">รอชำระ / แจ้งชำระ</option>
-              <option value="paid">ชำระแล้ว</option>
-            </select>
-          )}
-          <button onClick={exportCSV} disabled={!filtered.length} style={{ background: B.green, color: B.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", opacity: filtered.length ? 1 : 0.5 }}>⬇ Export CSV</button>
-          <div style={{ fontSize: 12, color: B.dkGray, marginLeft: "auto" }}>{filtered.length} / {rows.length} แถว</div>
-        </div>
-
-        {/* แบนเนอร์นักเรียนใหม่ตั้งแต่ครั้งก่อน */}
-        {tab === "online_students" && newSinceSeen > 0 && (
-          <div style={{ background: `${B.green}12`, border: `1px solid ${B.green}55`, borderRadius: 12, padding: "12px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: B.black }}>🆕 มีนักเรียนใหม่ {newSinceSeen} คน ตั้งแต่ครั้งก่อน</span>
-            <button onClick={markStudentsSeen} style={{ marginLeft: "auto", background: B.green, color: B.white, border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>ทำเครื่องหมายว่าดูแล้ว</button>
-          </div>
-        )}
-
-        {/* Table */}
-        <div style={{ background: B.white, borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-          {loading ? (
-            <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>
-          ) : filtered.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>ไม่พบข้อมูล</div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ background: B.gray }}>
-                    {currentTab.cols.map(c => (
-                      <th key={c} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: B.dkGray, fontSize: 12, borderBottom: `1px solid ${B.ltGray}`, whiteSpace: "nowrap" }}>{c}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r, i) => {
-                    const isNew = isNewStudent(r);
-                    return (
-                    <tr key={r.id || i} style={{ borderBottom: `1px solid ${B.ltGray}`, background: isNew ? `${B.green}10` : "transparent" }}>
-                      {currentTab.cols.map((c, ci) => (
-                        <td key={c} style={{ padding: "10px 12px", verticalAlign: "top" }}>
-                          {ci === 0 && isNew && <span style={{ display: "inline-block", background: B.green, color: B.white, fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4, marginRight: 6 }}>ใหม่</span>}
-                          {fmt(r[c])}
-                        </td>
-                      ))}
-                    </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div style={{ textAlign: "center", marginTop: 16, fontSize: 11, color: B.dkGray }}>
-          JIA Admin • แสดงสูงสุด 1000 แถวล่าสุดต่อตาราง
-        </div>
-        </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ==================== IN-APP BROWSER NOTICE ====================
 // ทราฟิกจากโฆษณา FB/IG เปิดใน webview ของแอป ทำให้ deep link แอด LINE มักค้าง
 // แนะนำให้เปิดในเบราว์เซอร์จริง (Chrome/Safari) เพื่อให้ flow แอด LINE ลื่นขึ้น
@@ -4960,6 +2626,7 @@ export default function App() {
             const newMods = (row.modules || "").split(",").map(Number).filter(Boolean);
             const merged = [...new Set([...getPurchased(), ...newMods])];
             savePurchased(merged);
+            save("last_purchase", { session_id: sessionId, modules: row.modules, at: Date.now() }); // อ้างอิงตอนขอใบกำกับภาษี
             if (!cancelled) { setStripeVerify("ok"); setPage("course"); }
             return;
           }
@@ -4990,6 +2657,18 @@ export default function App() {
     if (gameParam) { const u = { ...getUTM(), mode: gameRandomParam ? "random" : "hub" }; safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
   }, []);
+
+  // เข้ามาจากลิงก์ชวนเพื่อน แล้วสมัครสำเร็จ (ทุกเส้นทางจบที่ user มี customer_id + phone) → บันทึกยอดให้ผู้ชวนครั้งเดียว
+  // server ตรวจเองว่าเป็นลูกค้าใหม่จริง (สร้างภายใน 3 วัน) และไม่ใช่เบอร์เดียวกับเจ้าของโค้ด
+  useEffect(() => {
+    const code = getRefCode();
+    if (!code || load("ref_recorded", false) || !user?.customer_id || !user?.phone) return;
+    supaRpc("referral_record_signup", { p_code: code, p_customer_id: user.customer_id, p_phone: user.phone }).then((ok) => {
+      if (ok === null) return; // เรียกไม่สำเร็จ (เน็ต/ยังไม่ deploy) — ลองใหม่รอบหน้า
+      save("ref_recorded", true);
+      if (ok) { safeTrack("referral_signup", { code }); phCapture("referral_signup", { code }); }
+    });
+  }, [user?.customer_id, user?.phone]);
 
   // กลับจากหน้า LINE login (signInWithLine เคย liff.login() นำทางออกไปตอนกดปุ่มเข้าสู่ระบบ) → เก็บ
   // phone/name ที่กรอกไว้ตอนนั้นใน line_login_pending แล้วทำ signInWithLine ต่อให้จบตอนหน้ากลับมาโหลด
@@ -5031,9 +2710,16 @@ export default function App() {
     })();
   }, []);
 
+  if (PORTAL_TOKEN) return (
+    <>
+      <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>}><CompanyPortal token={PORTAL_TOKEN}/></Suspense>
+      <Analytics />
+    </>
+  );
+
   if (isAdmin) return (
     <>
-      <Admin/>
+      <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลดหน้าแอดมิน...</div>}><Admin/></Suspense>
       <Analytics />
     </>
   );
@@ -5056,6 +2742,7 @@ export default function App() {
           case "certificate": return <Certificate user={user} go={go}/>;
           case "minicert": return <MiniCert user={user} go={go}/>;
           case "booking": return <Booking go={go}/>;
+          case "taxinvoice": return <TaxInvoicePage go={go} user={user}/>;
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
