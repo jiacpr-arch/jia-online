@@ -251,10 +251,13 @@ export const getPosthog = async () => {
   if (_phTried) return _ph;
   _phTried = true;
   if (!POSTHOG_KEY) return null;
+  // capture_exceptions: true → error ที่หลุด (window.onerror / unhandledrejection) ไปอยู่ที่ PostHog → Error Tracking
   // capture_pageview: true → ได้ $pageview พร้อม utm_* /fbclid อัตโนมัติทุกครั้งที่เปิด (ไว้วัดผลโฆษณา)
-  try { const mod = await import("posthog-js"); const posthog = mod.default || mod; posthog.init(POSTHOG_KEY, { api_host: POSTHOG_HOST, capture_pageview: true }); _ph = posthog; return posthog; }
+  try { const mod = await import("posthog-js"); const posthog = mod.default || mod; posthog.init(POSTHOG_KEY, { api_host: POSTHOG_HOST, capture_pageview: true, capture_exceptions: true }); _ph = posthog; return posthog; }
   catch (e) { return null; }
 };
+// ส่ง error ที่จับได้เอง (เช่นจาก ErrorBoundary) เข้า PostHog Error Tracking — ห้ามโยน error ต่อเด็ดขาด
+export const phCaptureException = (err, props) => { getPosthog().then(ph => { try { ph && ph.captureException(err, props); } catch (e) {} }); };
 export const phCapture = (name, props) => { getPosthog().then(ph => { try { ph && ph.capture(name, props); } catch(e){} }); };
 
 export const getGateVariant = () => load("gate_variant", GATE_VARIANT_DEFAULT);
