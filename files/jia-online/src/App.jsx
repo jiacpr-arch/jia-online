@@ -9,6 +9,9 @@ import {
 } from "./lib/core";
 // หน้าแอดมินแยกเป็น chunk ของตัวเอง — ผู้เรียนทั่วไปไม่ต้องดาวน์โหลดโค้ดแอดมิน
 const Admin = lazy(() => import("./admin/Admin"));
+// พอร์ทัล HR (/org/<token>) — chunk แยก โหลดเฉพาะคนเปิดลิงก์ของบริษัท
+const CompanyPortal = lazy(() => import("./portal/CompanyPortal"));
+const PORTAL_TOKEN = typeof window !== "undefined" ? (window.location.pathname.match(/^\/org\/([A-Za-z0-9_-]{24,64})\/?$/) || [])[1] || null : null;
 // ==================== MORROO NETWORK ADS ====================
 const MORROO_ADS = [
   { id: "advice", brand: "Morroo Advice", emoji: "🩺", tag: "AI ปรึกษาสุขภาพ", headline: "ไม่สบายใจ? ถาม AI หมอก่อน", desc: "ปรึกษาอาการกับ AI ภาษาไทย ตอบใน 5 วินาที — ฟรี 3 ครั้ง/วัน", cta: "เริ่มปรึกษาฟรี", url: "https://advice.morroo.com", bg: "#3B82F6", bgLight: "#3B82F612" },
@@ -2575,6 +2578,13 @@ export default function App() {
       } catch (e) {}
     })();
   }, []);
+
+  if (PORTAL_TOKEN) return (
+    <>
+      <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div>}><CompanyPortal token={PORTAL_TOKEN}/></Suspense>
+      <Analytics />
+    </>
+  );
 
   if (isAdmin) return (
     <>

@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   B, SUPABASE_KEY, FN_URL, PRICING, VOUCHER_ALL_MODULES, STANDING_NEVER_EXPIRES, VOUCHER_SOURCES, SITE_URL, PARTNER_SOURCE, genPartnerCode, _adminKey, setAdminKey, adminRest, adminPing, thaiShortDate, genVoucherCode, normalizePhone, save, load, captureNodeToPng, deliverBlob, dataUrlToBlob, COURSE, I, Logo, css,
 } from "../lib/core";
-import { ReferralReport } from "./GrowthPanels";
+import { ReferralReport, CompanyPortalLinks } from "./GrowthPanels";
 
 // ==================== ADMIN ====================
 // รหัสแอดมินถูกตรวจฝั่ง server (edge function admin-api ตั้ง ADMIN_API_KEY) — ไม่มีความลับในบันเดิลแล้ว
@@ -1418,6 +1418,7 @@ function CompanyReport() {
         <button onClick={exportCSV} disabled={!rows.length} style={{ ...css.btn(B.white, B.black, true), border: `1px solid ${B.ltGray}`, fontSize: 13, padding: "8px 16px", opacity: rows.length ? 1 : .5 }}>Export CSV</button>
       </div>
 
+      <CompanyPortalLinks company={company}/>
       {loading ? <div style={{ padding: 20, textAlign: "center", color: B.dkGray }}>กำลังโหลด...</div> : (
         <div style={{ overflowX: "auto", background: B.white, borderRadius: 12 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
