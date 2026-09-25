@@ -59,12 +59,12 @@ export const markLineAdded = (user) => {
   save("line_added", true); save("line_added_at", new Date().toISOString());
   safeTrack("line_oa_added"); phCapture("line_oa_added", {});
   const u = user || load("user", null);
-  if (u?.phone) {
-    const tail = u.phone.replace(/\D/g, "").slice(-9);
-    // ผูก line_link_code ไว้กับเรคคอร์ดลูกค้าก่อน เพื่อให้ line-webhook จับคู่ข้อความ "JIA-LINK-<code>" → เขียน line_user_id กลับได้
-    supaRest("customers", "PATCH", { line_added: true, line_added_at: new Date().toISOString(), line_link_code: getLinkCode() }, `?tel=ilike.*${tail}`);
-  }
+  // ผูก line_link_code ไว้กับเรคคอร์ดลูกค้าก่อน เพื่อให้ line-webhook จับคู่ข้อความ "JIA-LINK-<code>" → เขียน line_user_id กลับได้
+  if (u?.phone) setCustomerLineLink(u, getLinkCode(), true);
 };
+// ตั้ง line_link_code (+ line_added) ผ่าน RPC แทน PATCH customers ตรงด้วยเบอร์ (เดิมใครรู้เบอร์ก็เปลี่ยนโค้ดของคนอื่นได้)
+export const setCustomerLineLink = (u, code, markAdded = false) =>
+  supaRpc("customer_set_line_link", { p_customer_id: u?.customer_id || null, p_phone: u?.phone || "", p_code: code, p_mark_added: !!markAdded });
 export const SUPABASE_URL = "https://tpoiyykbgsgnrdwzgzvn.supabase.co";
 export const SUPABASE_KEY = "sb_publishable_1kXSE788PB9XqH_2vU3pqg_6xtqI1Mf";
 

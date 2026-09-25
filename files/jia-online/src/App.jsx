@@ -5,7 +5,7 @@ import GamePage from "./game/GamePage";
 import { shuffled } from "./game/storyEngine";
 import {
   B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
-  REFERRAL_DISCOUNT_PCT, REFERRAL_REWARD_TEXT, captureReferral, getRefCode, referralLink,
+  REFERRAL_DISCOUNT_PCT, REFERRAL_REWARD_TEXT, captureReferral, getRefCode, referralLink, setCustomerLineLink,
 } from "./lib/core";
 // หน้าแอดมินแยกเป็น chunk ของตัวเอง — ผู้เรียนทั่วไปไม่ต้องดาวน์โหลดโค้ดแอดมิน
 const Admin = lazy(() => import("./admin/Admin"));
@@ -498,7 +498,8 @@ function Store({ go, setUser }) {
   const buyerReady = buyerName.trim() && normalizePhone(buyerPhone).length >= 9;
   const ensureBuyer = () => {
     if (!buyerReady) { alert("กรุณากรอกชื่อ-นามสกุลและเบอร์โทรที่ถูกต้องก่อนชำระเงิน"); return null; }
-    const u = { name: buyerName.trim(), phone: normalizePhone(buyerPhone) };
+    // รวมกับ user เดิม — เดิมเขียนทับเหลือแค่ชื่อ+เบอร์ ทำให้ customer_id/auth_user_id (ล็อกอิน LINE) หายหลังกดชำระเงิน
+    const u = { ...(load("user", null) || {}), name: buyerName.trim(), phone: normalizePhone(buyerPhone) };
     setUser(u);
     return u;
   };
@@ -1050,10 +1051,11 @@ function SignupGate({ go, setUser }) {
     if (!validate()) return;
     setErr(""); setBusy(true);
     const cleanPhone = phone.replace(/\D/g, "");
-    const userData = { name: name.trim(), phone: cleanPhone };
+    // เก็บ customer_id ไว้ใน user ด้วย — ชวนเพื่อน/รีวิว/ผูก LINE ผ่าน RPC ยืนยันตัวด้วย customer_id + เบอร์
+    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const userData = { name: name.trim(), phone: cleanPhone, customer_id: custId };
     setUser(userData);
     save("signed_up", true); save("enrolled", true);
-    const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const linkCode = getLinkCode();
     supaRest("customers", "POST", { id: custId, name: userData.name, tel: cleanPhone, source: "online-course", line_link_code: linkCode, pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), gate_variant: getGateVariant(), landing_url: load("landing_url", null), ...getUTM() });
     supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, status: "กำลังเรียน" });
@@ -1360,9 +1362,9 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       // ผูกกับ online_students เสมอ (ไม่ว่าจะเคยสมัครมาก่อนหรือไม่) เพื่อให้พนักงานค้นหาคะแนนย้อนหลังได้
       const u = load("user", null);
       if (!u) {
-        setUser({ name, phone });
-        save("signed_up", true);
         const custId = "cust_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+        setUser({ name, phone, customer_id: custId });
+        save("signed_up", true);
         supaRest("customers", "POST", { id: custId, name, tel: phone, source: "online-course", line_link_code: getLinkCode(), pdpa_consent_at: new Date().toISOString(), signup_at: new Date().toISOString(), gate_variant: getGateVariant(), landing_url: load("landing_url", null), ...getUTM() });
         supaRest("online_students", "POST", { customer_id: custId, name, phone, status: "กำลังเรียน", company: row.company || null, pre_course: preCourseStudent });
       } else if (row.company || preCourseStudent) {
@@ -2148,16 +2150,16 @@ function Certificate({ user, go }) {
     safeTrack("line_oa_clicked", { variant: "certificate", has_link_code: true }); phCapture("line_oa_clicked", { variant: "certificate", has_link_code: true });
     const u = user || load("user", null);
     const tail = u?.phone ? u.phone.replace(/\D/g, "").slice(-9) : null;
-    // ผูกโค้ดนี้กับเรคคอร์ดลูกค้า เพื่อให้ webhook จับคู่ได้แน่นอน
-    if (tail) supaRest("customers", "PATCH", { line_link_code: lc }, `?tel=ilike.*${tail}`);
+    // ผูกโค้ดนี้กับเรคคอร์ดลูกค้า เพื่อให้ webhook จับคู่ได้แน่นอน (ผ่าน RPC — ไม่แตะตาราง customers ตรง)
+    if (tail) setCustomerLineLink(u, lc);
     setLinkWaiting(true);
     if (pollRef.current) clearInterval(pollRef.current);
     let tries = 0;
     pollRef.current = setInterval(async () => {
       tries++;
       if (tail) {
-        const rows = await supaRest("customers", "GET", null, `?tel=ilike.*${tail}&select=line_user_id&limit=1`);
-        if (Array.isArray(rows) && rows[0]?.line_user_id) {
+        // ต้องรู้ทั้งเบอร์ + โค้ดผูก (อยู่ในเครื่องนี้เท่านั้น) — ไม่อ่านตาราง customers ด้วย anon key อีกต่อไป
+        if (await supaRpc("customer_line_linked", { p_phone: u.phone, p_code: lc }) === true) {
           clearInterval(pollRef.current); pollRef.current = null;
           save("line_linked", true); save("line_added", true);
           setLineLinked(true); setLinkWaiting(false);

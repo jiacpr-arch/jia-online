@@ -7,13 +7,19 @@ Backend ทั้งหมดอยู่บน Supabase โปรเจกต�
 
 ```
 files/jia-online/            ← Root Directory ของโปรเจกต์ Vercel (ตั้งใน dashboard ไม่ใช่ใน repo)
-  src/App.jsx                ← เกือบทั้งแอป: landing, คอร์ส, ควิซ, ชำระเงิน, ใบประกาศ, จอง On-site, admin
+  src/App.jsx                ← หน้าเว็บผู้เรียน: landing, คอร์ส, ควิซ, ชำระเงิน, ใบประกาศ, จอง On-site, ชวนเพื่อน, รีวิว
+  src/lib/core.jsx           ← ของที่ใช้ร่วมกัน: config, helper Supabase/analytics/auth, ข้อมูลคอร์ส, ไอคอน, สไตล์
+  src/admin/                 ← หน้าแอดมิน (/admin) โหลดแบบ lazy — Admin.jsx + GrowthPanels.jsx (ชวนเพื่อน/ใบกำกับภาษี/รีวิว/ลิงก์ HR)
+  src/portal/                ← พอร์ทัล HR ของบริษัท (/org/<token>) โหลดแบบ lazy
+  src/ErrorBoundary.jsx      ← จับ error ตอน render → ส่ง PostHog Error Tracking + หน้าโหลดใหม่
   src/game/                  ← เกม CPR HERO (GamePage, storyEngine, scenarios, EcgStrip, sound, characters)
   public/                    ← รูปตัวละคร/ฉากเกม, โลโก้, หน้า static (exam-prep-*.html), รูปแอด
+                                emergency.html (คู่มือ CPR ฉุกเฉิน ใช้ออฟไลน์ได้), sw.js + manifest.webmanifest + icons/ (PWA)
   supabase/functions/        ← Edge Functions (deploy ด้วย supabase CLI, verify_jwt=false ทุกตัว)
   supabase/migrations/       ← SQL ที่ apply บน production แล้ว (เก็บไว้เป็นประวัติ + ใช้ rerun ได้)
   docs/                      ← SECURITY_FOLLOWUP (งาน security ค้าง), AUTH_GATE_SETUP, CPR_HERO_GAME_PLAN
 .github/workflows/mirror-to-gitlab.yml  ← ทุก push/delete บน GitHub → mirror ไป gitlab.com/jiacpr/jia-online
+.github/workflows/build.yml             ← npm ci + npm run build ทุก PR / push เข้า main
 ```
 
 ## รันในเครื่อง
@@ -44,7 +50,7 @@ npm run build    # ต้องผ่านก่อนเปิด PR (ไม�
 | `line-webhook` | รับ webhook จาก LINE OA @jiacpr เก็บ user_id ลูกค้า |
 | `notify-new-student` | แจ้งทีมทาง LINE เมื่อมีนักเรียนใหม่ (trigger บน `online_students`) |
 | `notify-new-booking` | แจ้งทีมทาง LINE เมื่อมีการจอง On-site (trigger บน `bookings`) + งาน cron เตือนสลิปค้าง/รอบเรียนใกล้ถึง |
-| `customer-followup-drip` | ส่งข้อความติดตามลูกค้าตามลำดับ (pg_cron รายวัน) |
+| `customer-followup-drip` | ส่งข้อความติดตามลูกค้าตามลำดับ (pg_cron รายวัน) + เตือนใบประกาศใกล้/หมดอายุ |
 
 ฟังก์ชันอื่นในโปรเจกต์ Supabase เดียวกันแต่เป็นของแอปอื่น (source อยู่ repo อื่น):
 `bcpr-api` (class.morroo.com), `jiaroo-line-webhook` / `online-course-broadcast` (jiaroo CRM),
@@ -57,6 +63,19 @@ npm run build    # ต้องผ่านก่อนเปิด PR (ไม�
 - ตาราง `jiaroo_secrets` (tenant `jiaroo`): `NOTIFY_WEBHOOK_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN` — trigger/cron ใช้แนบ header
 - Vercel env (ไม่บังคับ): `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST` — ถ้าไม่ตั้งจะใช้ public key ที่ฝังในโค้ด
 
+### RPC ฝั่งฐานข้อมูลที่หน้าเว็บเรียก (SECURITY DEFINER — ตารางเบื้องหลังเปิด RLS ไม่มี policy)
+
+| RPC | ใช้ทำอะไร | migration |
+|---|---|---|
+| `online_cert_expiry_candidates` | (service_role เท่านั้น) ใบประกาศกลางที่ใกล้/เพิ่งหมดอายุ ให้ drip เตือน | `20260925000000` |
+| `referral_my_code` / `referral_record_signup` / `referral_code_valid` | ระบบชวนเพื่อน | `20260925000001` |
+| `company_portal` | ข้อมูลพอร์ทัล HR ตาม token | `20260925000002` |
+| `request_tax_invoice` / `submit_course_review` / `public_course_reviews` | ขอใบกำกับภาษี, รีวิวคอร์ส | `20260925000003` |
+| `customer_set_line_link` / `customer_line_linked` | ผูกโค้ด LINE + เช็คสถานะ (แทนการแตะ `customers` ตรง) | `20260925000004` |
+
+ลำดับ deploy ของชุดนี้: apply migration `20260925000000`–`20260925000004` → deploy `admin-api`, `stripe-checkout`,
+`stripe-webhook`, `customer-followup-drip` → merge หน้าเว็บ (หน้าเว็บรับมือได้ถ้า RPC ยังไม่มี: การ์ด/ส่วนที่เกี่ยวข้องแค่ไม่แสดง)
+
 ## ลิงก์พิเศษของแอป
 
 | URL | ผล |
@@ -64,6 +83,9 @@ npm run build    # ต้องผ่านก่อนเปิด PR (ไม�
 | `/game` หรือ `/?game=1` | เข้าหน้าเลือกเคสเกม CPR HERO ทันที (QR บูธ/อีเวนต์) |
 | `/game?random=play` หรือ `/?game=random` | สุ่มเคสเล่นทันทีเต็มจอ (ลิงก์ยิงแอด รูปแบบเดียวกับ firstaid.morroo.com) |
 | `/admin` | หน้าแอดมิน (ต้องมี admin key) |
+| `/org/<token>` | พอร์ทัล HR ของบริษัท (สร้างลิงก์ในแอดมิน → แท็บ "รายงานคะแนน (บริษัท)") |
+| `/?ref=<code>` | ลิงก์ชวนเพื่อน — เพื่อนได้ส่วนลด 20% ตอนจ่ายผ่าน Stripe |
+| `/emergency.html` | คู่มือ CPR ฉุกเฉิน + จังหวะกด 110/นาที (ใช้ได้แม้ออฟไลน์) |
 | `/cert-example.html` | ตัวอย่างใบประกาศสำหรับทีมขาย (ถ้า merge PR #80) |
 | `?camp=<code>` | แคมเปญ LINE OA (คูปอง/ปลดล็อกคอร์ส ตามที่กำหนดใน `CAMPAIGNS`) |
 
