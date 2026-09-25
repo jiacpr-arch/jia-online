@@ -11,6 +11,8 @@ import {
 const Admin = lazy(() => import("./admin/Admin"));
 // พอร์ทัล HR (/org/<token>) — chunk แยก โหลดเฉพาะคนเปิดลิงก์ของบริษัท
 const CompanyPortal = lazy(() => import("./portal/CompanyPortal"));
+// จำโค้ดชวนเพื่อน (?ref=) ตั้งแต่โหลดโมดูล — ก่อน render ใด ๆ (effect ของลูกอย่างหน้าร้านรันก่อน effect ของ App)
+captureReferral();
 const PORTAL_TOKEN = typeof window !== "undefined" ? (window.location.pathname.match(/^\/org\/([A-Za-z0-9_-]{24,64})\/?$/) || [])[1] || null : null;
 // ==================== MORROO NETWORK ADS ====================
 const MORROO_ADS = [
@@ -2201,7 +2203,7 @@ function Certificate({ user, go }) {
           <div style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 10.5, letterSpacing: .5, color: "#8A7A55" }}>088-558-8078 | cpr.morroo.com | LINE: @jiacpr</div>
           {verifyUrl && <div data-testid="cert-verify-qr" style={{ position: "absolute", top: 44, right: 58, width: 112, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "8px 6px 6px", boxSizing: "border-box" }}>
             <div style={{ display: "flex", justifyContent: "center" }}><VerifyQR url={verifyUrl} size={84}/></div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#0E1E3C", marginTop: 4, lineHeight: 1.2 }}>สแกนตรวจสอบใบประกาศ</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#0E1E3C", marginTop: 4, lineHeight: 1.2 }}>สแกนเพื่อตรวจสอบ</div>
             <div style={{ fontSize: 9.5, color: B.dkGray, fontFamily: "monospace", lineHeight: 1.3 }}>{hubCert.number}</div>
             {hubCert.expiresAt && <div style={{ fontSize: 9.5, color: B.dkGray, lineHeight: 1.3 }}>ใช้ได้ถึง {thaiDate(hubCert.expiresAt)}</div>}
           </div>}
@@ -2642,7 +2644,6 @@ export default function App() {
   // UTM + A/B variant
   useEffect(() => {
     captureUTM();
-    captureReferral();
     // ลิงก์เฉพาะกิจแคมเปญ (?camp=line0806) — จำ key ไว้ให้ issueGameVoucher เช็คสิทธิ์คูปอง
     try { const ck = new URLSearchParams(window.location.search).get("camp"); if (ck) save("game_camp", ck); } catch (e) {}
     // แคมเปญที่เปิด unlockCourse: เข้าผ่านลิงก์ในวันแคมเปญ → ปลดคอร์สทุกบทให้เลย (จำสิทธิ์ถาวรในเครื่อง)

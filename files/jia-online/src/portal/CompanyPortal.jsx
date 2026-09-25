@@ -91,7 +91,7 @@ export default function CompanyPortal({ token }) {
             </tr></thead>
             <tbody>
               {shown.map((s, i) => <tr key={i} style={{ borderTop: `1px solid ${B.ltGray}` }}>
-                <td style={{ padding: "10px 12px" }}><div style={{ fontWeight: 600 }}>{s.name}</div><div style={{ fontSize: 11, color: B.dkGray }}>{s.phone}</div></td>
+                <td style={{ padding: "10px 12px", minWidth: 140 }}><div style={{ fontWeight: 600 }}>{s.name}</div><div style={{ fontSize: 11, color: B.dkGray }}>{s.phone}</div></td>
                 {chapters.map((m) => { const v = s.chapterScores?.[m.id]; return <td key={m.id} style={{ padding: "10px 8px", textAlign: "center", color: v == null ? B.ltGray : v >= PASS ? B.green : B.red }}>{v == null ? "—" : `${v}%`}</td>; })}
                 <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 700 }}>{s.finalScore != null ? `${s.finalScore}%` : "—"}</td>
                 <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: isDone(s) ? B.green : B.dkGray }}>{isDone(s) ? "✓ จบแล้ว" : "กำลังเรียน"}</td>
