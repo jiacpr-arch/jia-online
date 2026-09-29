@@ -806,3 +806,18 @@ export const css = {
   wrap: { maxWidth: 480, margin: "0 auto", padding: "0 20px" },
 };
 
+
+// ===== งาน Dek-D (ต.ค. 2026): QR บูธ → เล่นเกม CPR HERO ฟรี → ได้เกียรติบัตร + โฆษณา =====
+// เข้าได้ที่ /dekd หรือ ?event=dekd — ไม่ต้องสมัคร/ไม่ต้องจ่าย เล่นแล้วบันทึกเกียรติบัตรเป็นรูปได้เลย
+export const DEKD_EVENT = {
+  key: "dekd",
+  roodeeUrl: "https://roodee.me",
+  roodeeCode: "dekd2026", // สแกน QR เว็บรู้ดี → กรอกโค้ดนี้ = เล่นฟรี 14 วัน (ตั้งโค้ดฝั่งรู้ดีแยกต่างหาก)
+  roodeeTrialDays: 14,
+};
+export const isDekdEvent = () => {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    return p.get("event") === DEKD_EVENT.key || /^\/dekd\/?$/.test(window.location.pathname);
+  } catch (e) { return false; }
+};

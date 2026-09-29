@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import GamePage from "./game/GamePage";
 import { shuffled } from "./game/storyEngine";
 import {
-  B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
+  B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, isDekdEvent, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
   REFERRAL_DISCOUNT_PCT, REFERRAL_REWARD_TEXT, captureReferral, getRefCode, referralLink, setCustomerLineLink,
 } from "./lib/core";
 // หน้าแอดมินแยกเป็น chunk ของตัวเอง — ผู้เรียนทั่วไปไม่ต้องดาวน์โหลดโค้ดแอดมิน
@@ -2530,7 +2530,9 @@ export default function App() {
   const gameValue = gameSearch ? gameSearch.get("game") : null;
   const gamePathParam = typeof window !== "undefined" && /^\/game\/?$/.test(window.location.pathname);
   const gameRandomParam = gameValue === "random" || (gamePathParam && gameSearch && gameSearch.get("random") === "play");
-  const gameParam = gameValue === "1" || gamePathParam || gameRandomParam;
+  // งาน Dek-D: /dekd หรือ ?event=dekd → เข้าเกมสุ่มโจทย์ทันที เล่นฟรีไม่ผ่านด่านสมัคร ชนะแล้วรับเกียรติบัตร
+  const dekdEvent = isDekdEvent();
+  const gameParam = gameValue === "1" || gamePathParam || gameRandomParam || dekdEvent;
   // ต้องมี session_id (Stripe แทนค่าให้ตอน redirect กลับ) ถึงจะเข้าสู่หน้าตรวจสอบการจ่ายเงิน
   // ได้ — กัน exploit เดิมที่พิมพ์ ?stripe=success&modules=... เองแล้วปลดล็อกฟรีทันที
   const stripeSessionId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("session_id") : null;
@@ -2561,7 +2563,7 @@ export default function App() {
   const [blogSlug, setBlogSlug] = useState(null);
   const go = useCallback(p => { setPage(p); window.scrollTo(0, 0); }, []);
   // แบนเนอร์ในแอป + ลิงก์ ?game=random → เข้าเกมแบบสุ่มโจทย์ให้ทันที (ไม่ผ่านหน้าเลือกเคส)
-  const [gameAutoRandom, setGameAutoRandom] = useState(gameRandomParam);
+  const [gameAutoRandom, setGameAutoRandom] = useState(gameRandomParam || dekdEvent);
   const goGameRandom = useCallback(() => { setGameAutoRandom(true); go("game"); }, [go]);
   // ชนะเกม CPR HERO → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (funnel ดึงคนมาเรียนจริง)
   // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) และยกเว้นนักเรียน pre-course ที่จ่ายค่า on-site แล้ว
@@ -2654,7 +2656,7 @@ export default function App() {
       phCapture("camp_course_unlock", { camp: camp.key || camp.event });
     }
     // เข้าจาก QR บูธ → บันทึก event พร้อม utm (เช่น utm_campaign=jia-niems-2026) ไว้วัดยอดสแกน
-    if (gameParam) { const u = { ...getUTM(), mode: gameRandomParam ? "random" : "hub" }; safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
+    if (gameParam) { const u = { ...getUTM(), mode: gameRandomParam ? "random" : "hub", ...(dekdEvent ? { event: "dekd" } : {}) }; safeTrack("game_qr_open", u); phCapture("game_qr_open", u); }
     getPosthog().then(ph => { if (ph) { try { ph.onFeatureFlags(() => { const v = ph.getFeatureFlag("gate_placement"); if (typeof v === "string" && ["before-course","after-lesson-1","soft"].includes(v)) save("gate_variant", v); }); } catch (e) {} } });
   }, []);
 
@@ -2746,7 +2748,7 @@ export default function App() {
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
-          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")} autoRandom={gameAutoRandom}/>;
+          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")} autoRandom={gameAutoRandom} eventMode={dekdEvent}/>;
           default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog} goGameRandom={goGameRandom}/>;
         }
       })()}
