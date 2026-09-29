@@ -402,7 +402,7 @@ function Landing({ go, enterCourse, openBlog, goGameRandom }) {
         <h2 style={{ fontSize: 24, fontWeight: 300, margin: "0 0 16px", opacity: .95 }}>ออนไลน์</h2>
         {FREE_LAUNCH && <div style={{ display: "inline-block", background: B.gold, color: B.black, borderRadius: 8, padding: "6px 16px", fontSize: 13, fontWeight: 800, marginBottom: 12 }}>เรียนฟรี! เดือนแรกเท่านั้น</div>}
         {!FREE_LAUNCH && <div style={{ display: "inline-block", background: B.gold, color: B.black, borderRadius: 8, padding: "6px 16px", fontSize: 13, fontWeight: 800, marginBottom: 12 }}>บทที่ 1 เรียนฟรี!</div>}
-        <p style={{ fontSize: 14, opacity: .9, lineHeight: 1.7, marginBottom: 28 }}>เรียนรู้การช่วยชีวิตขั้นพื้นฐาน มาตรฐาน 2025<br/>ดูวิดีโอ • ทำแบบทดสอบ • รับใบประกาศนียบัตร</p>
+        <p style={{ fontSize: 14, opacity: .9, lineHeight: 1.7, marginBottom: 28 }}>เรียนรู้การช่วยชีวิตขั้นพื้นฐาน มาตรฐาน 2025<br/>ดูวิดีโอ • ทำแบบทดสอบ • รับใบประกาศภาคทฤษฎี</p>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 14, background: "rgba(255,255,255,.15)", borderRadius: 16, padding: "14px 28px", marginBottom: 28 }}>
           {FREE_LAUNCH ? (<><span style={{ fontSize: 44, fontWeight: 800 }}>ฟรี!</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ textDecoration: "line-through", opacity: .7 }}>ปกติ ฿100</div><div style={{ opacity: .85 }}>+ คูปองส่วนลด ฿100</div></div></>) : (<><span style={{ fontSize: 44, fontWeight: 800 }}>฿35</span><div style={{ textAlign: "left", fontSize: 12 }}><div style={{ opacity: .85 }}>ต่อหัวข้อ</div><div style={{ opacity: .7 }}>Full Course ฿149</div></div></>)}
         </div>
@@ -448,7 +448,7 @@ function Landing({ go, enterCourse, openBlog, goGameRandom }) {
       {[
         { label: "1 หัวข้อ", price: "฿35", desc: "เลือกหัวข้อที่สนใจ", bg: B.white, border: B.ltGray, badge: null },
         { label: "3 หัวข้อ", price: "฿100", desc: "เฉลี่ย ฿33/หัวข้อ", bg: B.white, border: B.ltGray, badge: "ประหยัด 5%" },
-        { label: "Full Course", price: "฿149", desc: "6 หัวข้อ + Final Exam + Certificate + คูปอง On-site ฿100", bg: `${B.red}06`, border: B.red, badge: "แนะนำ" },
+        { label: "Full Course", price: "฿149", desc: "6 หัวข้อ + Final Exam + ใบประกาศภาคทฤษฎี (ออนไลน์) + คูปอง On-site ฿100", bg: `${B.red}06`, border: B.red, badge: "แนะนำ" },
       ].map((p, i) => (
         <div key={i} style={{ background: p.bg, borderRadius: 14, padding: 16, marginBottom: 12, border: `2px solid ${p.border}`, position: "relative" }}>
           {p.badge && <div style={{ position: "absolute", top: -10, right: 12, background: p.badge === "แนะนำ" ? B.red : B.gold, color: B.white, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 8 }}>{p.badge}</div>}
@@ -464,7 +464,7 @@ function Landing({ go, enterCourse, openBlog, goGameRandom }) {
     <div style={{ ...css.wrap, paddingTop: FREE_LAUNCH ? 36 : 0, paddingBottom: 24 }}>
       <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20, textAlign: "center" }}>เรียนอะไรบ้าง?</h3>
       {COURSE.modules.slice(0, 6).map((m, i) => (<div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 12, background: B.white, borderRadius: 14, padding: "14px 16px" }}><div style={{ minWidth: 38, height: 38, borderRadius: 10, background: `${B.red}12`, display: "flex", alignItems: "center", justifyContent: "center", color: B.red, fontWeight: 800, fontSize: 15 }}>{String(i + 1).padStart(2, "0")}</div><div><div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{m.short} {i === 0 && !FREE_LAUNCH ? <span style={{ background: B.green, color: B.white, fontSize: 10, padding: "2px 6px", borderRadius: 4, marginLeft: 6 }}>ฟรี</span> : null}</div><div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.5 }}>{m.desc}</div></div></div>))}
-      <div style={{ background: `${B.gold}18`, borderRadius: 14, padding: 16, textAlign: "center", marginTop: 4 }}><I name="cert" size={26} color={B.gold}/><div style={{ fontWeight: 600, fontSize: 14, marginTop: 6 }}>+ แบบทดสอบสุดท้าย & ใบประกาศนียบัตร</div></div>
+      <div style={{ background: `${B.gold}18`, borderRadius: 14, padding: 16, textAlign: "center", marginTop: 4 }}><I name="cert" size={26} color={B.gold}/><div style={{ fontWeight: 600, fontSize: 14, marginTop: 6 }}>+ แบบทดสอบสุดท้าย & ใบประกาศภาคทฤษฎี (ออนไลน์)</div><div style={{ fontSize: 12, color: B.dkGray, lineHeight: 1.6, marginTop: 6 }}>ใบรับรองที่ยืนยันตัวตน (ใช้ยื่นงาน/วิชาชีพ) ต้องผ่านการฝึกภาคปฏิบัติกับผู้สอนแบบ On-site</div></div>
     </div>
     <NewsSection openBlog={openBlog} goAll={() => go("blog")} title="ข่าวสาร & บทความ" subtitle="อัปเดตใหม่ทุกวัน — เคสจริง บทความ และทิปส์ช่วยชีวิต"/>
     <JiaAedNewsSection/>
@@ -476,7 +476,7 @@ function Landing({ go, enterCourse, openBlog, goGameRandom }) {
     </div>
     <div style={{ ...css.wrap, paddingBottom: 16 }}><MorrooAdBanner/></div>
     <div style={{ ...css.wrap, paddingBottom: 100 }}><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{[{ icon: "play", l: "6 วิดีโอ", s: "เรียนได้ทุกที่" },{ icon: "book", l: "Quiz ทุกบท", s: "ทดสอบความเข้าใจ" },{ icon: "cert", l: "ใบประกาศฯ", s: "มาตรฐาน 2025" },{ icon: "heart", l: "คูปอง ฿100", s: "ใช้ตอนเรียน on-site" }].map((f, i) => (<div key={i} style={{ background: B.white, borderRadius: 14, padding: 16, textAlign: "center" }}><I name={f.icon} size={22} color={B.red}/><div style={{ fontWeight: 600, fontSize: 13, marginTop: 6 }}>{f.l}</div><div style={{ fontSize: 11, color: B.dkGray, marginTop: 2 }}>{f.s}</div></div>))}</div></div>
-    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: B.white, padding: "14px 20px", boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 100 }}><div style={{ maxWidth: 480, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 11, color: B.dkGray }}>{FREE_LAUNCH ? "ช่วง Launch พิเศษ" : "เริ่มต้น"}</div><div style={{ fontSize: 22, fontWeight: 800, color: B.red }}>{FREE_LAUNCH ? "ฟรี!" : "฿35/หัวข้อ"}</div></div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { const txt = "เรียน CPR & AED ออนไลน์! ได้ใบ Certificate + คูปองส่วนลด"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn(B.white, B.red), padding: "10px 14px", border: `1px solid ${B.red}30`, fontSize: 13 }}>แชร์</button><button onClick={enterCourse} style={css.btn(B.red, B.white)}>{FREE_LAUNCH ? "เรียนฟรี" : "เรียนเลย"}</button></div></div></div>
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: B.white, padding: "14px 20px", boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 100 }}><div style={{ maxWidth: 480, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 11, color: B.dkGray }}>{FREE_LAUNCH ? "ช่วง Launch พิเศษ" : "เริ่มต้น"}</div><div style={{ fontSize: 22, fontWeight: 800, color: B.red }}>{FREE_LAUNCH ? "ฟรี!" : "฿35/หัวข้อ"}</div></div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { const txt = "เรียน CPR & AED ออนไลน์! ได้ใบประกาศภาคทฤษฎี + คูปองส่วนลด"; if (navigator.share) navigator.share({ title: "JIA CPR Online", text: txt, url: "https://cpr.morroo.com" }); else window.open("https://social-plugins.line.me/lineit/share?url=" + encodeURIComponent("https://cpr.morroo.com") + "&text=" + encodeURIComponent(txt), "_blank"); }} style={{ ...css.btn(B.white, B.red), padding: "10px 14px", border: `1px solid ${B.red}30`, fontSize: 13 }}>แชร์</button><button onClick={enterCourse} style={css.btn(B.red, B.white)}>{FREE_LAUNCH ? "เรียนฟรี" : "เรียนเลย"}</button></div></div></div>
   </div>);
 }
 
@@ -599,7 +599,7 @@ function Store({ go, setUser }) {
           <span style={{ fontWeight: 600 }}>รวม {selected.length} หัวข้อ</span>
           <span style={{ fontSize: 22, fontWeight: 800, color: B.red }}>฿{total}</span>
         </div>
-        {isFull && <div style={{ fontSize: 12, color: B.green, marginTop: 6 }}>ครบ 6 หัวข้อ! ได้ Final Exam + Full Certificate + คูปอง ฿100 ฟรี</div>}
+        {isFull && <div style={{ fontSize: 12, color: B.green, marginTop: 6 }}>ครบ 6 หัวข้อ! ได้ Final Exam + ใบประกาศภาคทฤษฎี (ออนไลน์) + คูปอง ฿100 ฟรี</div>}
       </div>
       {!user && <div style={{ ...css.card, marginBottom: 14 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>กรอกข้อมูลก่อนชำระเงิน</div>
@@ -898,7 +898,7 @@ function LineAddPrompt({ go, user, setUser, variant = "post-register" }) {
           {preCourse && <p style={{ fontSize: 13, color: "#06994A", fontWeight: 600, lineHeight: 1.6, margin: "0 0 12px" }}>แอด LINE @jiacpr เพื่อปลดล็อกคอร์สเรียนฟรี + เก็บสิทธิ์ไว้เรียนต่อได้ทุกอุปกรณ์ — ใช้เวลาไม่ถึง 10 วินาที</p>}
           <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 16px" }}>
             แอด LINE @jiacpr เพื่อ:<br/>
-            <strong style={{ color: B.black }}>✓</strong> รับใบ Certificate แบบ PDF<br/>
+            <strong style={{ color: B.black }}>✓</strong> รับใบประกาศภาคทฤษฎี แบบ PDF<br/>
             <strong style={{ color: B.black }}>✓</strong> แจ้งเตือนทบทวน CPR ทุก 3 เดือน<br/>
             <strong style={{ color: B.black }}>✓</strong> รับโปรต่ออายุ + คูปองพิเศษ<br/>
             <strong style={{ color: B.black }}>✓</strong> สอบถามได้ตลอด
@@ -1534,7 +1534,7 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
           <div style={{ background: `linear-gradient(135deg, ${B.gold} 0%, #E08800 100%)`, color: B.white, borderRadius: 16, padding: 18, marginBottom: 12, textAlign: "center" }}>
             <div style={{ fontSize: 12, fontWeight: 700, opacity: .9, letterSpacing: 1, textTransform: "uppercase" }}>คูปองเรียนฟรี</div>
             <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>จาก {partner.company}</div>
-            <div style={{ fontSize: 13, marginTop: 6, opacity: .95 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศนียบัตร</div>
+            <div style={{ fontSize: 13, marginTop: 6, opacity: .95 }}>คอร์ส CPR &amp; AED ออนไลน์ เต็มหลักสูตร + ใบประกาศภาคทฤษฎี</div>
             <div style={{ fontSize: 15, fontWeight: 800, marginTop: 8 }}>มูลค่า ฿{partner.sponsor_value || PRICING.full}</div>
             <div style={{ fontSize: 11, marginTop: 8, opacity: .85 }}>ใช้ได้ถึง {thaiShortDate((partner.expires_at || "").slice(0, 10))}</div>
             {partner.status === "redeemed" && <div style={{ marginTop: 10, background: "rgba(0,0,0,.18)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 700 }}>คูปองใบนี้ถูกใช้ไปแล้ว</div>}
@@ -1881,7 +1881,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
       {/* สิทธิ์ปลดทุกบทจากแคมเปญวันเดียว — บอกนักเรียนชัดๆ ว่าเรียนครบ+สอบผ่านแล้วได้ใบประกาศเลย */}
       {load("camp_course_unlock", false) && (
         <div style={{ width: "100%", marginBottom: 12, padding: "12px 14px", background: `${B.gold}15`, border: `1.5px dashed ${B.gold}`, borderRadius: 12, fontSize: 13, lineHeight: 1.6, color: B.black }}>
-          🎉 <b>สิทธิ์พิเศษแคมเปญ LINE:</b> ปลดคอร์สให้ครบทุกบทแล้ว — เรียนจบ + สอบผ่าน รับใบประกาศนียบัตรออนไลน์ได้เลย
+          🎉 <b>สิทธิ์พิเศษแคมเปญ LINE:</b> ปลดคอร์สให้ครบทุกบทแล้ว — เรียนจบ + สอบผ่าน รับใบประกาศภาคทฤษฎี (ออนไลน์) ได้เลย
         </div>
       )}
       {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — เตือนตลอดว่าใครมอบสิทธิ์เรียนฟรีนี้ให้ + ปุ่มติดต่อกลับ */}
