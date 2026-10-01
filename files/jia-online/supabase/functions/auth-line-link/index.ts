@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
   const { id_token, phone, pdpa, display_name, utm, landing_url, local_progress, gate_variant } = body;
   // นักเรียน pre-course (redeem โค้ด pre_course มา — จ่ายค่าคอร์ส on-site แล้ว): ไม่ออกคูปอง ฿100
   const preCourse = body.pre_course === true;
-  // เรียนฟรีด้วยโค้ด/ลิงก์แคมเปญ (ไม่ได้จ่ายเงิน): ไม่ออกคูปอง ฿100 — ส่วนลดให้เฉพาะคนที่จ่ายเงิน
+  // ยังไม่ได้จ่ายเงิน: ไม่ออกคูปอง ฿100 — ส่วนลดให้เฉพาะคนที่จ่ายเงิน
   const noCoupon = body.no_coupon === true;
   if (!id_token) return json({ error: "missing id_token" }, 400);
   if (!pdpa) return json({ error: "pdpa consent required" }, 400);
@@ -142,7 +142,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // 5) ยิงข้อความต้อนรับเข้าแชต LINE ทุกครั้งที่สมัครสำเร็จ (ด่านอยู่ก่อนเรียน)
-  //    lead ทั่วไปแนบคูปอง ฿100 — นักเรียน pre-course ได้ข้อความต้อนรับอย่างเดียว (จ่ายเงินแล้ว)
+  //    ไม่แนบคูปอง ฿100 แล้ว — ส่วนลดให้เฉพาะคนที่จ่ายเงิน (ได้ตอนเรียนจบ)
   const push = await runSignupPush({ line_user_id: lineUserId, name, pre_course: preCourse, no_coupon: noCoupon });
   const coupon: string | null = (push as any)?.coupon || null;
 

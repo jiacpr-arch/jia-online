@@ -1,5 +1,5 @@
 // signup-push
-// ยิงข้อความ "ผ่านบทที่ 1 แล้ว + คูปอง ฿100" เข้าแชต LINE ของลูกค้าหลังสมัครเสร็จ
+// ยิงข้อความต้อนรับ (ไม่มีคูปอง — ส่วนลดให้เฉพาะคนที่จ่ายเงิน) เข้าแชต LINE ของลูกค้าหลังสมัครเสร็จ
 // เรียกภายในจาก auth-line-link (หลัง upsert สำเร็จ เฉพาะคนที่มี line_user_id)
 // หรือเรียกตรงก็ได้: POST { line_user_id, name }
 //
@@ -7,7 +7,7 @@
 //   LINE_CHANNEL_ACCESS_TOKEN  (Messaging API @jiacpr — มีอยู่แล้ว / fallback jiaroo_secrets)
 //   SIGNUP_PUSH_SECRET         (ออปชัน) กันยิงมั่ว — ตรวจกับ header x-internal-secret
 //
-// เทสต์ไม่ส่งจริง: ?dry_run=1 หรือ body { dry_run: true } → คืนคูปอง + ข้อความตัวอย่าง
+// เทสต์ไม่ส่งจริง: ?dry_run=1 หรือ body { dry_run: true } → คืนข้อความตัวอย่าง
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -33,13 +33,6 @@ async function loadToken(): Promise<string> {
     .eq("tenant_slug", TENANT).eq("key", "LINE_CHANNEL_ACCESS_TOKEN").maybeSingle();
   return data?.value || "";
 }
-
-const genCoupon = () => {
-  const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let r = "JIA-";
-  for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)];
-  return r;
-};
 
 async function pushLine(to: string, text: string) {
   const token = await loadToken();
@@ -75,40 +68,14 @@ export async function runSignupPush(opts: { line_user_id: string; name?: string;
     return { ...push, coupon: null };
   }
 
-  // no_coupon = เรียนฟรีด้วยโค้ด/ลิงก์แคมเปญ (ไม่ได้จ่ายเงิน) → ข้อความต้อนรับไม่แนบคูปอง ฿100
-  if (opts.no_coupon) {
-    const text =
-      `🎉 ยินดีต้อนรับ${name ? " คุณ" + name : ""}! สมัครคอร์ส CPR & AED ออนไลน์เรียบร้อย\n\n` +
-      `เริ่มเรียนคอร์สออนไลน์ได้เลย เรียนจบรับใบประกาศนียบัตร สนใจเรียนภาคปฏิบัติ (on-site) ทักแชตนี้ได้ทันที`;
-    if (opts.dry_run) return { ok: true, dry_run: true, coupon: null, preview: text };
-    const push = await pushLine(line_user_id, text);
-    return { ...push, coupon: null };
-  }
-
-  // ออกคูปอง ฿100 (เหมือน submitQuiz ฝั่ง frontend) แล้วบันทึกให้ redeem ได้
-  // retry เมื่อชนรหัสซ้ำ (code unique) — ห้ามคืนคูปองที่ insert ไม่สำเร็จ ไม่งั้นลูกค้าได้โค้ด redeem ไม่ได้
-  let coupon = genCoupon();
-  if (!opts.dry_run) {
-    let saved = false;
-    for (let attempt = 0; attempt < 5 && !saved; attempt++) {
-      const { error } = await supa.from("promo_codes")
-        .insert({ code: coupon, type: "online", discount: 100, staff_name: "system" });
-      if (!error) { saved = true; break; }
-      coupon = genCoupon();
-    }
-    if (!saved) return { ok: false, error: "could not issue coupon" };
-  }
-
+  // คูปองส่วนลด ฿100 ให้เฉพาะคนที่จ่ายเงินซื้อคอร์สออนไลน์ — ตอนสมัครยังเรียนฟรีอยู่ จึงไม่แนบคูปอง
+  // (คนที่จ่ายเงินได้คูปองตอนเรียนจบผ่าน issue_online_coupon ฝั่งแอป) — no_coupon คงไว้ให้ client เก่าส่งมาได้
   const text =
     `🎉 ยินดีต้อนรับ${name ? " คุณ" + name : ""}! สมัครคอร์ส CPR & AED ออนไลน์เรียบร้อย\n\n` +
-    `ขอบคุณที่ลองทำควิซกับเรา 💙 คุณได้รับ "คูปองส่วนลด ฿100" สำหรับคอร์สภาคปฏิบัติ (on-site) ที่ JIA Trainer Center\n\n` +
-    `รหัสคูปอง: ${coupon}\n\n` +
-    `เริ่มเรียนคอร์สออนไลน์ได้เลย เรียนจบรับใบประกาศนียบัตร แล้วทักแชตนี้เพื่อจองรอบ on-site ได้ทันที`;
-
-  if (opts.dry_run) return { ok: true, dry_run: true, coupon, preview: text };
-
+    `เริ่มเรียนคอร์สออนไลน์ได้เลย เรียนจบรับใบประกาศนียบัตร สนใจเรียนภาคปฏิบัติ (on-site) ทักแชตนี้ได้ทันที`;
+  if (opts.dry_run) return { ok: true, dry_run: true, coupon: null, preview: text };
   const push = await pushLine(line_user_id, text);
-  return { ...push, coupon };
+  return { ...push, coupon: null };
 }
 
 // รันเซิร์ฟเวอร์เฉพาะตอนถูกเรียกเป็น entrypoint โดยตรง (กัน Deno.serve ทำงานซ้ำตอน auth-line-link import มาใช้ runSignupPush)

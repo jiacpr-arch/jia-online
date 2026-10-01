@@ -817,7 +817,7 @@ function LineAddPrompt({ go, user, setUser, variant = "post-register" }) {
   const preCourse = variant === "pre-course";
   // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ — ปกติออกให้แล้วตอนสมัคร/จบคอร์ส (Register/submitQuiz) ที่นี่ดึงจาก
   // local storage เป็นหลัก แล้วเผื่อกรณียังไม่มี (เช่น ผู้เรียนเก่าที่ยังไม่เคยผ่าน flow ใหม่) ค่อยออกผ่าน RPC
-  // ยกเว้นนักเรียน pre-course ที่จ่ายค่าคอร์ส on-site แล้ว และคนที่เรียนฟรีด้วยโค้ด — ไม่มีสิทธิ์คูปอง
+  // เฉพาะคนที่จ่ายเงินซื้อคอร์สออนไลน์ — คนเรียนฟรีและนักเรียน pre-course ไม่มีสิทธิ์คูปอง
   const showCoupon = !preCourse && !noOnsiteCoupon() && isSignedUp();
   const [coupon, setCoupon] = useState(() => (showCoupon ? load("coupon", null) : null));
   useEffect(() => {
@@ -961,7 +961,7 @@ function TeaserQuiz({ go }) {
           <div style={{ ...css.card, textAlign: "center" }}>
             <div style={{ fontSize: 56, marginBottom: 8 }}>🎉</div>
             <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>เก่งมาก! ทำได้ {correct}/{total} ข้อ</h2>
-            <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.7, margin: "0 0 20px" }}>นี่เป็นแค่น้ำจิ้ม 😉 คอร์สเต็มมีวิดีโอสอนละเอียด + ฝึกจริง + ใบประกาศนียบัตร<br/><strong style={{ color: B.black }}>สมัครฟรีเพื่อปลดคอร์สทั้งหมด + รับคูปองส่วนลด ฿100</strong></p>
+            <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.7, margin: "0 0 20px" }}>นี่เป็นแค่น้ำจิ้ม 😉 คอร์สเต็มมีวิดีโอสอนละเอียด + ฝึกจริง + ใบประกาศนียบัตร<br/><strong style={{ color: B.black }}>สมัครฟรีเพื่อเริ่มเรียนคอร์สเต็ม</strong></p>
             <button onClick={startSignup} style={{ ...css.btn(B.red, B.white, true), marginBottom: 10 }}>สมัครฟรี & เริ่มเรียน →</button>
             <button onClick={() => { save("claim_start_redeem", true); go("claim"); }} style={{ ...css.btn(B.white, B.red, true), border: `1px solid ${B.red}`, marginBottom: 10 }}>🎟️ มีโค้ดแล้ว? ใส่โค้ดเลย →</button>
             <button onClick={() => { save("teaser_done", true); go("landing"); }} style={{ background: "none", border: "none", color: B.dkGray, fontSize: 13, padding: "6px 12px", cursor: "pointer", textDecoration: "underline" }}>ดูรายละเอียดคอร์สก่อน</button>
@@ -1076,7 +1076,7 @@ function SignupGate({ go, setUser }) {
         <div style={{ ...css.card, textAlign: "center" }}>
           <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#06C75518", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><I name="line" size={36} color="#06C755"/></div>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 6px" }}>อีกขั้นเดียว! 🎉</h2>
-          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>เข้าสู่ระบบด้วย LINE เพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม + รับคูปองส่วนลด ฿100</strong> บัญชีเดียวกับที่ใช้จองคอร์ส on-site ได้เลย</p>
+          <p style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.7, margin: "0 0 18px" }}>เข้าสู่ระบบด้วย LINE เพื่อ <strong style={{ color: B.black }}>ปลดคอร์สเต็ม</strong> บัญชีเดียวกับที่ใช้จองคอร์ส on-site ได้เลย</p>
           {fallback && <div style={{ marginBottom: 12, textAlign: "left" }}>
             <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อ-นามสกุล *</label>
             <input type="text" placeholder="เช่น สมชาย ใจดี" value={name} onChange={e => { setName(e.target.value); setErr(""); }} style={{ width: "100%", padding: "12px 16px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" }}/>
@@ -1353,10 +1353,8 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       // (fallback ระหว่างที่ RPC เวอร์ชันเก่ายังไม่คืน source: โค้ดกลาง multi_use คือ pre-course เสมอ)
       const preCourseStudent = row.source != null ? row.source === "pre_course" : !!row.multi_use;
       save("pre_course_student", preCourseStudent);
-      // โค้ดฟรีเต็มคอร์ส (คูปองพาร์ทเนอร์ / โค้ดที่แอดมินออกให้ฟรี) → ไม่ได้คูปองส่วนลด ฿100
-      // ส่วนลดให้เฉพาะคนที่จ่ายเงิน: voucher ที่ขาย (voucher_sale) ยังได้ตามปกติ
-      // โค้ด lead 3 บทไม่นับ — ต้องจ่ายเงินซื้อบทที่เหลือก่อนจึงจะเรียนจบได้
-      if (isFullUnlock && row.source != null && row.source !== "voucher_sale") save("free_code_student", true);
+      // voucher ที่ขาย = จ่ายเงินแล้ว → มีสิทธิ์คูปองส่วนลด ฿100 (โค้ดฟรีอื่นๆ ไม่ได้ — ดู noOnsiteCoupon)
+      if (row.source === "voucher_sale") save("paid_voucher", true);
       // คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — จำช่องทางติดต่อพาร์ทเนอร์ไว้โชว์หลัง redeem/ในหน้าคอร์ส/ใบประกาศ
       if (row.source === PARTNER_SOURCE) {
         save("partner_sponsor", { company: row.company, line: row.sponsor_line, phone: row.sponsor_phone, value: row.sponsor_value || partner?.sponsor_value || PRICING.full, code });
@@ -2097,7 +2095,7 @@ function Certificate({ user, go }) {
   // มีใบกลางแล้ว → ใช้วันที่ออกใบจริงของ Hub (เดิมโชว์ "วันนี้" ทุกครั้งที่เปิดหน้า)
   const d = hubCert?.issuedAt ? new Date(hubCert.issuedAt) : new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   // นักเรียน pre-course จ่ายค่าคอร์ส on-site เต็มราคาแล้ว — ใบประกาศต้องไม่โชว์ "ส่วนลด ฿100"
-  // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน) — รวมถึงคนที่เรียนฟรีด้วยโค้ด
+  // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน) — และคนที่เรียนฟรีทุกแบบ
   const preCourseStudent = noOnsiteCoupon();
   // ปกติควรมีคูปองจากตอนสมัคร/จบคอร์สอยู่แล้ว (Register/submitQuiz) — ถ้ายังไม่มี ออกผ่าน RPC ฝั่งเซิร์ฟเวอร์
   // แทนการสุ่มโค้ดฝั่ง client เอง ไม่งั้นใบเซอร์จะโชว์โค้ดที่พนักงาน validate ไม่ได้ (ไม่มีในฐานข้อมูลจริง)
@@ -2579,8 +2577,8 @@ export default function App() {
   const [boothCta] = useState(() => boothCtaEligible(gameRandomParam)); // คิดครั้งเดียวตอนเปิด — param ถูกลบทีหลัง
   const goGameRandom = useCallback(() => { setGameAutoRandom(true); go("game"); }, [go]);
   // ชนะเกม CPR HERO → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (funnel ดึงคนมาเรียนจริง)
-  // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) และยกเว้นนักเรียน pre-course ที่จ่ายค่า on-site แล้ว
-  // (กันเข้าใจผิดเรื่องส่วนลด/เงินคืน — กฎเดียวกับหน้าใบประกาศ/สมัคร)
+  // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) — ออกให้เฉพาะคนที่จ่ายเงินซื้อคอร์สออนไลน์แล้ว (เล่นฟรีไม่ได้ส่วนลด)
+  // และไม่ให้นักเรียน pre-course ที่จ่ายค่า on-site แล้ว (กฎเดียวกับหน้าใบประกาศ/สมัคร — ดู noOnsiteCoupon)
   const issueGameVoucher = useCallback(() => {
     if (noOnsiteCoupon()) return null;
     // เฉพาะช่วงแคมเปญเท่านั้น — นอกช่วงไม่ออกคูปอง (เกมยังเล่นได้ปกติ แค่ไม่มีรางวัลคูปอง)

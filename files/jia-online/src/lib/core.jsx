@@ -279,11 +279,13 @@ export const isSignedUp = () => { const u = load("user", null); return !!(load("
 // นักเรียน pre-course = redeem โค้ดที่ source เป็น pre_course (เช่น JIA-STUDENT) — จ่ายค่าคอร์ส
 // on-site เต็มราคาแล้ว ห้ามออก/แสดงคูปองส่วนลด ฿100 ซ้ำ (ไม่งั้นถูกทวงส่วนลด/ขอเงินคืน)
 export const isPreCourseStudent = () => !!load("pre_course_student", false);
-// เรียนเต็มคอร์สฟรีด้วยโค้ด (คูปองพาร์ทเนอร์ / โค้ดที่แอดมินออกให้ฟรี) หรือลิงก์แคมเปญ (?camp=… unlockCourse)
-// กติกา: คนที่ได้โค้ดฟรี "ไม่ได้" คูปองส่วนลด ฿100 — ส่วนลดให้เฉพาะคนที่จ่ายเงิน (ซื้อคอร์สออนไลน์ / voucher_sale)
-// ยกเว้นถ้าภายหลังจ่ายเงินซื้อบทเรียนจริง (purchased ไม่ว่าง) ก็กลับมามีสิทธิ์ตามปกติ
-export const isFreeCodeStudent = () => !!load("free_code_student", false) || !!load("camp_course_unlock", false);
-export const noOnsiteCoupon = () => isPreCourseStudent() || (isFreeCodeStudent() && !(load("purchased", []) || []).length);
+// กติกาคูปองส่วนลด ฿100 คอร์ส on-site: ให้เฉพาะคนที่ "จ่ายเงิน" ซื้อคอร์สออนไลน์เท่านั้น
+//  - จ่ายเงินแล้ว = มีบทที่ซื้อและยืนยันชำระแล้ว (purchased — บันทึกหลัง Stripe/สลิปผ่านการตรวจเท่านั้น)
+//    หรือ redeem voucher ที่ขาย (source = voucher_sale → paid_voucher)
+//  - คนที่เรียนฟรีทุกแบบ (บทฟรี, โค้ดฟรี/พาร์ทเนอร์, ลิงก์แคมเปญ, เกม, ช่วง FREE_LAUNCH) ไม่ได้คูปอง
+//  - นักเรียน pre-course จ่ายค่า on-site เต็มราคาแล้ว ไม่ได้คูปองซ้ำ (กติกาเดิม)
+export const hasPaidOnline = () => !!load("paid_voucher", false) || (load("purchased", []) || []).length > 0;
+export const noOnsiteCoupon = () => isPreCourseStudent() || !hasPaidOnline();
 
 // UTM: เก็บครั้งแรกที่เข้า ก่อน replaceState จะลบ query ทิ้ง
 export const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
