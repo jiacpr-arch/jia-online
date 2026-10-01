@@ -372,6 +372,66 @@ if (typeof window !== "undefined") {
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); _installEvt = e; _installListeners.forEach((f) => f(true)); });
   window.addEventListener("appinstalled", () => { _installEvt = null; _installListeners.forEach((f) => f(false)); safeTrack("pwa_installed"); phCapture("pwa_installed", {}); });
 }
+// ==================== ก่อนเริ่มเรียน (Course intro) ====================
+// การ์ดแนะนำก่อนเรียนบนหน้าคอร์ส — เปิดไว้จนกว่าจะกด "รับทราบ" (จำใน localStorage) แล้วยุบ กดเปิดอ่านซ้ำได้
+const INTRO_SECTIONS = [
+  { icon: "🎯", title: "คอร์สนี้คืออะไร", items: [
+    "CPR & AED ภาคทฤษฎี ตามแนวทางมาตรฐาน 2025 — 6 บทเรียน + แบบทดสอบสุดท้าย",
+    "เรียนจบ + สอบผ่าน ได้ใบประกาศนียบัตร \"ภาคทฤษฎี (ออนไลน์)\"",
+  ]},
+  { icon: "📋", title: "กติกาการเรียน", items: [
+    "ดูวิดีโอให้ครบก่อน จึงจะทำแบบทดสอบท้ายบทได้",
+    "แต่ละบทต้องได้ 80% ขึ้นไป — ไม่ผ่านต้องดูวิดีโอซ้ำ และคำถามจะสุ่มใหม่ทุกครั้ง",
+    "เรียนตามลำดับ ผ่านครบ 6 บทจึงสอบปลายภาคได้ (ต้องเข้าสู่ระบบก่อนสอบ)",
+  ]},
+  { icon: "⚠️", title: "ข้อจำกัดของคอร์สออนไลน์", items: [
+    "เป็นความรู้ภาคทฤษฎี ใช้แทนการฝึกภาคปฏิบัติกับหุ่นจริงไม่ได้",
+    "ไม่ใช่คำแนะนำทางการแพทย์เฉพาะบุคคล — เกิดเหตุจริงโทร 1669 ทันที",
+    "ใบประกาศออนไลน์รับรองเฉพาะภาคทฤษฎี หากหน่วยงานต้องการภาคปฏิบัติ ต้องเข้าคลาส on-site เพิ่ม",
+  ]},
+  { icon: "🩺", title: "ผู้ที่ควรแจ้งผู้สอนก่อน / อาจฝึกภาคปฏิบัติไม่ได้", items: [
+    "ตั้งครรภ์ หรือเพิ่งผ่าตัด/คลอดบุตร",
+    "มีปัญหาหลัง เข่า ข้อมือ ไหล่ หรือบาดเจ็บที่ทำให้คุกเข่า/กดหน้าอกไม่ได้",
+    "โรคหัวใจ ความดันสูงที่ยังคุมไม่ได้ หรือแพทย์สั่งห้ามออกแรงหนัก",
+    "ยังเรียนภาคทฤษฎีออนไลน์ได้ตามปกติ — แต่ภาคปฏิบัติ ผู้สอนจะพิจารณาปรับหรืองดการฝึกตามความเหมาะสม",
+  ]},
+  { icon: "🎓", title: "นักเรียน pre-course (จองคลาส on-site แล้ว)", items: [
+    "เรียนออนไลน์ + สอบผ่านให้ครบ \"ก่อน\" วันเข้าคลาส",
+    "วันเข้าคลาส นำใบประกาศภาคทฤษฎี (หรือหน้าจอผลสอบ) มาแสดงกับผู้สอน",
+    "หากยังเรียนไม่จบ แจ้งทาง LINE @jiacpr ล่วงหน้า",
+  ]},
+  { icon: "🫁", title: "การช่วยหายใจด้วยอุปกรณ์ — ไม่รวมในคอร์สนี้", items: [
+    "คอร์สนี้สอนการเป่าปากช่วยหายใจพื้นฐานเท่านั้น",
+    "การช่วยหายใจด้วยอุปกรณ์ เช่น Pocket mask, BVM (Ambu bag) ต้องซื้อเพิ่มแยกต่างหาก — สอบถามทาง LINE @jiacpr",
+  ]},
+];
+
+function CourseIntroCard() {
+  const [open, setOpen] = useState(() => !load("intro_ack", false));
+  const ack = () => { save("intro_ack", true); setOpen(false); safeTrack("course_intro_ack"); phCapture("course_intro_ack", {}); };
+  const toggle = () => { if (!open) { safeTrack("course_intro_open"); phCapture("course_intro_open", {}); } setOpen(!open); };
+  return <div data-testid="course-intro" style={{ marginBottom: 12, background: B.white, border: `1.5px solid ${open ? B.red + "40" : B.ltGray}`, borderRadius: 14, overflow: "hidden" }}>
+    <button onClick={toggle} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
+      <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>📖</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: B.black }}>เริ่มที่นี่ — อ่านก่อนเริ่มเรียน</div>
+        <div style={{ fontSize: 11.5, color: B.dkGray, marginTop: 2 }}>กติกา • ข้อจำกัด • ผู้ที่ควรแจ้งผู้สอน • สิ่งที่ไม่รวมในคอร์ส</div>
+      </div>
+      <span style={{ fontSize: 12, color: B.dkGray }}>{open ? "▲" : "▼"}</span>
+    </button>
+    {open && <div style={{ padding: "0 16px 16px" }}>
+      {INTRO_SECTIONS.map((s) => <div key={s.title} style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: B.black, marginBottom: 4 }}>{s.icon} {s.title}</div>
+        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, lineHeight: 1.65, color: B.dkGray }}>
+          {s.items.map((t) => <li key={t}>{t}</li>)}
+        </ul>
+      </div>)}
+      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: 14, fontSize: 12.5, color: "#06994A", fontWeight: 600 }}>มีคำถาม? ติดต่อ LINE @jiacpr →</a>
+      <button onClick={ack} style={{ ...css.btn(B.red, B.white, true), marginTop: 12, fontSize: 14 }}>รับทราบ พร้อมเริ่มเรียน →</button>
+    </div>}
+  </div>;
+}
+
 function EmergencyGuideCard({ compact = false }) {
   const [canInstall, setCanInstall] = useState(!!_installEvt);
   useEffect(() => { _installListeners.add(setCanInstall); return () => { _installListeners.delete(setCanInstall); }; }, []);
@@ -1879,6 +1939,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
     })()}
     <div style={{ ...css.wrap, paddingTop: 20, paddingBottom: 40 }}>
       <AccountCard user={user} setUser={setUser}/>
+      <CourseIntroCard/>
       {/* สิทธิ์ปลดทุกบทจากแคมเปญวันเดียว — บอกนักเรียนชัดๆ ว่าเรียนครบ+สอบผ่านแล้วได้ใบประกาศเลย */}
       {load("camp_course_unlock", false) && (
         <div style={{ width: "100%", marginBottom: 12, padding: "12px 14px", background: `${B.gold}15`, border: `1.5px dashed ${B.gold}`, borderRadius: 12, fontSize: 13, lineHeight: 1.6, color: B.black }}>
