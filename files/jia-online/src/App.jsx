@@ -1884,7 +1884,11 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
           🎉 <b>สิทธิ์พิเศษแคมเปญ:</b> ปลดคอร์สให้ครบทุกบทแล้ว — เรียนจบ + สอบผ่าน รับใบประกาศภาคทฤษฎี (ออนไลน์) ได้เลย
         </div>
       )}
-      {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — เตือนตลอดว่าใครมอบสิทธิ์เรียนฟรีนี้ให้ + ปุ่มติดต่อกลับ */}
+      {coupon && <label data-testid="cert-hide-coupon" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13, color: B.dkGray, cursor: "pointer" }}>
+      <input type="checkbox" checked={hideCouponOnCert} onChange={(e) => toggleHideCoupon(e.target.checked)}/>
+      ไม่แสดงคูปองส่วนลดบนใบประกาศ (เช่น ใช้ยื่นที่ทำงาน/สถานศึกษา)
+    </label>}
+    {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — เตือนตลอดว่าใครมอบสิทธิ์เรียนฟรีนี้ให้ + ปุ่มติดต่อกลับ */}
       {getPartnerSponsor() && <div style={{ marginBottom: 12 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="course" compact/></div>}
       {/* CPR HERO — เกมฝึกสถานการณ์จริง อิงเนื้อหาบทเรียน (เล่นฟรีทุกเคส) */}
       <button onClick={() => { safeTrack("game_banner_click", { from: "course" }); phCapture("game_banner_click", { from: "course" }); (goGameRandom || (() => go("game")))(); }} style={{ width: "100%", marginBottom: 12, background: "linear-gradient(135deg, #10182F 0%, #2B3D77 100%)", color: B.white, border: "none", borderRadius: 14, padding: "14px 16px", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
@@ -2101,6 +2105,11 @@ function Certificate({ user, go }) {
     if (!u?.customer_id) return;
     issueOnlineCoupon(u.customer_id, u.phone).then(c => { if (c) { save("coupon", c); setCoupon(c); } });
   }, [preCourseStudent, coupon]);
+  // ผู้เรียนบางคนเอาใบไปยื่นที่ทำงาน/สถานศึกษา ไม่อยากให้มีคำว่า "ส่วนลด" บนใบ → ซ่อนได้เฉพาะบนรูปใบประกาศ
+  // (คูปองยังใช้ได้และยังโชว์ในการ์ดด้านล่าง) จำค่าไว้ในเครื่องนี้
+  const [hideCouponOnCert, setHideCouponOnCert] = useState(() => load("cert_hide_coupon", false));
+  const toggleHideCoupon = (v) => { setHideCouponOnCert(v); save("cert_hide_coupon", v); safeTrack("cert_hide_coupon", { hidden: v }); };
+  const certCoupon = hideCouponOnCert ? null : coupon;
   const certRef = useRef(null);
   const [gen, setGen] = useState(null); // null | "img" | "pdf"
   const fileBase = `JIA_Certificate_${sanitizeFileName(user?.name)}`;
@@ -2186,10 +2195,12 @@ function Certificate({ user, go }) {
           <div style={{ position: "absolute", top: 392, left: 70, right: 70, textAlign: "center", fontSize: 14, color: B.dkGray }}>ได้ผ่านการอบรม <strong style={{ color: "#0E1E3C" }}>ภาคทฤษฎี (ออนไลน์)</strong></div>
           <div style={{ position: "absolute", top: 412, left: 70, right: 70, textAlign: "center", fontSize: 14, fontWeight: 700, color: B.black }}>หลักสูตรการช่วยชีวิตขั้นพื้นฐาน CPR &amp; AED · มาตรฐาน 2025</div>
           <div style={{ position: "absolute", top: 436, left: 0, right: 0, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: B.red }}>ขอเชิญฝึกภาคปฏิบัติกับผู้สอนตัวจริง เพื่อช่วยชีวิตได้อย่างมั่นใจ</div>
-          {coupon ? (<>
+          {certCoupon ? (<>
             <div style={{ position: "absolute", top: 484, left: 0, right: 0, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: "#FFF9E8" }}>ส่วนลด ฿100 คอร์ส On-site</div>
-            <div style={{ position: "absolute", top: 506, left: 0, right: 0, textAlign: "center", fontSize: 15, fontWeight: 800, letterSpacing: 1, color: "#F3DB8E", fontFamily: "monospace" }}>• {coupon} •</div>
-          </>) : (
+            <div style={{ position: "absolute", top: 506, left: 0, right: 0, textAlign: "center", fontSize: 15, fontWeight: 800, letterSpacing: 1, color: "#F3DB8E", fontFamily: "monospace" }}>• {certCoupon} •</div>
+          </>) : coupon ? (
+            <div style={{ position: "absolute", top: 495, left: 0, right: 0, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#FFF9E8" }}>ผ่านการทดสอบภาคทฤษฎีเรียบร้อย</div>
+          ) : (
             <div style={{ position: "absolute", top: 495, left: 0, right: 0, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#FFF9E8" }}>แสดงใบประกาศนี้กับเจ้าหน้าที่ในวันอบรมภาคปฏิบัติ</div>
           )}
           <div style={{ position: "absolute", top: 542, left: 64, width: 216, textAlign: "center", background: "#FFFDF7", border: "1px solid rgba(196,154,72,.55)", borderRadius: 10, padding: "5px 6px", boxSizing: "border-box" }}>
