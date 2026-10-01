@@ -2396,11 +2396,11 @@ function Booking({ go }) {
 
       const bkId = uid();
       const noteParts = [`${selectedPkg.title} ฿${price}${selectedPkg.extra ? ` (ส่วนเพิ่ม ฿${selectedPkg.extra} ชำระแยก)` : ""}`, form.prefTime ? `สะดวก: ${form.prefTime}` : "", form.note || ""].filter(Boolean);
-      const bookingRow = { id: bkId, customer_id: custId, name: form.name, tel: phone, course_type: "joincourse", course_name: "CPR & AED (On-site)", channel: "online-course", total_people: parseInt(form.people) || 1, final_price: price, package: form.pkg, discount_code: coupon || "", discount_amount: coupon ? 100 : 0, payment_mode: "", payment_status: "รอเซลล์ติดต่อ (นัดวัน)", time_slot: form.prefTime || "", total_days: 1, note: noteParts.join(" | "), pdpa_consent: true, pdpa_consent_date: today(), created_at: new Date().toISOString() };
+      const bookingRow = { id: bkId, customer_id: custId, name: form.name, tel: phone, course_type: "joincourse", course_name: "CPR & AED (On-site)", channel: "online-course", total_people: parseInt(form.people) || 1, final_price: price, cpr_package: form.pkg, discount_code: coupon || "", discount_amount: coupon ? 100 : 0, payment_mode: "", payment_status: "รอเซลล์ติดต่อ (นัดวัน)", time_slot: form.prefTime || "", total_days: 1, note: noteParts.join(" | "), pdpa_consent: true, pdpa_consent_date: today(), created_at: new Date().toISOString() };
       let booking = await supaRest("bookings", "POST", bookingRow);
-      // คอลัมน์ package มาจาก migration 20261002000000 — ถ้ายังไม่ได้ apply insert จะล้ม (supaRest คืน [])
-      // ลองใหม่โดยไม่ส่ง package (แพ็กเกจยังอยู่ใน note ให้เซลล์เห็น) กัน lead หาย
-      if (!booking?.length) { const { package: _pkg, ...withoutPackage } = bookingRow; booking = await supaRest("bookings", "POST", withoutPackage); }
+      // คอลัมน์ cpr_package มาจาก migration 20261002000000 — ถ้ายังไม่ได้ apply insert จะล้ม (supaRest คืน [])
+      // ลองใหม่โดยไม่ส่ง cpr_package (แพ็กเกจยังอยู่ใน note ให้เซลล์เห็น) กัน lead หาย
+      if (!booking?.length) { const { cpr_package: _pkg, ...withoutPackage } = bookingRow; booking = await supaRest("bookings", "POST", withoutPackage); }
       console.log("📢 Booking lead:", booking);
 
       setBookingRef(bkId);
