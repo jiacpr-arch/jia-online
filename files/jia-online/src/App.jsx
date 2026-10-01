@@ -2324,6 +2324,17 @@ function MiniCert({ user, go }) {
 
 // ==================== BOOKING ====================
 
+// แพ็กเกจคอร์ส CPR & AED (เจ้าของตัดสินใจ 2 ต.ค. 2569) — ตรงกับ lib/cpr-package.mjs ใน jia-learning-hub
+// A = ค่าเรียน (face shield + ใบ JIA ฟรี), B = + ใบ W Medical ฿200, C = + pocket mask ฿300 ลด ฿10 = +฿490
+// คูปอง ฿100 ลดจากราคาคอร์สเหมือนเดิม ส่วนเพิ่มของแพ็กเกจไม่ลด
+const CPR_COURSE_PRICE = 500;
+const CPR_PACKAGES = [
+  { id: "A", title: "แพ็กเกจ A", extra: 0, items: ["เรียน on-site กับผู้สอน", "face shield (แถมฟรี)", "ใบประกาศ JIA (ฟรี)"] },
+  { id: "B", title: "แพ็กเกจ B", extra: 200, items: ["ทุกอย่างในแพ็กเกจ A", "ใบรับรองโรงพยาบาล W Medical"] },
+  { id: "C", title: "แพ็กเกจ C", extra: 490, recommended: true, items: ["ทุกอย่างในแพ็กเกจ B", "pocket mask (หน้ากากช่วยหายใจพกพา)"] },
+];
+const packagePrice = (pkgId, coupon) => CPR_COURSE_PRICE - (coupon ? 100 : 0) + (CPR_PACKAGES.find(p => p.id === pkgId)?.extra || 0);
+
 function Booking({ go }) {
   // คูปองหมดอายุแล้ว (โค้ดจากเกมช่วงงาน) → ไม่ใช้เป็นส่วนลด; คูปองจากสมัคร (ไม่มีวันหมดอายุ) ใช้ได้ปกติ
   const rawCoupon = load("coupon", null);
@@ -2332,7 +2343,7 @@ function Booking({ go }) {
   const user = load("user", null);
   // จองผ่านเซลล์เป็นหลัก: ไม่ให้เลือกวันคลาสเอง (วันจริงนัด/จองผ่านช่องทางอื่น ระบบนี้ไม่ใช่แหล่งวันว่าง)
   // เก็บเป็น lead + คูปอง → เซลล์ติดต่อกลับนัดวัน+แจ้งชำระเงิน
-  const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "", people: "1", prefTime: "", note: coupon ? `คูปองออนไลน์ ${coupon}` : "" });
+  const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "", people: "1", prefTime: "", note: coupon ? `คูปองออนไลน์ ${coupon}` : "", pkg: "C" });
   const [step, setStep] = useState("form"); // form → done
   const [submitting, setSubmitting] = useState(false);
   const [bookingRef, setBookingRef] = useState(null);
@@ -2363,11 +2374,13 @@ function Booking({ go }) {
     const hh = String(t.getUTCHours()).padStart(2, "0"); const mm = String(t.getUTCMinutes()).padStart(2, "0");
     return `${t.getUTCDate()} ${months[t.getUTCMonth()]} ${(t.getUTCFullYear() + 543) % 100} · ${hh}:${mm} น.`;
   };
-  const bcprBookingUrl = `https://class.jiacpr.com/courses/bcpr?${coupon ? `coupon=${encodeURIComponent(coupon)}&` : ""}utm_source=cpr-online`;
+  // ส่งแพ็กเกจที่เลือกไปด้วย — hub เลือกแพ็กเกจนี้ไว้ให้ในหน้าจอง (แพ็กเกจใช้กับคอร์ส cpr ของ hub)
+  const bcprBookingUrl = `https://class.jiacpr.com/courses/bcpr?${coupon ? `coupon=${encodeURIComponent(coupon)}&` : ""}package=${form.pkg}&utm_source=cpr-online`;
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inp = { width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${B.ltGray}`, fontSize: 15, boxSizing: "border-box", outline: "none" };
   const lbl = { fontSize: 13, fontWeight: 600, color: B.black, marginBottom: 6, display: "block" };
-  const price = coupon ? 400 : 500;
+  const price = packagePrice(form.pkg, coupon);
+  const selectedPkg = CPR_PACKAGES.find(p => p.id === form.pkg);
 
   const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
   const today = () => new Date().toISOString().slice(0, 10);
@@ -2382,8 +2395,12 @@ function Booking({ go }) {
       await supaRest("customers", "POST", { id: custId, name: form.name, tel: phone, email: "", created_at: today(), source: "online-course" });
 
       const bkId = uid();
-      const noteParts = [form.prefTime ? `สะดวก: ${form.prefTime}` : "", form.note || ""].filter(Boolean);
-      const booking = await supaRest("bookings", "POST", { id: bkId, customer_id: custId, name: form.name, tel: phone, course_type: "joincourse", course_name: "CPR & AED (On-site)", channel: "online-course", total_people: parseInt(form.people) || 1, final_price: price, discount_code: coupon || "", discount_amount: coupon ? 100 : 0, payment_mode: "", payment_status: "รอเซลล์ติดต่อ (นัดวัน)", time_slot: form.prefTime || "", total_days: 1, note: noteParts.join(" | "), pdpa_consent: true, pdpa_consent_date: today(), created_at: new Date().toISOString() });
+      const noteParts = [`${selectedPkg.title} ฿${price}${selectedPkg.extra ? ` (ส่วนเพิ่ม ฿${selectedPkg.extra} ชำระแยก)` : ""}`, form.prefTime ? `สะดวก: ${form.prefTime}` : "", form.note || ""].filter(Boolean);
+      const bookingRow = { id: bkId, customer_id: custId, name: form.name, tel: phone, course_type: "joincourse", course_name: "CPR & AED (On-site)", channel: "online-course", total_people: parseInt(form.people) || 1, final_price: price, package: form.pkg, discount_code: coupon || "", discount_amount: coupon ? 100 : 0, payment_mode: "", payment_status: "รอเซลล์ติดต่อ (นัดวัน)", time_slot: form.prefTime || "", total_days: 1, note: noteParts.join(" | "), pdpa_consent: true, pdpa_consent_date: today(), created_at: new Date().toISOString() };
+      let booking = await supaRest("bookings", "POST", bookingRow);
+      // คอลัมน์ package มาจาก migration 20261002000000 — ถ้ายังไม่ได้ apply insert จะล้ม (supaRest คืน [])
+      // ลองใหม่โดยไม่ส่ง package (แพ็กเกจยังอยู่ใน note ให้เซลล์เห็น) กัน lead หาย
+      if (!booking?.length) { const { package: _pkg, ...withoutPackage } = bookingRow; booking = await supaRest("bookings", "POST", withoutPackage); }
       console.log("📢 Booking lead:", booking);
 
       setBookingRef(bkId);
@@ -2401,6 +2418,7 @@ function Booking({ go }) {
       <div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><I name="check" size={38} color={B.green}/></div>
       <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>รับคำขอจองแล้ว!</h2>
       <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6 }}>ทีมงาน JIA จะติดต่อกลับเพื่อ<strong style={{ color: B.black }}>นัดวันเรียนและแจ้งวิธีชำระเงิน</strong><br/>โดยเร็วที่สุด (ในเวลาทำการ)</p>
+      <div style={{ background: B.white, borderRadius: 12, padding: 14, marginTop: 16, fontSize: 14 }}><strong>{selectedPkg.title} · ฿{price}</strong><div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>{selectedPkg.items.join(" · ")} · รับ face shield ฟรี</div></div>
       {coupon && <div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 14, marginTop: 16, fontSize: 14 }}>เก็บรหัสคูปองไว้แจ้งทีมงาน<br/><strong style={{ color: B.red, fontFamily: "monospace", letterSpacing: 1 }}>{coupon}</strong> <span style={{ color: B.dkGray, fontSize: 13 }}>(ส่วนลด ฿100)</span></div>}
       <div style={{ fontSize: 13, color: B.dkGray, marginTop: 16 }}>อยากนัดวันเร็วขึ้น? ทักไลน์ได้เลย</div>
       <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginTop: 8, background: "#06C755", borderRadius: 12, padding: "14px 28px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> ทักนัดวันทาง LINE @jiacpr</a>
@@ -2422,8 +2440,8 @@ function Booking({ go }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
         {[
           { icon: "clock", t: "2 ชั่วโมง", s: "ต่อรอบ" },
-          { icon: "star", t: coupon ? "฿400" : "฿500", s: coupon ? "ลดแล้ว ฿100" : "ต่อท่าน" },
-          { icon: "book", t: "ใบรับรอง", s: "มาตรฐาน 2025" },
+          { icon: "star", t: `เริ่ม ฿${packagePrice("A", coupon)}`, s: coupon ? "ลดแล้ว ฿100" : "ต่อท่าน" },
+          { icon: "book", t: "ใบประกาศ JIA", s: "ฟรีทุกแพ็กเกจ" },
           { icon: "heart", t: "ฝึกจริง", s: "หุ่น CPR + AED" },
         ].map((c, i) => (
           <div key={i} style={{ background: B.white, borderRadius: 12, padding: 14, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,.05)" }}>
@@ -2433,7 +2451,7 @@ function Booking({ go }) {
       </div>
 
       {coupon && <div style={{ background: `${B.green}10`, borderRadius: 12, padding: "12px 16px", marginBottom: 20, display: "flex", alignItems: "center", gap: 10, border: `1px solid ${B.green}30` }}>
-        <I name="check" size={20} color={B.green}/><div><div style={{ fontSize: 13, fontWeight: 700, color: B.green }}>คูปองส่วนลด ฿100 ถูกใช้แล้ว!</div><div style={{ fontSize: 12, color: B.dkGray }}>รหัส: {coupon} • ราคาจาก ฿500 เหลือ ฿400</div></div>
+        <I name="check" size={20} color={B.green}/><div><div style={{ fontSize: 13, fontWeight: 700, color: B.green }}>คูปองส่วนลด ฿100 ถูกใช้แล้ว!</div><div style={{ fontSize: 12, color: B.dkGray }}>รหัส: {coupon} • ลดค่าคอร์ส ฿100 ทุกแพ็กเกจ</div></div>
       </div>}
 
       {/* รอบที่เปิดรับจริงจากระบบจองกลาง — จองออนไลน์พร้อมชำระเงินได้เลยที่ class.jiacpr.com (คูปองใช้ได้ตรงที่หน้าจองเลย) */}
@@ -2458,6 +2476,23 @@ function Booking({ go }) {
 
       {/* Form */}
       <div style={{ background: B.white, borderRadius: 16, padding: 20, boxShadow: "0 2px 12px rgba(0,0,0,.06)" }}>
+        <div style={{ marginBottom: 16 }}>
+          <label style={lbl}>เลือกแพ็กเกจ</label>
+          <div style={{ fontSize: 13, color: B.green, background: `${B.green}10`, borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>🎁 รับ face shield ฟรีทุกคน</div>
+          {CPR_PACKAGES.map(p => {
+            const on = form.pkg === p.id;
+            return <label key={p.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", border: `${on ? 2 : 1}px solid ${on ? B.red : B.ltGray}`, background: on ? `${B.red}08` : B.white, borderRadius: 12, padding: "10px 12px", marginBottom: 8, cursor: "pointer" }}>
+              <input type="radio" name="cpr-package" checked={on} onChange={() => F("pkg", p.id)} style={{ marginTop: 4, accentColor: B.red }}/>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{p.title}</span>
+                {p.recommended && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: B.white, background: B.red, borderRadius: 6, padding: "2px 8px" }}>แนะนำ</span>}
+                <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 12, color: B.dkGray }}>{p.items.map(t => <li key={t}>{t}</li>)}</ul>
+              </span>
+              <span style={{ fontWeight: 800, fontSize: 16, whiteSpace: "nowrap" }}>฿{packagePrice(p.id, coupon)}</span>
+            </label>;
+          })}
+          {selectedPkg.extra > 0 && <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>ค่าเรียน ฿{CPR_COURSE_PRICE - (coupon ? 100 : 0)} + ส่วนเพิ่ม ฿{selectedPkg.extra} ({form.pkg === "C" ? "ใบ W Medical + pocket mask" : "ใบ W Medical"}) ชำระแยกกับเซลล์</div>}
+        </div>
         <div style={{ marginBottom: 14 }}><label style={lbl}>ชื่อ-นามสกุล *</label><input value={form.name} onChange={e => F("name", e.target.value)} placeholder="ชื่อจริง นามสกุล" style={inp}/></div>
         <div style={{ marginBottom: 14 }}><label style={lbl}>เบอร์โทร *</label><input value={form.phone} onChange={e => F("phone", e.target.value)} placeholder="08X-XXX-XXXX" type="tel" style={inp}/></div>
 
@@ -2469,7 +2504,7 @@ function Booking({ go }) {
 
         <div style={{ marginBottom: 14 }}><label style={lbl}>จำนวนคน</label><select value={form.people} onChange={e => F("people", e.target.value)} style={inp}><option>1</option><option>2</option><option>3</option><option>4</option><option>5+</option></select></div>
         <div style={{ marginBottom: 18 }}><label style={lbl}>หมายเหตุ</label><textarea value={form.note} onChange={e => F("note", e.target.value)} placeholder="ข้อมูลเพิ่มเติม" rows={2} style={{ ...inp, resize: "vertical" }}/></div>
-        <button onClick={submit} disabled={submitting} style={{ ...css.btn(B.red, B.white), width: "100%", padding: "14px", fontSize: 16, opacity: submitting ? 0.6 : 1 }}>{submitting ? "กำลังส่ง..." : "ส่งคำขอจอง — ให้ทีมงานติดต่อกลับ →"}</button>
+        <button onClick={submit} disabled={submitting} style={{ ...css.btn(B.red, B.white), width: "100%", padding: "14px", fontSize: 16, opacity: submitting ? 0.6 : 1 }}>{submitting ? "กำลังส่ง..." : `ส่งคำขอจอง ${selectedPkg.title} ฿${price} — ให้ทีมงานติดต่อกลับ →`}</button>
       </div>
 
       <div style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: B.dkGray }}>หรือจองผ่าน LINE ได้เลย</div>
