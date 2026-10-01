@@ -104,7 +104,7 @@ const randomUnlockedScenario = (finalExamPassed) => {
 
 // fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
 // (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
-export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false }) {
+export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false, boothLineOa = null }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -830,6 +830,23 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
               <Metric label="เวลาทั้งเคส" value={fmtTime(st.simTime)} tone="" />
             </div>
           </div>
+          {/* มาจากบูธรู้ดี (งานเด็กดี) — ดาว/รางวัล/เกียรติบัตรรับทาง LINE @roodee.me (App ส่ง boothLineOa มาเฉพาะช่วงงาน) */}
+          {boothLineOa && (
+            <div className="cbs-invite">
+              <div className="cbs-invite-title">🎁 มาจากบูธรู้ดี งานเด็กดี?</div>
+              <div className="cbs-invite-sub">
+                โชว์หน้านี้ให้พี่ทีมงานเพื่อรับดาว ⭐ — ส่วนลด คอร์สฟรี และเกียรติบัตร รับทาง LINE {boothLineOa}
+              </div>
+              <a
+                className="cbs-btn-line"
+                href={`https://line.me/R/ti/p/${encodeURIComponent(boothLineOa)}`}
+                target="_blank" rel="noopener noreferrer"
+                onClick={() => track('game_booth_line_cta', { scenario_id: sc.id, won: result.won })}
+              >
+                💬 แอด LINE {boothLineOa} รับรางวัล
+              </a>
+            </div>
+          )}
           {result.won && voucher && (
             <div className="cbs-voucher">
               <div className="cbs-voucher-eyebrow">🎁 รางวัลพลเมืองดี — ปลดล็อกแล้ว</div>

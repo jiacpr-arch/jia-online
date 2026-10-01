@@ -202,11 +202,23 @@ export const issueOnlineCoupon = async (customerId, phone) => {
 // รับใบประกาศวันหลังได้ — รับสิทธิ์ได้เฉพาะวันแคมเปญเท่านั้น; ด่านสมัคร+ดูวิดีโอ+สอบ ยังบังคับตามปกติ)
 export const GAME_VOUCHER_CAMPAIGNS = [
   { start: "2026-08-06", end: "2026-08-06", event: "แคมเปญ LINE @jiacpr", key: "line0806", unlockCourse: true }, // auto-reply แอด LINE OA 6 ส.ค. — วันเดียว + ผ่านลิงก์เท่านั้น
-  { start: "2026-10-01", end: "2026-10-31", event: "งาน TCAS Fair" },
+  // บูธรู้ดี งาน Dek-D TCAS Fair: รางวัลส่วนลดใช้กติกาบูธ (50% / BLS ฟรี ส่งทาง LINE @roodee.me) จึงไม่ออกคูปอง ฿100
+  // ปลดคอร์สออนไลน์เฉพาะคนที่เข้าผ่านลิงก์ ?camp=dekd (ส่งในแชท LINE @roodee.me หลังแอดเพื่อน)
+  { start: "2026-10-01", end: "2026-10-31", event: "บูธรู้ดี งาน TCAS Fair", key: "dekd", unlockCourse: true, noVoucher: true },
 ];
 export const activeGameVoucherCampaign = () => {
   const t = todayISOTH();
   return GAME_VOUCHER_CAMPAIGNS.find(c => t >= c.start && t <= c.end && (!c.key || load("game_camp", null) === c.key)) || null;
+};
+// ปุ่ม "รับรางวัลบูธทาง LINE @roodee.me" ท้ายเกม — โชว์ในช่วงงานกับคนที่มาจากบูธ:
+// เข้าผ่าน ?camp=dekd (ลิงก์ใน LINE) หรือผ่านลิงก์เกมสุ่มบนแบนเนอร์บูธ (?game=random)
+export const BOOTH_LINE_CTA = { key: "dekd", start: "2026-10-01", end: "2026-10-31", oa: "@roodee.me" };
+export const boothCtaEligible = (viaGameLink) => {
+  const t = todayISOTH();
+  if (t < BOOTH_LINE_CTA.start || t > BOOTH_LINE_CTA.end) return false;
+  let camp = load("game_camp", null);
+  try { camp = new URLSearchParams(window.location.search).get("camp") || camp; } catch (e) {}
+  return camp === BOOTH_LINE_CTA.key || !!viaGameLink;
 };
 export const todayISOTH = () => { const t = new Date(Date.now() + 7 * 3600 * 1000); return t.toISOString().slice(0, 10); }; // วันนี้เวลาไทย (UTC+7)
 export const thaiShortDate = (iso) => { try { const [y, m, d] = iso.split("-").map(Number); const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]; return `${d} ${months[m - 1]} ${(y + 543) % 100}`; } catch (e) { return iso; } };
