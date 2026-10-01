@@ -1,5 +1,5 @@
 // signup-push
-// ยิงข้อความ "ผ่านบทที่ 1 แล้ว + คูปอง ฿100" เข้าแชต LINE ของลูกค้าหลังสมัครเสร็จ
+// ยิงข้อความต้อนรับ (ไม่มีคูปอง — ส่วนลดให้เฉพาะคนที่จ่ายเงิน) เข้าแชต LINE ของลูกค้าหลังสมัครเสร็จ
 // เรียกภายในจาก auth-line-link (หลัง upsert สำเร็จ เฉพาะคนที่มี line_user_id)
 // หรือเรียกตรงก็ได้: POST { line_user_id, name }
 //
@@ -7,7 +7,7 @@
 //   LINE_CHANNEL_ACCESS_TOKEN  (Messaging API @jiacpr — มีอยู่แล้ว / fallback jiaroo_secrets)
 //   SIGNUP_PUSH_SECRET         (ออปชัน) กันยิงมั่ว — ตรวจกับ header x-internal-secret
 //
-// เทสต์ไม่ส่งจริง: ?dry_run=1 หรือ body { dry_run: true } → คืนคูปอง + ข้อความตัวอย่าง
+// เทสต์ไม่ส่งจริง: ?dry_run=1 หรือ body { dry_run: true } → คืนข้อความตัวอย่าง
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -34,13 +34,6 @@ async function loadToken(): Promise<string> {
   return data?.value || "";
 }
 
-const genCoupon = () => {
-  const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let r = "JIA-";
-  for (let i = 0; i < 6; i++) r += c[Math.floor(Math.random() * c.length)];
-  return r;
-};
-
 async function pushLine(to: string, text: string) {
   const token = await loadToken();
   if (!token) return { ok: false, error: "no LINE token" };
@@ -61,7 +54,7 @@ async function pushLine(to: string, text: string) {
 // แยกเป็นฟังก์ชันเพื่อให้ auth-line-link import มาเรียกตรงได้ (ไม่ต้อง http รอบสอง)
 // pre_course = นักเรียนที่จ่ายค่าคอร์ส on-site เต็มราคาแล้ว มาเรียนออนไลน์ก่อนเข้าคลาส
 // → ห้ามออก/ส่งคูปอง ฿100 (เคยส่งให้ทุกคน ทำให้นักเรียนกลุ่มนี้ทวงส่วนลด/ขอเงินคืน)
-export async function runSignupPush(opts: { line_user_id: string; name?: string; dry_run?: boolean; pre_course?: boolean }) {
+export async function runSignupPush(opts: { line_user_id: string; name?: string; dry_run?: boolean; pre_course?: boolean; no_coupon?: boolean }) {
   const { line_user_id, name } = opts;
   if (!line_user_id) return { ok: false, error: "missing line_user_id" };
 
@@ -75,30 +68,14 @@ export async function runSignupPush(opts: { line_user_id: string; name?: string;
     return { ...push, coupon: null };
   }
 
-  // ออกคูปอง ฿100 (เหมือน submitQuiz ฝั่ง frontend) แล้วบันทึกให้ redeem ได้
-  // retry เมื่อชนรหัสซ้ำ (code unique) — ห้ามคืนคูปองที่ insert ไม่สำเร็จ ไม่งั้นลูกค้าได้โค้ด redeem ไม่ได้
-  let coupon = genCoupon();
-  if (!opts.dry_run) {
-    let saved = false;
-    for (let attempt = 0; attempt < 5 && !saved; attempt++) {
-      const { error } = await supa.from("promo_codes")
-        .insert({ code: coupon, type: "online", discount: 100, staff_name: "system" });
-      if (!error) { saved = true; break; }
-      coupon = genCoupon();
-    }
-    if (!saved) return { ok: false, error: "could not issue coupon" };
-  }
-
+  // คูปองส่วนลด ฿100 ให้เฉพาะคนที่จ่ายเงินซื้อคอร์สออนไลน์ — ตอนสมัครยังเรียนฟรีอยู่ จึงไม่แนบคูปอง
+  // (คนที่จ่ายเงินได้คูปองตอนเรียนจบผ่าน issue_online_coupon ฝั่งแอป) — no_coupon คงไว้ให้ client เก่าส่งมาได้
   const text =
     `🎉 ยินดีต้อนรับ${name ? " คุณ" + name : ""}! สมัครคอร์ส CPR & AED ออนไลน์เรียบร้อย\n\n` +
-    `ขอบคุณที่ลองทำควิซกับเรา 💙 คุณได้รับ "คูปองส่วนลด ฿100" สำหรับคอร์สภาคปฏิบัติ (on-site) ที่ JIA Trainer Center\n\n` +
-    `รหัสคูปอง: ${coupon}\n\n` +
-    `เริ่มเรียนคอร์สออนไลน์ได้เลย เรียนจบรับใบประกาศนียบัตร แล้วทักแชตนี้เพื่อจองรอบ on-site ได้ทันที`;
-
-  if (opts.dry_run) return { ok: true, dry_run: true, coupon, preview: text };
-
+    `เริ่มเรียนคอร์สออนไลน์ได้เลย เรียนจบรับใบประกาศนียบัตร สนใจเรียนภาคปฏิบัติ (on-site) ทักแชตนี้ได้ทันที`;
+  if (opts.dry_run) return { ok: true, dry_run: true, coupon: null, preview: text };
   const push = await pushLine(line_user_id, text);
-  return { ...push, coupon };
+  return { ...push, coupon: null };
 }
 
 // รันเซิร์ฟเวอร์เฉพาะตอนถูกเรียกเป็น entrypoint โดยตรง (กัน Deno.serve ทำงานซ้ำตอน auth-line-link import มาใช้ runSignupPush)
@@ -113,7 +90,7 @@ if (import.meta.main) {
     let payload: any = {};
     try { payload = await req.json(); } catch { /* ignore */ }
     const dry_run = payload?.dry_run === true || url.searchParams.get("dry_run") === "1";
-    const res = await runSignupPush({ line_user_id: payload?.line_user_id, name: payload?.name, dry_run, pre_course: payload?.pre_course === true });
+    const res = await runSignupPush({ line_user_id: payload?.line_user_id, name: payload?.name, dry_run, pre_course: payload?.pre_course === true, no_coupon: payload?.no_coupon === true });
     return json(res, 200);
   });
 }
