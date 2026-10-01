@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import GamePage from "./game/GamePage";
 import { shuffled } from "./game/storyEngine";
 import {
-  B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, BOOTH_LINE_CTA, boothCtaEligible, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
+  B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, BOOTH_LINE_CTA, boothCtaEligible, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, noOnsiteCoupon, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
   REFERRAL_DISCOUNT_PCT, REFERRAL_REWARD_TEXT, captureReferral, getRefCode, referralLink, setCustomerLineLink,
 } from "./lib/core";
 // หน้าแอดมินแยกเป็น chunk ของตัวเอง — ผู้เรียนทั่วไปไม่ต้องดาวน์โหลดโค้ดแอดมิน
@@ -817,8 +817,8 @@ function LineAddPrompt({ go, user, setUser, variant = "post-register" }) {
   const preCourse = variant === "pre-course";
   // หลังสมัครเสร็จ: โชว์คูปอง ฿100 บนจอ — ปกติออกให้แล้วตอนสมัคร/จบคอร์ส (Register/submitQuiz) ที่นี่ดึงจาก
   // local storage เป็นหลัก แล้วเผื่อกรณียังไม่มี (เช่น ผู้เรียนเก่าที่ยังไม่เคยผ่าน flow ใหม่) ค่อยออกผ่าน RPC
-  // ยกเว้นนักเรียน pre-course ที่จ่ายค่าคอร์ส on-site แล้ว — ไม่มีสิทธิ์คูปอง กันเข้าใจผิดเรื่องส่วนลด/เงินคืน
-  const showCoupon = !preCourse && !isPreCourseStudent() && isSignedUp();
+  // ยกเว้นนักเรียน pre-course ที่จ่ายค่าคอร์ส on-site แล้ว และคนที่เรียนฟรีด้วยโค้ด — ไม่มีสิทธิ์คูปอง
+  const showCoupon = !preCourse && !noOnsiteCoupon() && isSignedUp();
   const [coupon, setCoupon] = useState(() => (showCoupon ? load("coupon", null) : null));
   useEffect(() => {
     if (!showCoupon || coupon) return;
@@ -1137,12 +1137,12 @@ function Register({ go, setUser }) {
         await syncHubIdentity(supa, { nameTh: userData.name, phone: cleanPhone });
       } catch (e2) {}
     }
-    let coupon = load("coupon", null);
+    let coupon = noOnsiteCoupon() ? null : load("coupon", null);
     if (completed) {
       const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
       // ต้องบันทึก completed_at ก่อน แล้วค่อยออกคูปอง — issue_online_coupon เช็กว่าเรียนจบแล้วจริงจากแถวนี้
       await supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: finalScore, renew_date: renew.toISOString().split("T")[0], pre_course: isPreCourseStudent() });
-      if (!coupon && !isPreCourseStudent()) { coupon = await issueOnlineCoupon(custId, cleanPhone); if (coupon) save("coupon", coupon); }
+      if (!coupon && !noOnsiteCoupon()) { coupon = await issueOnlineCoupon(custId, cleanPhone); if (coupon) save("coupon", coupon); }
       if (!isPreCourseStudent()) supaRest("sales_tracking", "POST", { name: userData.name, phone: cleanPhone, completed_date: new Date().toISOString(), score: finalScore, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
     } else {
       supaRest("online_students", "POST", { customer_id: custId, name: userData.name, phone: cleanPhone, email: f.email || "", status: "กำลังเรียน", pre_course: isPreCourseStudent() });
@@ -1353,8 +1353,11 @@ function Claim({ go, setUser, initialStep = "form", initialCode = "" }) {
       // (fallback ระหว่างที่ RPC เวอร์ชันเก่ายังไม่คืน source: โค้ดกลาง multi_use คือ pre-course เสมอ)
       const preCourseStudent = row.source != null ? row.source === "pre_course" : !!row.multi_use;
       save("pre_course_student", preCourseStudent);
+      // โค้ดฟรีเต็มคอร์ส (คูปองพาร์ทเนอร์ / โค้ดที่แอดมินออกให้ฟรี) → ไม่ได้คูปองส่วนลด ฿100
+      // ส่วนลดให้เฉพาะคนที่จ่ายเงิน: voucher ที่ขาย (voucher_sale) ยังได้ตามปกติ
+      // โค้ด lead 3 บทไม่นับ — ต้องจ่ายเงินซื้อบทที่เหลือก่อนจึงจะเรียนจบได้
+      if (isFullUnlock && row.source != null && row.source !== "voucher_sale") save("free_code_student", true);
       // คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — จำช่องทางติดต่อพาร์ทเนอร์ไว้โชว์หลัง redeem/ในหน้าคอร์ส/ใบประกาศ
-      // (ยังได้คูปองส่วนลด ฿100 on-site ของ JIA ตามปกติ เพราะ preCourseStudent = false เสมอสำหรับ source นี้)
       if (row.source === PARTNER_SOURCE) {
         save("partner_sponsor", { company: row.company, line: row.sponsor_line, phone: row.sponsor_phone, value: row.sponsor_value || partner?.sponsor_value || PRICING.full, code });
         save("partner_coupon_pending", null);
@@ -1780,12 +1783,12 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
         const u = user || load("user", null);
         // ใช้คูปองเดิมที่เคยออกให้ (ตอนสมัคร) เป็นหลัก — อย่าสร้างทับ ไม่งั้นโค้ดที่ผู้เรียนจดไว้จะใช้ไม่ได้
         // นักเรียน pre-course (จ่ายค่า on-site แล้ว) ไม่ออกคูปอง ฿100 — กันใบประกาศ/ทีมขายโชว์ส่วนลดที่ไม่มีจริง
-        const existingCoupon = load("coupon", null);
+        const existingCoupon = noOnsiteCoupon() ? null : load("coupon", null);
         if (u) {
           const renew = new Date(); renew.setMonth(renew.getMonth() + 6);
           // ต้องบันทึก completed_at ก่อน แล้วค่อยออกคูปอง — issue_online_coupon เช็กว่าเรียนจบแล้วจริงจากแถวนี้
           await supaRest("online_students", "PATCH", { status: "จบคอร์ส ✅", completed_at: new Date().toISOString(), final_score: score, renew_date: renew.toISOString().split("T")[0] }, `?phone=ilike.*${u.phone.replace(/\D/g,"").slice(-9)}&name=eq.${encodeURIComponent(u.name)}`);
-          const coupon = existingCoupon || (isPreCourseStudent() || !u.customer_id ? null : await issueOnlineCoupon(u.customer_id, u.phone));
+          const coupon = existingCoupon || (noOnsiteCoupon() || !u.customer_id ? null : await issueOnlineCoupon(u.customer_id, u.phone));
           if (coupon && !existingCoupon) save("coupon", coupon);
           // pre-course ไม่ต้องเข้าคิวติดตามขาย (จ่ายและจองคลาสแล้ว)
           if (!isPreCourseStudent()) supaRest("sales_tracking", "POST", { name: u.name, phone: u.phone.replace(/\D/g,""), completed_date: new Date().toISOString(), score, coupon_code: coupon, follow_status: "ยังไม่ติดต่อ" });
@@ -1918,7 +1921,7 @@ function Course({ go, progress, setProgress, user, setUser, openBlog, goGameRand
         <I name="arrow" size={14} color={B.gold}/>
       </button>}
       {!FREE_LAUNCH && purchased.filter(x => x <= 6).length < 6 && <button onClick={() => go("store")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 8, fontSize: 14 }}>ซื้อเพิ่ม / Full Course ฿{PRICING.full} →</button>}
-      {pct === 100 && <button onClick={() => go(load("enrolled", false) ? "certificate" : "register")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 16 }}>{load("enrolled", false) ? (isPreCourseStudent() ? "ดูใบประกาศนียบัตร →" : "ดูใบประกาศนียบัตร & คูปอง →") : "ลงทะเบียนรับใบประกาศนียบัตร →"}</button>}
+      {pct === 100 && <button onClick={() => go(load("enrolled", false) ? "certificate" : "register")} style={{ ...css.btn(B.gold, B.black, true), marginTop: 16 }}>{load("enrolled", false) ? (noOnsiteCoupon() ? "ดูใบประกาศนียบัตร →" : "ดูใบประกาศนียบัตร & คูปอง →") : "ลงทะเบียนรับใบประกาศนียบัตร →"}</button>}
       {/* Mini cert per module */}
       {progress.done.filter(id => id <= 6).length > 0 && progress.done.filter(id => id <= 6).length < 7 && <button onClick={() => go("minicert")} style={{ ...css.btn(B.white, B.dkGray, true), marginTop: 8, border: `1px solid ${B.ltGray}`, fontSize: 13 }}>ดูใบ Mini Certificate →</button>}
       <div style={{ marginTop: 20 }}><MorrooAdBanner/></div>
@@ -2094,8 +2097,8 @@ function Certificate({ user, go }) {
   // มีใบกลางแล้ว → ใช้วันที่ออกใบจริงของ Hub (เดิมโชว์ "วันนี้" ทุกครั้งที่เปิดหน้า)
   const d = hubCert?.issuedAt ? new Date(hubCert.issuedAt) : new Date(); const ds = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear() + 543}`;
   // นักเรียน pre-course จ่ายค่าคอร์ส on-site เต็มราคาแล้ว — ใบประกาศต้องไม่โชว์ "ส่วนลด ฿100"
-  // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน)
-  const preCourseStudent = isPreCourseStudent();
+  // (เคยโชว์ให้ทุกคน ทำให้นักเรียนกลุ่มนี้เข้าใจว่ามีส่วนลดค้าง แล้วมาขอเงินคืน) — รวมถึงคนที่เรียนฟรีด้วยโค้ด
+  const preCourseStudent = noOnsiteCoupon();
   // ปกติควรมีคูปองจากตอนสมัคร/จบคอร์สอยู่แล้ว (Register/submitQuiz) — ถ้ายังไม่มี ออกผ่าน RPC ฝั่งเซิร์ฟเวอร์
   // แทนการสุ่มโค้ดฝั่ง client เอง ไม่งั้นใบเซอร์จะโชว์โค้ดที่พนักงาน validate ไม่ได้ (ไม่มีในฐานข้อมูลจริง)
   const [coupon, setCoupon] = useState(() => (preCourseStudent ? null : load("coupon", null)));
@@ -2327,7 +2330,7 @@ function Booking({ go }) {
   // คูปองหมดอายุแล้ว (โค้ดจากเกมช่วงงาน) → ไม่ใช้เป็นส่วนลด; คูปองจากสมัคร (ไม่มีวันหมดอายุ) ใช้ได้ปกติ
   const rawCoupon = load("coupon", null);
   const couponExp = load("coupon_expires", null);
-  const coupon = (rawCoupon && (!couponExp || todayISOTH() <= couponExp)) ? rawCoupon : null;
+  const coupon = (rawCoupon && !noOnsiteCoupon() && (!couponExp || todayISOTH() <= couponExp)) ? rawCoupon : null;
   const user = load("user", null);
   // จองผ่านเซลล์เป็นหลัก: ไม่ให้เลือกวันคลาสเอง (วันจริงนัด/จองผ่านช่องทางอื่น ระบบนี้ไม่ใช่แหล่งวันว่าง)
   // เก็บเป็น lead + คูปอง → เซลล์ติดต่อกลับนัดวัน+แจ้งชำระเงิน
@@ -2579,7 +2582,7 @@ export default function App() {
   // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) และยกเว้นนักเรียน pre-course ที่จ่ายค่า on-site แล้ว
   // (กันเข้าใจผิดเรื่องส่วนลด/เงินคืน — กฎเดียวกับหน้าใบประกาศ/สมัคร)
   const issueGameVoucher = useCallback(() => {
-    if (isPreCourseStudent()) return null;
+    if (noOnsiteCoupon()) return null;
     // เฉพาะช่วงแคมเปญเท่านั้น — นอกช่วงไม่ออกคูปอง (เกมยังเล่นได้ปกติ แค่ไม่มีรางวัลคูปอง)
     const camp = activeGameVoucherCampaign();
     if (!camp || camp.noVoucher) return null;

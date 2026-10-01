@@ -54,6 +54,8 @@ export const resetLearner = () => {
 // นักเรียน pre-course จ่ายเงิน+จองคลาสแล้ว — ข้อความต้องไม่อ้างว่า "ได้รับส่วนลด" (กันเข้าใจผิดเรื่องเงินคืน)
 export const lineLinkDeepLink = (code) => `https://line.me/R/oaMessage/%40jiacpr/?${encodeURIComponent("JIA-LINK-" + code + "\n" + (isPreCourseStudent()
   ? "สนใจคอร์ส CPR & AED 🙏 กำลังเรียนทฤษฎีออนไลน์ก่อนเข้าคลาส (pre-course) มีคำถามเรื่องวันอบรมภาคปฏิบัติ สอบถามได้ไหมครับ/คะ"
+  : noOnsiteCoupon()
+  ? "สนใจคอร์ส CPR & AED 🙏 เรียนออนไลน์อยู่ อยากนัดวันมาเรียนภาคปฏิบัติ ไม่ทราบว่าสะดวกวันไหนบ้างครับ/ค่ะ"
   : "สนใจคอร์ส CPR & AED 🙏 เรียนออนไลน์อยู่และได้รับส่วนลดแล้ว อยากนัดวันมาเรียนภาคปฏิบัติ ไม่ทราบว่าสะดวกวันไหนบ้างครับ/ค่ะ"))}`;
 export const markLineAdded = (user) => {
   save("line_added", true); save("line_added_at", new Date().toISOString());
@@ -277,6 +279,11 @@ export const isSignedUp = () => { const u = load("user", null); return !!(load("
 // นักเรียน pre-course = redeem โค้ดที่ source เป็น pre_course (เช่น JIA-STUDENT) — จ่ายค่าคอร์ส
 // on-site เต็มราคาแล้ว ห้ามออก/แสดงคูปองส่วนลด ฿100 ซ้ำ (ไม่งั้นถูกทวงส่วนลด/ขอเงินคืน)
 export const isPreCourseStudent = () => !!load("pre_course_student", false);
+// เรียนเต็มคอร์สฟรีด้วยโค้ด (คูปองพาร์ทเนอร์ / โค้ดที่แอดมินออกให้ฟรี) หรือลิงก์แคมเปญ (?camp=… unlockCourse)
+// กติกา: คนที่ได้โค้ดฟรี "ไม่ได้" คูปองส่วนลด ฿100 — ส่วนลดให้เฉพาะคนที่จ่ายเงิน (ซื้อคอร์สออนไลน์ / voucher_sale)
+// ยกเว้นถ้าภายหลังจ่ายเงินซื้อบทเรียนจริง (purchased ไม่ว่าง) ก็กลับมามีสิทธิ์ตามปกติ
+export const isFreeCodeStudent = () => !!load("free_code_student", false) || !!load("camp_course_unlock", false);
+export const noOnsiteCoupon = () => isPreCourseStudent() || (isFreeCodeStudent() && !(load("purchased", []) || []).length);
 
 // UTM: เก็บครั้งแรกที่เข้า ก่อน replaceState จะลบ query ทิ้ง
 export const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
@@ -412,6 +419,7 @@ export const signInWithLine = async ({ phone = "", name = "", silent = false } =
     utm: getUTM(), landing_url: load("landing_url", null), local_progress: load("progress", { done: [], scores: {} }),
     gate_variant: getGateVariant(),
     pre_course: isPreCourseStudent(), // ให้ server ข้ามการออกคูปอง ฿100 + ข้อความขายให้นักเรียน pre-course
+    no_coupon: noOnsiteCoupon(), // เรียนฟรีด้วยโค้ด/ลิงก์แคมเปญ → ข้อความต้อนรับไม่แนบคูปอง ฿100
   }) });
   let linkData = {}; try { linkData = await linkRes.json(); } catch (e) {}
 
@@ -433,7 +441,7 @@ export const signInWithLine = async ({ phone = "", name = "", silent = false } =
   let progress = linkData.progress || load("progress", { done: [], scores: {} });
   if (meData.progress) progress = mergeProgressLocal(progress, meData.progress);
   save("progress", progress);
-  if (linkData.coupon && !isPreCourseStudent()) save("coupon", linkData.coupon);
+  if (linkData.coupon && !noOnsiteCoupon()) save("coupon", linkData.coupon);
   save("signup_pending", null); save("line_login_pending", null);
   safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
   phCapture("signup_complete", { provider: "line", variant: getGateVariant() });

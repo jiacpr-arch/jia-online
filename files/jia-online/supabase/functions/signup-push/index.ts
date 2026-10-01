@@ -61,7 +61,7 @@ async function pushLine(to: string, text: string) {
 // แยกเป็นฟังก์ชันเพื่อให้ auth-line-link import มาเรียกตรงได้ (ไม่ต้อง http รอบสอง)
 // pre_course = นักเรียนที่จ่ายค่าคอร์ส on-site เต็มราคาแล้ว มาเรียนออนไลน์ก่อนเข้าคลาส
 // → ห้ามออก/ส่งคูปอง ฿100 (เคยส่งให้ทุกคน ทำให้นักเรียนกลุ่มนี้ทวงส่วนลด/ขอเงินคืน)
-export async function runSignupPush(opts: { line_user_id: string; name?: string; dry_run?: boolean; pre_course?: boolean }) {
+export async function runSignupPush(opts: { line_user_id: string; name?: string; dry_run?: boolean; pre_course?: boolean; no_coupon?: boolean }) {
   const { line_user_id, name } = opts;
   if (!line_user_id) return { ok: false, error: "missing line_user_id" };
 
@@ -70,6 +70,16 @@ export async function runSignupPush(opts: { line_user_id: string; name?: string;
       `🎉 ยินดีต้อนรับ${name ? " คุณ" + name : ""}! ผูกบัญชีคอร์ส CPR & AED ออนไลน์เรียบร้อย\n\n` +
       `เรียนทฤษฎีออนไลน์ให้จบก่อนวันอบรม แล้วพบกันในคลาสภาคปฏิบัติครับ 💙\n` +
       `มีคำถามเรื่องวันเวลา/สถานที่ ทักแชตนี้ได้เลย`;
+    if (opts.dry_run) return { ok: true, dry_run: true, coupon: null, preview: text };
+    const push = await pushLine(line_user_id, text);
+    return { ...push, coupon: null };
+  }
+
+  // no_coupon = เรียนฟรีด้วยโค้ด/ลิงก์แคมเปญ (ไม่ได้จ่ายเงิน) → ข้อความต้อนรับไม่แนบคูปอง ฿100
+  if (opts.no_coupon) {
+    const text =
+      `🎉 ยินดีต้อนรับ${name ? " คุณ" + name : ""}! สมัครคอร์ส CPR & AED ออนไลน์เรียบร้อย\n\n` +
+      `เริ่มเรียนคอร์สออนไลน์ได้เลย เรียนจบรับใบประกาศนียบัตร สนใจเรียนภาคปฏิบัติ (on-site) ทักแชตนี้ได้ทันที`;
     if (opts.dry_run) return { ok: true, dry_run: true, coupon: null, preview: text };
     const push = await pushLine(line_user_id, text);
     return { ...push, coupon: null };
@@ -113,7 +123,7 @@ if (import.meta.main) {
     let payload: any = {};
     try { payload = await req.json(); } catch { /* ignore */ }
     const dry_run = payload?.dry_run === true || url.searchParams.get("dry_run") === "1";
-    const res = await runSignupPush({ line_user_id: payload?.line_user_id, name: payload?.name, dry_run, pre_course: payload?.pre_course === true });
+    const res = await runSignupPush({ line_user_id: payload?.line_user_id, name: payload?.name, dry_run, pre_course: payload?.pre_course === true, no_coupon: payload?.no_coupon === true });
     return json(res, 200);
   });
 }
