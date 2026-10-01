@@ -374,6 +374,8 @@ if (typeof window !== "undefined") {
 }
 // ==================== ก่อนเริ่มเรียน (Course intro) ====================
 // การ์ดแนะนำก่อนเรียนบนหน้าคอร์ส — เปิดไว้จนกว่าจะกด "รับทราบ" (จำใน localStorage) แล้วยุบ กดเปิดอ่านซ้ำได้
+// วิดีโอแนะนำก่อนเรียน (YouTube unlisted) — ใส่ ID เมื่ออัปโหลดแล้ว สคริปต์อยู่ที่ docs/INTRO_VIDEO_SCRIPT.md; null = แสดงเฉพาะข้อความ
+const INTRO_VIDEO_ID = null;
 const INTRO_SECTIONS = [
   { icon: "🎯", title: "คอร์สนี้คืออะไร", items: [
     "CPR & AED ภาคทฤษฎี ตามแนวทางมาตรฐาน 2025 — 6 บทเรียน + แบบทดสอบสุดท้าย",
@@ -412,14 +414,15 @@ function CourseIntroCard() {
   const toggle = () => { if (!open) { safeTrack("course_intro_open"); phCapture("course_intro_open", {}); } setOpen(!open); };
   return <div data-testid="course-intro" style={{ marginBottom: 12, background: B.white, border: `1.5px solid ${open ? B.red + "40" : B.ltGray}`, borderRadius: 14, overflow: "hidden" }}>
     <button onClick={toggle} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
-      <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>📖</div>
+      <div style={{ minWidth: 42, height: 42, borderRadius: 11, background: `${B.red}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>{INTRO_VIDEO_ID ? "🎬" : "📖"}</div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: B.black }}>เริ่มที่นี่ — อ่านก่อนเริ่มเรียน</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: B.black }}>เริ่มที่นี่ — {INTRO_VIDEO_ID ? "ดูวิดีโอก่อนเริ่มเรียน" : "อ่านก่อนเริ่มเรียน"}</div>
         <div style={{ fontSize: 11.5, color: B.dkGray, marginTop: 2 }}>กติกา • ข้อจำกัด • ผู้ที่ควรแจ้งผู้สอน • สิ่งที่ไม่รวมในคอร์ส</div>
       </div>
       <span style={{ fontSize: 12, color: B.dkGray }}>{open ? "▲" : "▼"}</span>
     </button>
     {open && <div style={{ padding: "0 16px 16px" }}>
+      {INTRO_VIDEO_ID && <div style={{ borderRadius: 12, overflow: "hidden", marginBottom: 4 }}><iframe width="100%" style={{ aspectRatio: "16/9", border: "none", display: "block" }} src={"https://www.youtube.com/embed/" + INTRO_VIDEO_ID + "?rel=0"} title="ก่อนเริ่มเรียน" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen/></div>}
       {INTRO_SECTIONS.map((s) => <div key={s.title} style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: B.black, marginBottom: 4 }}>{s.icon} {s.title}</div>
         <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, lineHeight: 1.65, color: B.dkGray }}>
