@@ -2348,7 +2348,7 @@ function Booking({ go }) {
   const [submitting, setSubmitting] = useState(false);
   const [bookingRef, setBookingRef] = useState(null);
 
-  // รอบเรียน B-CPR ที่เปิดจองจริง — class.jiacpr.com (Hub) เป็นระบบจองกลางแล้ว (แทน class.morroo.com เดิม)
+  // รอบเรียน CPR & AED (cpr) ที่เปิดจองจริง — class.jiacpr.com (Hub) เป็นระบบจองกลางแล้ว (แทน class.morroo.com เดิม)
   // ดึงผ่าน public catalog API (ไม่ต้องใช้ key, เปิด CORS ให้ทุกโดเมน) — โชว์เป็นข้อมูล + ลิงก์ไปจองพร้อมจ่ายที่ hub
   // ดึงไม่ได้/ไม่มีรอบว่าง = ไม่โชว์บล็อกนี้ lead form เดิมทำงานตามปกติ
   const [hubRounds, setHubRounds] = useState(null);
@@ -2358,7 +2358,7 @@ function Booking({ go }) {
     fetch("https://class.jiacpr.com/api/public/catalog", { signal: ctrl.signal })
       .then(r => r.json()).then(d => {
         if (Array.isArray(d?.rounds)) {
-          const open = d.rounds.filter(r => r.courseId === "bcpr" && r.seatsLeft > 0).slice(0, 3);
+          const open = d.rounds.filter(r => r.courseId === "cpr" && r.seatsLeft > 0).slice(0, 3);
           if (open.length) setHubRounds(open);
         }
       }).catch(() => {}).finally(() => clearTimeout(timer));
@@ -2374,8 +2374,9 @@ function Booking({ go }) {
     const hh = String(t.getUTCHours()).padStart(2, "0"); const mm = String(t.getUTCMinutes()).padStart(2, "0");
     return `${t.getUTCDate()} ${months[t.getUTCMonth()]} ${(t.getUTCFullYear() + 543) % 100} · ${hh}:${mm} น.`;
   };
-  // ส่งแพ็กเกจที่เลือกไปด้วย — hub เลือกแพ็กเกจนี้ไว้ให้ในหน้าจอง (แพ็กเกจใช้กับคอร์ส cpr ของ hub)
-  const bcprBookingUrl = `https://class.jiacpr.com/courses/bcpr?${coupon ? `coupon=${encodeURIComponent(coupon)}&` : ""}package=${form.pkg}&utm_source=cpr-online`;
+  // ลิงก์ไปรอบคอร์ส CPR & AED (cpr) ของ hub — คอร์สเดียวที่มีแพ็กเกจ A/B/C (เจ้าของตัดสินใจ 1 ต.ค. 2569)
+  // ส่งแพ็กเกจที่เลือกไปด้วย hub เลือกไว้ให้ในหน้าจอง
+  const hubBookingUrl = `https://class.jiacpr.com/courses/cpr?${coupon ? `coupon=${encodeURIComponent(coupon)}&` : ""}package=${form.pkg}&utm_source=cpr-online`;
   const F = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inp = { width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${B.ltGray}`, fontSize: 15, boxSizing: "border-box", outline: "none" };
   const lbl = { fontSize: 13, fontWeight: 600, color: B.black, marginBottom: 6, display: "block" };
@@ -2464,7 +2465,7 @@ function Booking({ go }) {
             <span style={{ color: B.green, fontWeight: 700 }}>เหลือ {r.seatsLeft} ที่</span>
           </div>
         ))}
-        <a href={bcprBookingUrl} target="_blank" rel="noopener noreferrer"
+        <a href={hubBookingUrl} target="_blank" rel="noopener noreferrer"
           onClick={() => track("booking_hub_click", { source: "cpr-online" })}
           style={{ display: "block", textAlign: "center", marginTop: 10, background: B.red, color: B.white, borderRadius: 10, padding: "13px 12px", textDecoration: "none", fontWeight: 700, fontSize: 14 }}>
           จองรอบเรียนพร้อมชำระเงินเลย →
