@@ -15,6 +15,7 @@ import {
   playChoiceAppear, playTickSound, playCorrectSound, playComboBreakSound,
   playWinJingle, playLoseSound, playImpactSound, playHeartbeatThump,
 } from './sound';
+import EventCert from './EventCert';
 import './game.css';
 
 // CPR HERO — เกมตัดสินใจสไตล์ Code Blue Sim (จาก acls/bls.morroo.com) ฉบับประชาชน
@@ -104,7 +105,7 @@ const randomUnlockedScenario = (finalExamPassed) => {
 
 // fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
 // (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
-export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false }) {
+export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false, eventMode = false }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -861,7 +862,10 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
           )}
           {/* ชวนไปคอร์สปฏิบัติ — โชว์ทุกครั้งที่จบเกมแบบไม่มีคูปอง (แพ้ / ชนะนอกช่วงแคมเปญ)
               จังหวะแพ้คือจังหวะขายที่แรงที่สุด: เกมเพิ่งสอนเองว่าของจริงไม่มีปุ่มเริ่มใหม่ */}
-          {!(result.won && voucher) && (
+          {eventMode && result.won && (
+            <EventCert scenarioTitle={sc.title} grade={result.grade} onTrack={track} lineUrl={lineChatUrl(`สนใจคอร์สปฏิบัติ CPR ค่ะ/ครับ — มาจากงาน Dek-D`)} />
+          )}
+          {!eventMode && !(result.won && voucher) && (
             <div className="cbs-invite">
               <div className="cbs-invite-title">
                 {result.won ? '🫀 เก่งในเกมแล้ว — ลองฝึกกับหุ่นจริงไหม?' : '🫀 ในเกมแก้มือได้ แต่ชีวิตจริงไม่มีปุ่มเริ่มใหม่'}
