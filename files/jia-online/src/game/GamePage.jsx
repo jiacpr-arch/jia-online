@@ -921,7 +921,7 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
           <div className="cbs-cert-note">
             {sc.lesson
               ? <>📚 เคสนี้อิงเนื้อหา <b>บทที่ {sc.lesson}</b> ของคอร์ส — พลาดตรงไหน กลับไปดูวิดีโอบทนั้นซ้ำได้เลย</>
-              : <>📚 {sc.debriefNote || 'เคสเสริมตามแนวทาง AHA 2025 — ทบทวนได้จากทุกบทของคอร์ส'}</>}
+              : <>📚 {sc.debriefNote || 'เคสเสริมตามแนวทางการช่วยชีวิตสากล 2025 — ทบทวนได้จากทุกบทของคอร์ส'}</>}
           </div>
           <div className="cbs-debrief-actions">
             <button type="button" className="cbs-btn-main" onClick={startGame}>
