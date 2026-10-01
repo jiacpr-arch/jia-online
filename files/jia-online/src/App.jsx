@@ -48,9 +48,9 @@ function MorrooAdBanner() {
 }
 
 // ==================== PARTNER CONTACT CARD ====================
-// การ์ดแสดง LINE + เบอร์โทรของ "พาร์ทเนอร์" ผู้มอบคูปองเรียนฟรี (ไม่ใช่ของ JIA)
+// การ์ดแสดง LINE + เบอร์โทรของ "เซลล์ผู้ดูแล" (เซลล์ JIA ที่แจกคูปองเรียนฟรี) — ลูกค้าคูปองเป็นของเซลล์คนนั้นเท่านั้น
 // ใช้ 3 จุด: หลัง redeem คูปองพาร์ทเนอร์ / แบนเนอร์ในหน้าคอร์ส / หน้าใบประกาศหลังเรียนจบ
-function PartnerContactCard({ sponsor, where, title, compact }) {
+function PartnerContactCard({ sponsor, where, title, subtitle, compact }) {
   if (!sponsor) return null;
   const lineHref = partnerLineUrl(sponsor.line);
   const telHref = sponsor.phone ? `tel:${sponsor.phone.replace(/[^0-9+]/g, "")}` : null;
@@ -59,8 +59,9 @@ function PartnerContactCard({ sponsor, where, title, compact }) {
   return (
     <div style={{ background: `${B.gold}0F`, border: `1.5px dashed ${B.gold}`, borderRadius: 14, padding: compact ? "12px 14px" : 18, textAlign: "center" }}>
       <div style={{ fontSize: compact ? 13 : 15, fontWeight: 800, color: B.black, marginBottom: compact ? 8 : 10 }}>
-        {title || `🎁 คอร์สนี้มอบให้ฟรีโดย ${sponsor.company}`}
+        {title || `👤 ผู้ดูแลของคุณ: ${sponsor.company}`}
       </div>
+      {!compact && <div style={{ fontSize: 13, color: B.dkGray, marginTop: -4, marginBottom: 12, lineHeight: 1.5 }}>{subtitle || "มีคำถาม หรืออยากจองภาคปฏิบัติ ติดต่อผู้ดูแลได้โดยตรง"}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
         {lineHref && <a href={lineHref} target="_blank" rel="noopener noreferrer" onClick={() => track("line")}
           style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#06C755", color: B.white, borderRadius: 10, padding: compact ? "9px 16px" : "12px 20px", textDecoration: "none", fontWeight: 700, fontSize: compact ? 13 : 14 }}>
@@ -72,6 +73,25 @@ function PartnerContactCard({ sponsor, where, title, compact }) {
         </a>}
       </div>
     </div>
+  );
+}
+
+// ปุ่ม "ติดต่อเรา" ทั่วแอป: ลูกค้าคูปองพาร์ทเนอร์ → ไปหาเซลล์ผู้ดูแลคนเดียว (LINE ก่อน ไม่มีค่อยโทร)
+// ลูกค้าทั่วไป → LINE @jiacpr เหมือนเดิม — action = "สอบถาม" / "ทักนัดวัน" / "จอง" ฯลฯ
+function ContactLink({ action, style, iconSize = 22, variant }) {
+  const sp = getPartnerSponsor();
+  const repLine = sp ? partnerLineUrl(sp.line) : null;
+  const repTel = sp?.phone ? `tel:${sp.phone.replace(/[^0-9+]/g, "")}` : null;
+  const track = (channel) => { safeTrack("line_oa_clicked", { variant, owner: sp?.company || null, channel }); phCapture("line_oa_clicked", { variant, owner: sp?.company || null, channel }); };
+  if (sp && !repLine && repTel) return (
+    <a href={repTel} onClick={() => track("rep_phone")} style={{ ...style, background: B.white, color: B.black, border: `1px solid ${B.ltGray}` }}>
+      <I name="phone" size={iconSize - 4} color={B.black}/> {action}กับ {sp.company} โทร {sp.phone}
+    </a>
+  );
+  return (
+    <a href={repLine || LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => track(repLine ? "rep_line" : "oa")} style={style}>
+      <I name="line" size={iconSize} color={B.white}/> {repLine ? `${action}กับ ${sp.company} ทาง LINE` : `${action}ทาง LINE @jiacpr`}
+    </a>
   );
 }
 
@@ -2211,7 +2231,7 @@ function Certificate({ user, go }) {
       </div>
     </div>
     {/* คูปองพาร์ทเนอร์ (QR ธุรกิจพันธมิตร) — ขอบคุณผู้มอบคอร์สนี้ + ให้ช่องทางติดต่อกลับ (ไม่แตะรูปใบประกาศ) */}
-    {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`ขอบคุณ ${getPartnerSponsor().company} ผู้มอบคอร์สนี้ให้คุณ`}/></div>}
+    {getPartnerSponsor() && <div style={{ marginTop: 16 }}><PartnerContactCard sponsor={getPartnerSponsor()} where="certificate" title={`👤 ${getPartnerSponsor().company} ผู้ดูแลของคุณ`} subtitle="ใบประกาศออนไลน์เป็นภาคทฤษฎี — อยากฝึกกับหุ่นจริง/ใช้ AED จริง ติดต่อผู้ดูแลเพื่อจองภาคปฏิบัติได้เลย"/></div>}
     {/* ใบประกาศออนไลน์กลาง JIA (ตรวจสอบได้ที่ Hub) — เพิ่มจากใบของเว็บนี้ ไม่แทน */}
     {renew && <RenewBanner renew={renew} go={go}/>}
     <HubCertificateCard hub={hub}/>
@@ -2253,13 +2273,13 @@ function Certificate({ user, go }) {
         <div style={{ fontSize: 15, fontWeight: 700, color: B.red, marginBottom: 4 }}>คูปองส่วนลด ฿100 สำหรับคอร์ส On-site!</div>
         <div style={{ fontSize: 22, fontWeight: 800, color: B.red, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 }}>{coupon}</div>
         <button onClick={() => go("booking")} style={{ ...css.btn(B.red, B.white, true), display: "block", width: "100%", textAlign: "center", cursor: "pointer" }}>จองคอร์ส On-site ใช้คูปองส่วนลด →</button>
-        <a href={LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => { safeTrack("line_oa_clicked", { variant: "certificate-inquire" }); phCapture("line_oa_clicked", { variant: "certificate-inquire" }); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามทาง LINE @jiacpr</a>
+        <ContactLink action="สอบถาม" variant="certificate-inquire" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}/>
       </div>
       ) : (
       <div style={{ background: `${B.green}0C`, borderRadius: 16, padding: 20, marginTop: 16, textAlign: "center" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: B.black, marginBottom: 4 }}>ชำระค่าคอร์สภาคปฏิบัติเรียบร้อยแล้ว ✅</div>
         <div style={{ fontSize: 13, color: B.dkGray, lineHeight: 1.6, marginBottom: 12 }}>พร้อมเข้าอบรมภาคปฏิบัติได้เลย — แสดงใบประกาศนี้กับเจ้าหน้าที่ในวันเรียน</div>
-        <a href={LINE_URL} target="_blank" rel="noopener noreferrer" onClick={() => { safeTrack("line_oa_clicked", { variant: "certificate-inquire" }); phCapture("line_oa_clicked", { variant: "certificate-inquire" }); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}><I name="line" size={22} color={B.white}/> สอบถามวันอบรมทาง LINE @jiacpr</a>
+        <ContactLink action="สอบถามวันอบรม" variant="certificate-inquire" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#06C755", borderRadius: 12, padding: "12px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 14 }}/>
       </div>
       )}
     </>)}
@@ -2370,8 +2390,11 @@ function Booking({ go }) {
       await supaRest("customers", "POST", { id: custId, name: form.name, tel: phone, email: "", created_at: today(), source: "online-course" });
 
       const bkId = uid();
-      const noteParts = [form.prefTime ? `สะดวก: ${form.prefTime}` : "", form.note || ""].filter(Boolean);
-      const booking = await supaRest("bookings", "POST", { id: bkId, customer_id: custId, name: form.name, tel: phone, course_type: "joincourse", course_name: "CPR & AED (On-site)", channel: "online-course", total_people: parseInt(form.people) || 1, final_price: price, discount_code: coupon || "", discount_amount: coupon ? 100 : 0, payment_mode: "", payment_status: "รอเซลล์ติดต่อ (นัดวัน)", time_slot: form.prefTime || "", total_days: 1, note: noteParts.join(" | "), pdpa_consent: true, pdpa_consent_date: today(), created_at: new Date().toISOString() });
+      // ลูกค้าคูปองพาร์ทเนอร์เป็นของเซลล์ที่แจกคูปอง → ใส่ชื่อเซลล์ใน sales_staff ให้ทีมเห็นว่าใครดูแล
+      // (notify-new-booking หาเจ้าของจากเบอร์ซ้ำอีกชั้นแล้วส่งตรงหาเซลล์คนนั้น)
+      const owner = getPartnerSponsor();
+      const noteParts = [owner ? `ลูกค้าคูปองของ ${owner.company}` : "", form.prefTime ? `สะดวก: ${form.prefTime}` : "", form.note || ""].filter(Boolean);
+      const booking = await supaRest("bookings", "POST", { id: bkId, customer_id: custId, name: form.name, tel: phone, course_type: "joincourse", course_name: "CPR & AED (On-site)", channel: "online-course", total_people: parseInt(form.people) || 1, final_price: price, discount_code: coupon || "", discount_amount: coupon ? 100 : 0, payment_mode: "", payment_status: "รอเซลล์ติดต่อ (นัดวัน)", ...(owner ? { sales_staff: owner.company } : {}), time_slot: form.prefTime || "", total_days: 1, note: noteParts.join(" | "), pdpa_consent: true, pdpa_consent_date: today(), created_at: new Date().toISOString() });
       console.log("📢 Booking lead:", booking);
 
       setBookingRef(bkId);
@@ -2388,10 +2411,10 @@ function Booking({ go }) {
     <div style={{ ...css.page, padding: 20 }}><div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center", paddingTop: 60 }}>
       <div style={{ width: 76, height: 76, borderRadius: "50%", background: `${B.green}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><I name="check" size={38} color={B.green}/></div>
       <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>รับคำขอจองแล้ว!</h2>
-      <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6 }}>ทีมงาน JIA จะติดต่อกลับเพื่อ<strong style={{ color: B.black }}>นัดวันเรียนและแจ้งวิธีชำระเงิน</strong><br/>โดยเร็วที่สุด (ในเวลาทำการ)</p>
+      <p style={{ fontSize: 14, color: B.dkGray, lineHeight: 1.6 }}>{getPartnerSponsor() ? `${getPartnerSponsor().company} ผู้ดูแลของคุณ` : "ทีมงาน JIA"} จะติดต่อกลับเพื่อ<strong style={{ color: B.black }}>นัดวันเรียนและแจ้งวิธีชำระเงิน</strong><br/>โดยเร็วที่สุด (ในเวลาทำการ)</p>
       {coupon && <div style={{ background: `${B.gold}12`, borderRadius: 12, padding: 14, marginTop: 16, fontSize: 14 }}>เก็บรหัสคูปองไว้แจ้งทีมงาน<br/><strong style={{ color: B.red, fontFamily: "monospace", letterSpacing: 1 }}>{coupon}</strong> <span style={{ color: B.dkGray, fontSize: 13 }}>(ส่วนลด ฿100)</span></div>}
       <div style={{ fontSize: 13, color: B.dkGray, marginTop: 16 }}>อยากนัดวันเร็วขึ้น? ทักไลน์ได้เลย</div>
-      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginTop: 8, background: "#06C755", borderRadius: 12, padding: "14px 28px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> ทักนัดวันทาง LINE @jiacpr</a>
+      <ContactLink action="ทักนัดวัน" variant="booking-done" style={{ display: "inline-flex", alignItems: "center", gap: 10, marginTop: 8, background: "#06C755", borderRadius: 12, padding: "14px 28px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}/>
       <div><button onClick={() => go("course")} style={{ ...css.btn(B.white, B.black, true), marginTop: 14, border: `1px solid ${B.ltGray}` }}>← กลับหน้าบทเรียน</button></div>
     </div></div>
   );
@@ -2461,7 +2484,7 @@ function Booking({ go }) {
       </div>
 
       <div style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: B.dkGray }}>หรือจองผ่าน LINE ได้เลย</div>
-      <a href={LINE_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 8, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}><I name="line" size={22} color={B.white}/> จองผ่าน LINE @jiacpr</a>
+      <ContactLink action="จอง" variant="booking-form" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 8, background: "#06C755", borderRadius: 12, padding: "14px 24px", color: B.white, textDecoration: "none", fontWeight: 700, fontSize: 15 }}/>
     </div></div>
   );
 }

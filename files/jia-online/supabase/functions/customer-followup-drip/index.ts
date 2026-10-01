@@ -62,6 +62,14 @@ const MSG: Record<string, (name: string, code: string | null, paid?: boolean) =>
     : `คุณ ${n} 💪 ทักษะ CPR ช่วยชีวิตคนใกล้ตัวได้จริง อย่าเพิ่งหยุดกลางทางนะครับ\nเรียนจบรับใบประกาศ + คูปอง on-site ฿100 ฟรีๆ\n👉 cpr.morroo.com\n${FOOTER}`,
 };
 
+const phoneTail = (p: string | null | undefined) => { const d = (p || "").replace(/\D/g, ""); return d.length >= 9 ? d.slice(-9) : ""; };
+// ลูกค้าของเซลล์ (คูปองพาร์ทเนอร์) — ต่อท้ายข้อความขาย ให้ทักเซลล์ผู้ดูแลตรงแทนการตอบใน OA
+function ownerContactLine(o?: { company: string; line: string | null; phone: string | null }) {
+  if (!o || (!o.line && !o.phone)) return "";
+  const parts = [o.line ? `LINE: ${o.line}` : "", o.phone ? `โทร: ${o.phone}` : ""].filter(Boolean).join(" · ");
+  return `\n\n👤 ผู้ดูแลของคุณ: ${o.company}\n${parts}\nทักผู้ดูแลโดยตรงได้เลยครับ`;
+}
+
 // เลือกสเต็ปตามจำนวนวัน (มีกรอบเวลา กัน backlog ถ้าผูก LINE ช้า)
 function unpaidStep(days: number): string | null {
   if (days >= 1 && days <= 2) return "unpaid_d0";
@@ -77,12 +85,20 @@ function stuckStep(days: number): string | null {
 
 async function enqueueDrip(preview: boolean) {
   const now = Date.now();
-  const [studentsRes, custRes, bookingsRes, existingRes] = await Promise.all([
-    supa.from("online_students").select("customer_id,name,status,completed_at,registered_at,coupon_code,pre_course").limit(10000),
+  const [studentsRes, custRes, bookingsRes, existingRes, ownerRes] = await Promise.all([
+    supa.from("online_students").select("customer_id,name,phone,status,completed_at,registered_at,coupon_code,pre_course").limit(10000),
     supa.from("customers").select("id,name,line_user_id").not("line_user_id", "is", null).limit(10000),
     supa.from("bookings").select("customer_id").not("customer_id", "is", null).limit(10000),
     supa.from("line_broadcasts").select("customer_id,type").limit(100000),
+    supa.from("lead_promo_codes").select("company,sponsor_line,sponsor_phone,redeemed_phone,redeemed_at")
+      .eq("source", "partner_coupon").not("redeemed_at", "is", null).order("redeemed_at", { ascending: true }).limit(10000),
   ]);
+  // ลูกค้าคูปองพาร์ทเนอร์เป็นของเซลล์ที่แจก (ใบแรกที่ใช้ชนะ — ตรงกับ sales_owner_for_phone) → ข้อความขายชี้ไปหาเซลล์คนนั้น
+  const ownerByPhone = new Map<string, { company: string; line: string | null; phone: string | null }>();
+  for (const c of ownerRes.data || []) {
+    const tail = phoneTail(c.redeemed_phone);
+    if (tail && !ownerByPhone.has(tail)) ownerByPhone.set(tail, { company: c.company, line: c.sponsor_line, phone: c.sponsor_phone });
+  }
   const custMap = new Map<string, { line_user_id: string; name: string }>();
   for (const c of custRes.data || []) if (c.line_user_id) custMap.set(c.id, { line_user_id: c.line_user_id, name: c.name });
   const booked = new Set<string>((bookingsRes.data || []).map((b: any) => b.customer_id));
@@ -107,7 +123,8 @@ async function enqueueDrip(preview: boolean) {
     already.add(`${s.customer_id}|${type}`); // กันซ้ำในรอบเดียวกัน
     toInsert.push({
       customer_id: s.customer_id, line_user_id: cust.line_user_id, type,
-      message_text: MSG[type](name, s.coupon_code || null, preCourse),
+      message_text: MSG[type](name, s.coupon_code || null, preCourse) +
+        (type.startsWith("unpaid_") ? ownerContactLine(ownerByPhone.get(phoneTail(s.phone))) : ""),
       scheduled_at: new Date().toISOString(), status: "pending",
     });
   }

@@ -14,6 +14,8 @@
 //   class-web / bcpr-web → จองจากเว็บ class.morroo.com พร้อมสลิป รอตรวจสอบ → ชี้ไปหน้าแอดมินของ class
 //   class-admin          → แอดมิน/เซลล์ลงจองแทนลูกค้าเอง (ไม่ต้องรีบติดต่อกลับ แค่แจ้งให้ทีมรู้)
 //   อื่นๆ                 → ฟอร์มเดิมของ cpr.morroo.com (ยังไม่มีรอบ/ยังไม่ชำระ) → ชี้ไป cpr.morroo.com/admin
+// ลูกค้าคูปองพาร์ทเนอร์ (sales_owner_for_phone เจอเจ้าของ) → ขึ้นบรรทัดแรกว่าเป็นลูกค้าของเซลล์คนไหน
+// และส่งข้อความเดียวกันตรงหาเซลล์คนนั้นเพิ่มอีก 1 ข้อความ (ลูกค้าเป็นของเซลล์ที่แจกคูปองเท่านั้น)
 // ทั้ง class-web/bcpr-web และ class-admin แสดง "ที่นั่งคงเหลือ" ของรอบนั้นด้วย (คำนวณสดจาก
 // classes.max_students ลบยอดจองปัจจุบันในสถานะ รอตรวจสอบ/ชำระแล้ว — รวมแถวที่เพิ่ง insert ไปแล้ว)
 // และถ้ารอบใกล้เต็ม (เหลือ ≤ NEAR_FULL_THRESHOLD) หรือเต็มพอดี จะแทรกบรรทัดเตือนในข้อความเดียวกัน
@@ -121,6 +123,22 @@ async function getSeatsLeft(classId: string | null | undefined): Promise<{ left:
 }
 
 // วันที่แบบไทยสั้นๆ สำหรับข้อความ LINE (2026-08-22 → 22 ส.ค. 2569)
+// ลูกค้าคูปองพาร์ทเนอร์เป็นของเซลล์ที่แจกคูปองเท่านั้น (public.sales_owner_for_phone) — null = ลูกค้าทั่วไป
+type SalesOwner = { code: string; display_name: string | null; rep_name: string | null; rep_line_user_id: string | null };
+async function getSalesOwner(tel: string | null | undefined): Promise<SalesOwner | null> {
+  if (!tel) return null;
+  try {
+    const { data } = await supa.rpc("sales_owner_for_phone", { p_phone: tel });
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.code ? row : null;
+  } catch { return null; }
+}
+function ownerHeader(owner: SalesOwner | null): string {
+  if (!owner) return "";
+  const who = owner.rep_name || owner.display_name || "เซลล์ผู้แจกคูปอง";
+  return `⚠️ ลูกค้าของ ${who} (คูปอง ${owner.code}) — ให้ ${who} ดูแลเท่านั้น\n\n`;
+}
+
 const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 function thDate(iso: string | null | undefined): string {
   if (!iso) return "(ยังไม่ระบุ)";
@@ -315,20 +333,24 @@ Deno.serve(async (req: Request) => {
   }
 
   const seats = await getSeatsLeft(rec.class_id);
-  const text = buildText(rec, seats);
+  const owner = await getSalesOwner(rec.tel);
+  const text = ownerHeader(owner) + buildText(rec, seats);
   const { recipients, mode } = await getRecipients();
+  // ลูกค้าคูปองพาร์ทเนอร์ → ส่งตรงหาเซลล์เจ้าของด้วย (ถ้าเซลล์คนนั้นไม่ได้อยู่ในรายชื่อผู้รับอยู่แล้ว)
+  const ownerIds = owner?.rep_line_user_id && !recipients.includes(owner.rep_line_user_id) ? [owner.rep_line_user_id] : [];
 
   if (dryRun) {
     return new Response(JSON.stringify({
-      ok: true, dry_run: true, mode, recipients: recipients.length, preview: text,
+      ok: true, dry_run: true, mode, recipients: recipients.length, owner: owner?.rep_name || null, preview: text,
     }), { headers: { "Content-Type": "application/json" } });
   }
 
   const token = await loadToken();
   const line = await pushMany(token, recipients, text);
+  const ownerLine = ownerIds.length ? await pushMany(token, ownerIds, text) : null;
 
   return new Response(JSON.stringify({
     ok: true, mode, recipients: recipients.length,
-    line, ran_at: new Date().toISOString(),
+    line, owner_line: ownerLine, ran_at: new Date().toISOString(),
   }), { headers: { "Content-Type": "application/json" } });
 });
