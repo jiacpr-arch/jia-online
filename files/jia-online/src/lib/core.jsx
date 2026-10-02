@@ -217,10 +217,14 @@ export const activeGameVoucherCampaign = () => {
 };
 // ปุ่ม "รับรางวัลบูธทาง LINE @roodee.me" ท้ายเกม — โชว์ในช่วงงานกับคนที่มาจากบูธ:
 // เข้าผ่าน ?camp=dekd (ลิงก์ใน LINE) หรือผ่านลิงก์เกมสุ่มบนแบนเนอร์บูธ (?game=random)
-export const BOOTH_LINE_CTA = { key: "dekd", start: "2026-10-01", end: "2026-10-31", oa: "@roodee.me" };
+// signupStart–signupEnd = วันงานจริง (3–5 ต.ค.) → ปุ่มเปลี่ยนเป็น "สมัครสมาชิกฟรีผ่าน LINE" และโชว์ให้ทุกคนที่เล่นจบ
+// (เด็กเล่นที่บูธ/สแกน QR ไหนก็เห็น) — แอด OA แล้วข้อความต้อนรับส่งลิงก์ ?camp=dekd ให้เข้าเว็บสมัครสมาชิก
+export const BOOTH_LINE_CTA = { key: "dekd", start: "2026-10-01", end: "2026-10-31", signupStart: "2026-10-03", signupEnd: "2026-10-05", oa: "@roodee.me" };
+export const isBoothSignupDay = () => { const t = todayISOTH(); return t >= BOOTH_LINE_CTA.signupStart && t <= BOOTH_LINE_CTA.signupEnd; };
 export const boothCtaEligible = (viaGameLink) => {
   const t = todayISOTH();
   if (t < BOOTH_LINE_CTA.start || t > BOOTH_LINE_CTA.end) return false;
+  if (isBoothSignupDay()) return true;
   let camp = load("game_camp", null);
   try { camp = new URLSearchParams(window.location.search).get("camp") || camp; } catch (e) {}
   return camp === BOOTH_LINE_CTA.key || !!viaGameLink;
