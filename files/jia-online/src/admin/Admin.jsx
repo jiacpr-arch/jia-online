@@ -1060,10 +1060,14 @@ function PartnerCouponPanel({ onPrint }) {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null); // company ที่กำลังดูรายชื่อคนใช้
   const [editing, setEditing] = useState(null); // company ที่กำลังแก้ไขช่องทางติดต่อ
-  const [editForm, setEditForm] = useState({ sponsor_line: "", sponsor_phone: "", sponsor_value: "" });
+  const [editForm, setEditForm] = useState({ sponsor_line: "", sponsor_phone: "", sponsor_value: "", sales_rep_id: "" });
   const [savingEdit, setSavingEdit] = useState(false);
+  // เซลล์เจ้าของคูปอง (jiaroo_team) — ลูกค้าที่ใช้คูปองเป็นของเซลล์คนนี้: ได้แจ้งเตือน LINE ตอนใช้คูปอง/เรียนจบ/จอง/ทัก OA
+  const [team, setTeam] = useState([]);
+  useEffect(() => { adminRest("jiaroo_team", "GET", null, `?tenant_slug=eq.${JIAROO_TENANT}&active=eq.true&order=name.asc`).then(r => setTeam(Array.isArray(r) ? r : [])); }, []);
+  const teamById = Object.fromEntries(team.map(t => [t.id, t]));
 
-  const [form, setForm] = useState({ company: "", prefix: "", sponsor_line: "", sponsor_phone: "", sponsor_value: String(PRICING.full), count: "50", expires: "" });
+  const [form, setForm] = useState({ company: "", prefix: "", sponsor_line: "", sponsor_phone: "", sponsor_value: String(PRICING.full), count: "50", expires: "", sales_rep_id: "" });
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState("");
   const [created, setCreated] = useState(null); // ชุดที่เพิ่งสร้าง { company, rows }
@@ -1072,7 +1076,7 @@ function PartnerCouponPanel({ onPrint }) {
 
   const refresh = async () => {
     setLoading(true);
-    const res = await adminRest("lead_promo_codes", "GET", null, "?source=eq.partner_coupon&select=code,company,name,redeemed_at,redeemed_phone,expires_at,created_at,sponsor_line,sponsor_phone,sponsor_value&order=created_at.desc&limit=5000");
+    const res = await adminRest("lead_promo_codes", "GET", null, "?source=eq.partner_coupon&select=code,company,name,redeemed_at,redeemed_phone,expires_at,created_at,sponsor_line,sponsor_phone,sponsor_value,sales_rep_id&order=created_at.desc&limit=5000");
     const list = Array.isArray(res) ? res : [];
     const byCompany = new Map();
     for (const r of list) {
@@ -1089,7 +1093,8 @@ function PartnerCouponPanel({ onPrint }) {
     const company = form.company.trim();
     const prefix = form.prefix.trim().toUpperCase();
     const n = parseInt(form.count, 10) || 0;
-    if (!company) { setErr("กรุณากรอกชื่อพาร์ทเนอร์"); return; }
+    if (!company) { setErr("กรุณากรอกชื่อที่โชว์ให้ลูกค้า"); return; }
+    if (!form.sales_rep_id) { setErr("กรุณาเลือกเซลล์เจ้าของคูปอง"); return; }
     if (!/^[A-Z0-9]{2,8}$/.test(prefix)) { setErr("รหัสย่อ 2-8 ตัว ใช้ A-Z, 0-9 เท่านั้น เช่น OMNOI"); return; }
     if (n < 1 || n > 200) { setErr("จำนวนใบต้องอยู่ระหว่าง 1-200"); return; }
     const sponsorValue = parseInt(form.sponsor_value, 10) || PRICING.full;
@@ -1113,6 +1118,7 @@ function PartnerCouponPanel({ onPrint }) {
         sponsor_line: form.sponsor_line.trim() || null,
         sponsor_phone: form.sponsor_phone.trim() || null,
         sponsor_value: sponsorValue,
+        sales_rep_id: form.sales_rep_id,
       }));
     };
     try {
@@ -1129,7 +1135,7 @@ function PartnerCouponPanel({ onPrint }) {
   const startEdit = (g) => {
     const latest = g.rows[0] || {};
     setEditing(g.company);
-    setEditForm({ sponsor_line: latest.sponsor_line || "", sponsor_phone: latest.sponsor_phone || "", sponsor_value: String(latest.sponsor_value || PRICING.full) });
+    setEditForm({ sponsor_line: latest.sponsor_line || "", sponsor_phone: latest.sponsor_phone || "", sponsor_value: String(latest.sponsor_value || PRICING.full), sales_rep_id: latest.sales_rep_id || "" });
   };
   const saveEdit = async (company) => {
     setSavingEdit(true);
@@ -1137,6 +1143,7 @@ function PartnerCouponPanel({ onPrint }) {
       sponsor_line: editForm.sponsor_line.trim() || null,
       sponsor_phone: editForm.sponsor_phone.trim() || null,
       sponsor_value: parseInt(editForm.sponsor_value, 10) || PRICING.full,
+      sales_rep_id: editForm.sales_rep_id || null,
     }, `?source=eq.partner_coupon&company=eq.${encodeURIComponent(company)}`);
     setSavingEdit(false);
     setEditing(null);
@@ -1154,11 +1161,18 @@ function PartnerCouponPanel({ onPrint }) {
     <div style={{ maxWidth: 720 }}>
       <div style={{ background: B.white, borderRadius: 14, padding: 20, marginBottom: 16 }}>
         <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 4 }}>สร้างคูปองพาร์ทเนอร์ (QR ใบละ 1 สิทธิ์)</h3>
-        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>ธุรกิจพันธมิตร (เช่น ออฟฟิศอ้อมน้อย) แจกคูปองให้ลูกค้า สแกนแล้วเรียนคอร์สเต็มฟรีทันที — คนละ 1 ใบ 1 สิทธิ์ หลังใช้จะเห็น LINE/เบอร์ที่กรอกไว้นี้บนหน้าเว็บ</p>
+        <p style={{ fontSize: 12, color: B.dkGray, marginTop: 0, marginBottom: 16 }}>เซลล์แจกคูปองให้ลูกค้า สแกนแล้วเรียนคอร์สเต็มฟรีทันที — คนละ 1 ใบ 1 สิทธิ์ ลูกค้าที่ใช้คูปองเป็นของเซลล์เจ้าของคูปองเท่านั้น: หน้าเว็บโชว์ LINE/เบอร์ที่กรอกไว้นี้เป็น "ผู้ดูแลของคุณ" และเซลล์ได้แจ้งเตือน LINE ตอนลูกค้าใช้คูปอง เรียนจบ จอง หรือทัก @jiacpr</p>
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>เซลล์เจ้าของคูปอง *</label>
+          <select value={form.sales_rep_id} onChange={e => F("sales_rep_id", e.target.value)} style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box", background: B.white }}>
+            <option value="">— เลือกเซลล์ —</option>
+            {team.map(t => <option key={t.id} value={t.id}>{t.name}{t.line_user_id ? "" : " (ยังไม่ผูก LINE — ไม่ได้รับแจ้งเตือน)"}</option>)}
+          </select>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อพาร์ทเนอร์ *</label>
-            <input type="text" value={form.company} onChange={e => F("company", e.target.value)} placeholder="เช่น ออฟฟิศอ้อมน้อย" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>ชื่อที่โชว์ให้ลูกค้า *</label>
+            <input type="text" value={form.company} onChange={e => F("company", e.target.value)} placeholder="เช่น คุณเจ๋ง JIA CPR" style={{ width: "100%", padding: "12px 14px", border: `2px solid ${B.ltGray}`, borderRadius: 10, fontSize: 14, boxSizing: "border-box" }}/>
           </div>
           <div>
             <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>รหัสย่อ (ใช้ขึ้นต้นโค้ด) *</label>
@@ -1216,18 +1230,23 @@ function PartnerCouponPanel({ onPrint }) {
                 <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>
                   ทั้งหมด {total} · ใช้แล้ว <strong style={{ color: B.green }}>{used}</strong> · เหลือ <strong style={{ color: B.gold }}>{left}</strong>{expired > 0 && <> · หมดอายุ {expired}</>}
                 </div>
+                <div style={{ fontSize: 12, marginTop: 4, color: latest.sales_rep_id ? B.dkGray : B.red }}>เซลล์เจ้าของ: {latest.sales_rep_id ? (teamById[latest.sales_rep_id]?.name || "(ไม่อยู่ในทีมแล้ว)") : "ยังไม่ได้ผูก — กด \"แก้ไข\" เพื่อเลือกเซลล์"}</div>
                 <div style={{ fontSize: 12, color: B.dkGray, marginTop: 4 }}>LINE: {latest.sponsor_line || "—"} · โทร: {latest.sponsor_phone || "—"} · มูลค่า ฿{latest.sponsor_value || PRICING.full}</div>
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button onClick={() => printGroup(g, true)} style={{ ...css.btn(B.gold, B.black), fontSize: 12, padding: "8px 12px" }}>พิมพ์ใบที่ยังไม่ใช้</button>
                 <button onClick={() => printGroup(g, false)} style={{ ...css.btn(B.white, B.black), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>พิมพ์ทั้งหมด</button>
                 <button onClick={() => setExpanded(expanded === g.company ? null : g.company)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>{expanded === g.company ? "ซ่อนรายชื่อ" : "ดูรายชื่อคนใช้"}</button>
-                <button onClick={() => startEdit(g)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>แก้ไขช่องทางติดต่อ</button>
+                <button onClick={() => startEdit(g)} style={{ ...css.btn(B.white, B.dkGray), border: `1px solid ${B.ltGray}`, fontSize: 12, padding: "8px 12px" }}>แก้ไขเซลล์/ช่องทางติดต่อ</button>
               </div>
             </div>
 
             {editing === g.company && (
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${B.gray}` }}>
+                <select value={editForm.sales_rep_id} onChange={e => setEditForm(p => ({ ...p, sales_rep_id: e.target.value }))} style={{ width: "100%", padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13, marginBottom: 8, background: B.white }}>
+                  <option value="">— เซลล์เจ้าของ (ยังไม่เลือก) —</option>
+                  {team.map(t => <option key={t.id} value={t.id}>{t.name}{t.line_user_id ? "" : " (ยังไม่ผูก LINE)"}</option>)}
+                </select>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
                   <input type="text" value={editForm.sponsor_line} onChange={e => setEditForm(p => ({ ...p, sponsor_line: e.target.value }))} placeholder="LINE" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>
                   <input type="tel" value={editForm.sponsor_phone} onChange={e => setEditForm(p => ({ ...p, sponsor_phone: e.target.value }))} placeholder="เบอร์โทร" style={{ padding: "10px 12px", border: `2px solid ${B.ltGray}`, borderRadius: 8, fontSize: 13 }}/>

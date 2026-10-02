@@ -149,6 +149,22 @@ async function linkByCode(code: string, lineUserId: string): Promise<string | nu
   return cust.id;
 }
 
+// ลูกค้าคูปองพาร์ทเนอร์เป็นของเซลล์ที่แจกคูปอง — ถ้าลูกค้า (ที่ผูก LINE แล้ว) ทัก @jiacpr ส่งต่อให้เซลล์เจ้าของรู้
+// notify-sales-rep หาเจ้าของจากเบอร์เอง + กันส่งถี่ (ลูกค้าทั่วไป/ไม่มีเจ้าของ = no-op) — พังก็ไม่กระทบ webhook
+async function forwardToSalesOwner(lineUserId: string, text: string): Promise<void> {
+  try {
+    const { data: cust } = await supa.from("customers").select("name, tel").eq("line_user_id", lineUserId).maybeSingle();
+    if (!cust?.tel) return;
+    const secret = await loadSecretValue("NOTIFY_WEBHOOK_SECRET");
+    if (!secret) return;
+    await fetch(`${SUPABASE_URL}/functions/v1/notify-sales-rep`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-webhook-secret": secret },
+      body: JSON.stringify({ event: "line_message", record: { name: cust.name, phone: cust.tel, text } }),
+    });
+  } catch (_e) { /* non-fatal */ }
+}
+
 async function logInbound(row: {
   line_user_id?: string | null; event_type?: string | null; message_text?: string | null;
   matched_customer_id?: string | null; raw_payload?: unknown;
@@ -188,6 +204,7 @@ Deno.serve(async (req: Request) => {
         if (matched && ev.replyToken) {
           await lineReply(ev.replyToken, "ผูกบัญชีเรียบร้อยแล้วค่ะ ✅ จะส่งโปรโมชั่น คูปองต่ออายุ และแจ้งเตือนทบทวน CPR ให้ทาง LINE นี้นะคะ 💙");
         }
+        if (!code && lineUserId) await forwardToSalesOwner(lineUserId, text);
       } else if (type === "follow") {
         let displayName: string | null = null;
         if (lineUserId) {

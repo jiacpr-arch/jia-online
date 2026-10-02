@@ -146,5 +146,16 @@ Deno.serve(async (req: Request) => {
   const push = await runSignupPush({ line_user_id: lineUserId, name, pre_course: preCourse, no_coupon: noCoupon });
   const coupon: string | null = (push as any)?.coupon || null;
 
-  return json({ ok: true, customer_id: customerId, line_user_id: lineUserId, name, progress: merged, coupon });
+  // 6) ลูกค้าคูปองพาร์ทเนอร์ → ผู้ดูแล (เซลล์ที่แจกคูปอง) ให้เครื่องใหม่โชว์การ์ดติดต่อเซลล์คนเดิม
+  let salesOwner: unknown = null;
+  try {
+    const { data: c } = await supa.from("customers").select("tel").eq("id", customerId).maybeSingle();
+    if (c?.tel) {
+      const { data: o } = await supa.rpc("sales_owner_for_phone", { p_phone: c.tel });
+      const r = Array.isArray(o) ? o[0] : o;
+      if (r?.code) salesOwner = { company: r.display_name, line: r.contact_line, phone: r.contact_phone, value: r.sponsor_value, code: r.code };
+    }
+  } catch (_e) { /* non-fatal */ }
+
+  return json({ ok: true, customer_id: customerId, line_user_id: lineUserId, name, progress: merged, coupon, sales_owner: salesOwner });
 });

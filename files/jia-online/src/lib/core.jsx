@@ -131,6 +131,9 @@ export const partnerLineUrl = (v) => {
   return `https://line.me/ti/p/~${encodeURIComponent(s)}`;
 };
 export const getPartnerSponsor = () => load("partner_sponsor", null);
+// เซลล์ผู้ดูแลจาก server (ลูกค้าคูปองพาร์ทเนอร์เป็นของเซลล์ที่แจกคูปองเท่านั้น) — เติมให้เครื่องใหม่/ล้างเบราว์เซอร์
+// ข้อมูลฝั่ง server ชนะ (แอดมินแก้ช่องทางติดต่อได้ทีหลัง)
+export const rememberSalesOwner = (o) => { if (o && o.code && (o.line || o.phone)) save("partner_sponsor", o); };
 
 export const supaRest = async (table, method = "GET", body = null, filters = "") => {
   const url = `${SUPABASE_URL}/rest/v1/${table}${filters}`;
@@ -335,11 +338,15 @@ export const syncProgressRemote = async (np) => {
       const supa = await getSupabase();
       const { data: { session } } = await supa.auth.getSession();
       if (session?.access_token) {
-        await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress: np }) });
+        const r = await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", access_token: session.access_token, progress: np }) });
+        try { rememberSalesOwner((await r.json())?.sales_owner); } catch (e) {}
         return;
       }
     }
-    if (u.line_user_id) { const idt = load("line_id_token", null); if (idt) await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", id_token: idt, progress: np }) }); }
+    if (u.line_user_id) {
+      const idt = load("line_id_token", null);
+      if (idt) { const r = await fetch(FN_URL("account-progress"), { method: "POST", headers: FN_HEADERS, body: JSON.stringify({ action: "save", id_token: idt, progress: np }) }); try { rememberSalesOwner((await r.json())?.sales_owner); } catch (e) {} }
+    }
   } catch (e) {}
 };
 
@@ -444,6 +451,7 @@ export const signInWithLine = async ({ phone = "", name = "", silent = false } =
   if (meData.progress) progress = mergeProgressLocal(progress, meData.progress);
   save("progress", progress);
   if (linkData.coupon && !noOnsiteCoupon()) save("coupon", linkData.coupon);
+  rememberSalesOwner(linkData.sales_owner);
   save("signup_pending", null); save("line_login_pending", null);
   safeTrack("signup_complete", { provider: "line", is_friend: isFriend });
   phCapture("signup_complete", { provider: "line", variant: getGateVariant() });

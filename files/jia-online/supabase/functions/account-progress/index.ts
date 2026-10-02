@@ -37,6 +37,18 @@ function mergeProgress(a: any, b: any) {
   return { done, scores };
 }
 
+// ลูกค้าคูปองพาร์ทเนอร์ → ผู้ดูแล (เซลล์ที่แจกคูปอง) ให้เครื่องใหม่โชว์การ์ดติดต่อเซลล์คนเดิมได้ (ไม่หายตาม localStorage)
+async function salesOwnerFor(col: string, val: string | null) {
+  try {
+    const { data: cust } = await supa.from("customers").select("tel").eq(col, val).limit(1).maybeSingle();
+    if (!cust?.tel) return null;
+    const { data } = await supa.rpc("sales_owner_for_phone", { p_phone: cust.tel });
+    const o = Array.isArray(data) ? data[0] : data;
+    if (!o?.code) return null;
+    return { company: o.display_name, line: o.contact_line, phone: o.contact_phone, value: o.sponsor_value, code: o.code };
+  } catch { return null; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
@@ -69,7 +81,7 @@ Deno.serve(async (req: Request) => {
 
   if (action === "load") {
     const { data } = await supa.from("course_progress").select("done, scores").eq(col, val).maybeSingle();
-    return json({ ok: true, progress: data || { done: [], scores: {} } });
+    return json({ ok: true, progress: data || { done: [], scores: {} }, sales_owner: await salesOwnerFor(col, val) });
   }
 
   if (action === "save") {
@@ -87,7 +99,7 @@ Deno.serve(async (req: Request) => {
         done: merged.done, scores: merged.scores, updated_at: new Date().toISOString(),
       }, { onConflict: "customer_id" });
     }
-    return json({ ok: true, progress: merged });
+    return json({ ok: true, progress: merged, sales_owner: await salesOwnerFor(col, val) });
   }
 
   return json({ error: "unknown action" }, 400);
