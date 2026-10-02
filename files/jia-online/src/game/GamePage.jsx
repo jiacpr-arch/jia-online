@@ -104,7 +104,7 @@ const randomUnlockedScenario = (finalExamPassed) => {
 
 // fetchCustomImages: callback จาก App คืน rows ของตาราง game_character_images
 // (รูปตัวละครที่แอดมินอัปโหลดเอง) — โหลดไม่ได้/ว่าง = ใช้รูป default ตามปกติ
-export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false, boothLineOa = null }) {
+export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExamPassed = false, earnVoucher, onGoBooking, autoRandom = false, boothLineOa = null, boothSignup = false }) {
   const [reducedMotion] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -806,6 +806,25 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
             )}
             {result.isHiscore && <><br />🏆 New Hi-Score: {result.score}</>}
           </p>
+          {/* วันงานเด็กดี 3–5 ต.ค. — ปุ่มหลักชวนสมัครสมาชิกเว็บผ่าน LINE OA (แอดแล้วข้อความต้อนรับส่งลิงก์ ?camp=dekd
+              เข้าเว็บสมัคร + ปลดคอร์สครบทุกบท) โชว์ให้ทุกคนที่เล่นจบในวันงาน */}
+          {boothLineOa && boothSignup && (
+            <div className="cbs-invite cbs-invite-signup">
+              <div className="cbs-invite-title">🎉 สมัครสมาชิกฟรี! รับสิทธิ์ทันทีผ่าน LINE</div>
+              <div className="cbs-invite-sub">
+                แอด LINE {boothLineOa} → รับลิงก์สมัครสมาชิกเว็บ เรียนคอร์ส CPR ออนไลน์ฟรีครบทุกบท + ใบประกาศ
+                แล้วไปปั๊มหัวใจบน SimCPR ที่บูธรู้ดี ลุ้นตุ๊กตา + ส่วนลด/BLS ฟรี
+              </div>
+              <a
+                className="cbs-btn-line"
+                href={`https://line.me/R/ti/p/${encodeURIComponent(boothLineOa)}`}
+                target="_blank" rel="noopener noreferrer"
+                onClick={() => track('game_booth_line_cta', { scenario_id: sc.id, won: result.won, signup: true })}
+              >
+                📲 สมัครสมาชิกฟรีผ่าน LINE {boothLineOa}
+              </a>
+            </div>
+          )}
           <div className="cbs-grade-row">
             <div className="cbs-grade-box">
               <span className={`cbs-grade cbs-g-${result.grade.toLowerCase()}`}>{result.grade}</span>
@@ -830,8 +849,9 @@ export default function GamePage({ onExit, onTrack, fetchCustomImages, finalExam
               <Metric label="เวลาทั้งเคส" value={fmtTime(st.simTime)} tone="" />
             </div>
           </div>
-          {/* มาจากบูธรู้ดี (งานเด็กดี) — ดาว/รางวัล/เกียรติบัตรรับทาง LINE @roodee.me (App ส่ง boothLineOa มาเฉพาะช่วงงาน) */}
-          {boothLineOa && (
+          {/* มาจากบูธรู้ดี (งานเด็กดี) — ดาว/รางวัล/เกียรติบัตรรับทาง LINE @roodee.me (App ส่ง boothLineOa มาเฉพาะช่วงงาน)
+              วันงานจริง (boothSignup) ย้ายขึ้นไปไว้บนสุดเป็นปุ่มสมัครสมาชิก — ดู boothSignupCta */}
+          {boothLineOa && !boothSignup && (
             <div className="cbs-invite">
               <div className="cbs-invite-title">🎁 มาจากบูธรู้ดี งานเด็กดี?</div>
               <div className="cbs-invite-sub">

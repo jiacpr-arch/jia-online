@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import GamePage from "./game/GamePage";
 import { shuffled } from "./game/storyEngine";
 import {
-  B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, BOOTH_LINE_CTA, boothCtaEligible, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, noOnsiteCoupon, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
+  B, SERIF, FREE_LAUNCH, LINE_URL, LINE_QR_URL, safeTrack, genLinkCode, randToken, getLinkCode, lineLinkDeepLink, markLineAdded, SUPABASE_URL, SUPABASE_KEY, AUTH_GATE_ENABLED, FN_URL, PRICING, PROMO_ENABLED, PROMO_FREE_MODULES, PROMO_EXPIRY_DAYS, LEAD_SOURCES, PARTNER_SOURCE, partnerLineUrl, getPartnerSponsor, supaRest, supaRpc, genCoupon, issueOnlineCoupon, activeGameVoucherCampaign, BOOTH_LINE_CTA, boothCtaEligible, isBoothSignupDay, todayISOTH, thaiShortDate, genLeadCode, normalizePhone, normalizeEmail, daysUntil, genIdempotencyKey, save, load, QUIZ_DRAW_N, drawQuiz, loadLiff, getSupabase, getPosthog, phCapture, getGateVariant, isSignedUp, isPreCourseStudent, noOnsiteCoupon, captureUTM, getUTM, FN_HEADERS, syncProgressRemote, syncHubIdentity, signInWithLine, requestEmailIdentityOtp, verifyEmailIdentityOtp, logoutAccount, startOverLearner, sanitizeFileName, captureNodeToPng, deliverBlob, dataUrlToBlob, CERT_DECO, getPurchased, savePurchased, getPendingSlips, savePendingSlips, syncPendingSlips, isModuleAccessible, calcPrice, TEASER_QUIZ, COURSE, I, Logo, css,
   REFERRAL_DISCOUNT_PCT, REFERRAL_REWARD_TEXT, captureReferral, getRefCode, referralLink, setCustomerLineLink,
 } from "./lib/core";
 // หน้าแอดมินแยกเป็น chunk ของตัวเอง — ผู้เรียนทั่วไปไม่ต้องดาวน์โหลดโค้ดแอดมิน
@@ -2634,6 +2634,7 @@ export default function App() {
   // แบนเนอร์ในแอป + ลิงก์ ?game=random → เข้าเกมแบบสุ่มโจทย์ให้ทันที (ไม่ผ่านหน้าเลือกเคส)
   const [gameAutoRandom, setGameAutoRandom] = useState(gameRandomParam);
   const [boothCta] = useState(() => boothCtaEligible(gameRandomParam)); // คิดครั้งเดียวตอนเปิด — param ถูกลบทีหลัง
+  const [boothSignup] = useState(() => boothCta && isBoothSignupDay()); // วันงาน 3–5 ต.ค. → ปุ่มสมัครสมาชิกผ่าน LINE
   const goGameRandom = useCallback(() => { setGameAutoRandom(true); go("game"); }, [go]);
   // ชนะเกม CPR HERO → ปลดคูปองส่วนลด ฿100 คอร์ส on-site (funnel ดึงคนมาเรียนจริง)
   // รียูสคูปองเดิมถ้ามี (อย่าออกทับ) — ออกให้เฉพาะคนที่จ่ายเงินซื้อคอร์สออนไลน์แล้ว (เล่นฟรีไม่ได้ส่วนลด)
@@ -2818,7 +2819,7 @@ export default function App() {
           case "blog": return <BlogList goBack={backFromBlog} openBlog={openBlog}/>;
           case "blog-detail": return <BlogDetail slug={blogSlug} goBack={() => go("blog")} openBlog={openBlog}/>;
           case "claim": return <Claim go={go} setUser={u => { setUser(u); save("user", u); }} initialStep={initialClaimCode ? "redeem" : (load("claim_start_redeem", false) ? "redeem" : "form")} initialCode={initialClaimCode}/>;
-          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")} autoRandom={gameAutoRandom} boothLineOa={boothCta ? BOOTH_LINE_CTA.oa : null}/>;
+          case "game": return <GamePage onExit={() => go(hasEnrolledBefore() ? "course" : "landing")} onTrack={(n, p) => { safeTrack(n, p); phCapture(n, p); }} fetchCustomImages={() => supaRest("game_character_images", "GET", null, "?select=char_id,pose,url")} finalExamPassed={progress.done.includes(COURSE.modules[COURSE.modules.length - 1].id)} earnVoucher={issueGameVoucher} onGoBooking={() => go("booking")} autoRandom={gameAutoRandom} boothLineOa={boothCta ? BOOTH_LINE_CTA.oa : null} boothSignup={boothSignup}/>;
           default: return <Landing go={go} enterCourse={enterCourse} openBlog={openBlog} goGameRandom={goGameRandom}/>;
         }
       })()}

@@ -814,6 +814,9 @@
 .cbs-invite-title { font-size: 15px; font-weight: 800; color: var(--cbs-ink); }
 .cbs-invite-sub { font-size: 12px; line-height: 1.7; color: var(--cbs-dim); margin-top: 6px; }
 .cbs-invite-ghost { margin-top: 8px; width: 100%; }
+/* วันงานเด็กดี: กล่องสมัครสมาชิกผ่าน LINE — กรอบเขียว LINE ให้เด่นกว่ากล่องอื่น */
+.cbs-invite-signup { border-color: #06C755; background: linear-gradient(180deg, rgba(6, 199, 85, .16), rgba(10, 16, 36, .55)); }
+.cbs-invite-signup .cbs-invite-title { font-size: 17px; }
 
 /* เผยรางวัลใหม่ในหน้า debrief */
 .cbs-award-reveal {
