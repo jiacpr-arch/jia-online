@@ -90,8 +90,7 @@ end;
 $$;
 revoke execute on function public.notify_sales_rep_redeemed_fn() from public, anon, authenticated;
 
-drop trigger if exists notify_sales_rep_redeemed on public.lead_promo_codes;
-create trigger notify_sales_rep_redeemed
+create or replace trigger notify_sales_rep_redeemed
 after update of redeemed_at on public.lead_promo_codes
 for each row execute function public.notify_sales_rep_redeemed_fn();
 
@@ -116,7 +115,6 @@ end;
 $$;
 revoke execute on function public.notify_sales_rep_completed_fn() from public, anon, authenticated;
 
-drop trigger if exists notify_sales_rep_completed on public.online_students;
-create trigger notify_sales_rep_completed
+create or replace trigger notify_sales_rep_completed
 after insert or update of completed_at on public.online_students
 for each row execute function public.notify_sales_rep_completed_fn();

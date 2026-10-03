@@ -122,7 +122,6 @@ async function getSeatsLeft(classId: string | null | undefined): Promise<{ left:
   return { left: Math.max(cls.max_students - taken, 0), max: cls.max_students };
 }
 
-// วันที่แบบไทยสั้นๆ สำหรับข้อความ LINE (2026-08-22 → 22 ส.ค. 2569)
 // ลูกค้าคูปองพาร์ทเนอร์เป็นของเซลล์ที่แจกคูปองเท่านั้น (public.sales_owner_for_phone) — null = ลูกค้าทั่วไป
 type SalesOwner = { code: string; display_name: string | null; rep_name: string | null; rep_line_user_id: string | null };
 async function getSalesOwner(tel: string | null | undefined): Promise<SalesOwner | null> {
@@ -139,6 +138,7 @@ function ownerHeader(owner: SalesOwner | null): string {
   return `⚠️ ลูกค้าของ ${who} (คูปอง ${owner.code}) — ให้ ${who} ดูแลเท่านั้น\n\n`;
 }
 
+// วันที่แบบไทยสั้นๆ สำหรับข้อความ LINE (2026-08-22 → 22 ส.ค. 2569)
 const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 function thDate(iso: string | null | undefined): string {
   if (!iso) return "(ยังไม่ระบุ)";
