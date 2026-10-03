@@ -61,9 +61,9 @@ migration ที่ auto-apply
 - ✅ ระบบใหม่ทุกตัว (ชวนเพื่อน, พอร์ทัล HR, ใบกำกับภาษี, รีวิว) ใช้ตาราง RLS default-deny + RPC เท่านั้น
 
 ยังค้าง (ต้องตัดสินใจ/ทำต่อ):
-- ⏳ **ปิด `anon_read` / `anon_update` บน `customers`** — หน้าเว็บนี้ไม่ต้องใช้แล้ว (ยกเว้น INSERT ตอนสมัคร และ PATCH
-  `online_students` ด้วยเบอร์ที่ยังเหลือ) ต้องตรวจแอปอื่นในเครือก่อน: ดู `pg_stat_statements` ว่ายังมี anon query
-  `customers` จากที่อื่นไหม แล้วค่อย `drop policy` (ทำเมื่อพร้อม ไม่อยู่ใน migration ที่ apply อัตโนมัติ)
+- ✅ **(3 ต.ค. 2569) ปิด `anon_read` / `anon_update` / "Anyone can view customers" บน `customers` แล้ว** —
+  เฝ้าดู pg_stat_statements 7 วัน (25 ก.ย.–2 ต.ค.) ไม่มีแอปไหน SELECT/UPDATE ด้วย anon เพิ่มเลย, หน้าเว็บเขียน
+  `customers` แบบ `return=minimal` (ไม่ต้องใช้สิทธิ์อ่าน) — migration `20261003000000` (มีคำสั่งย้อนกลับในไฟล์)
 - ⏳ `online_students` PATCH ด้วยเบอร์+ชื่อ (คะแนนรายบท/สถานะจบ) — ควรย้ายไปทำใน `grade-quiz` ฝั่ง server
 - ⏳ เปิด **Leaked password protection** ใน Supabase Dashboard (ยังไม่ได้เปิด — ต้องกดเองในแดชบอร์ด)
 
