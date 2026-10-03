@@ -135,10 +135,14 @@ export const getPartnerSponsor = () => load("partner_sponsor", null);
 // ข้อมูลฝั่ง server ชนะ (แอดมินแก้ช่องทางติดต่อได้ทีหลัง)
 export const rememberSalesOwner = (o) => { if (o && o.code && (o.line || o.phone)) save("partner_sponsor", o); };
 
+// ตารางที่ anon เขียนได้แต่อ่านไม่ได้ (ปิด policy SELECT แล้ว) — ต้องเขียนแบบ return=minimal เพราะการขอแถวกลับ
+// (return=representation) ต้องผ่าน SELECT policy ด้วย ถ้าขอกลับจะโดนปฏิเสธทั้งคำขอ ผู้เรียกห้ามใช้ค่าที่คืนจากตารางพวกนี้
+const WRITE_ONLY_TABLES = new Set(["customers"]);
+
 export const supaRest = async (table, method = "GET", body = null, filters = "") => {
   const url = `${SUPABASE_URL}/rest/v1/${table}${filters}`;
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" };
-  if (method === "POST" || method === "PATCH") h.Prefer = "return=representation";
+  if (method === "POST" || method === "PATCH") h.Prefer = WRITE_ONLY_TABLES.has(table) ? "return=minimal" : "return=representation";
   const opts = { method, headers: h };
   if (body && method !== "GET" && method !== "DELETE") opts.body = JSON.stringify(body);
   try { const res = await fetch(url, opts); return res.ok ? (await res.text().then(t => t ? JSON.parse(t) : [])) : []; } catch(e) { console.error("Supabase:", e); return []; }
