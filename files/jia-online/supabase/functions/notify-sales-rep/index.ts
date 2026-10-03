@@ -60,14 +60,17 @@ function buildText(event: string, rec: any, owner: Owner): string | null {
   const phone = rec.phone || "-";
   const head = `👤 ลูกค้าของคุณ (คูปอง ${owner.code})\nชื่อ: ${name}\nเบอร์: ${phone}\n\n`;
   if (event === "redeemed") {
-    return `🎟️ ลูกค้าใช้คูปองของคุณแล้ว\n\n${head}` +
-      `ลูกค้าเริ่มเรียนคอร์สออนไลน์แล้ว ทักไปแนะนำตัวได้เลย ลูกค้ารายนี้เป็นของคุณ`;
+    const lineId = rec.line_id ? `LINE: ${rec.line_id}\n` : "";
+    return `🎟️ ลูกค้าใหม่ของคุณ! ใช้คูปองแล้ว\n\n${head}${lineId}` +
+      `👉 ต้องทำ: โทรแนะนำตัวภายในวันนี้ บอกว่าคุณเป็นผู้ดูแล\n` +
+      `ลูกค้าเห็นชื่อ/เบอร์คุณในหน้าเรียนแล้ว ถ้าลูกค้าทักมา ระบบจะส่งต่อหาคุณ\n\n` +
+      `พิมพ์ "ลูกค้าของฉัน" เพื่อดูรายชื่อทั้งหมด`;
   }
   if (event === "completed") {
     const score = rec.final_score != null ? `คะแนนสอบ: ${rec.final_score}%\n\n` : "";
     return `🏆 ลูกค้าของคุณเรียนจบแล้ว\n\n${head}${score}` +
       `ใบประกาศออนไลน์เป็นภาคทฤษฎีเท่านั้น ลูกค้ายังต้องฝึกภาคปฏิบัติ\n` +
-      `จังหวะดีที่สุดในการโทรเสนอคอร์ส on-site — ติดต่อภายในวันนี้`;
+      `👉 ต้องทำ: โทรเสนอคอร์ส on-site ภายในวันนี้ — จังหวะดีที่สุด`;
   }
   if (event === "line_message") {
     const text = String(rec.text || "").slice(0, 300);
@@ -92,6 +95,10 @@ Deno.serve(async (req: Request) => {
   if (!owner) return json({ ok: true, skipped: "no owner" });
   if (!owner.rep_line_user_id) return json({ ok: true, skipped: "rep has no LINE / not assigned", code: owner.code });
 
+  if (rec.line_id == null) {
+    const { data: lc } = await supa.from("lead_promo_codes").select("line_id").eq("code", owner.code).maybeSingle();
+    if (lc?.line_id) rec.line_id = lc.line_id;
+  }
   const text = buildText(event, rec, owner);
   if (!text) return json({ error: "unknown event" }, 400);
 
